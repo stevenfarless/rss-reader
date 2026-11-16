@@ -6,16 +6,14 @@
 <title>RSS Reader</title><link rel="manifest" href="./manifest.webmanifest"><link rel="icon" href="./assets/icon.svg" type="image/svg+xml"><link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-<header class="topbar">
-<button class="brand" id="home" aria-label="RSS Reader home"><span class="mark">R</span><span>RSS Reader</span></button>
-<label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search articles" aria-label="Search articles"><kbd>/</kbd></label>
-<div class="tools"><button id="refresh" title="Refresh feeds (r)" aria-label="Refresh feeds">↻</button><button id="theme" title="Toggle theme" aria-label="Toggle theme">◐</button><button id="settings" title="Settings" aria-label="Settings">⚙</button></div>
-</header>
 <div class="layout">
 <aside class="sidebar" id="sidebar">
+<button class="brand" id="home" aria-label="RSS Reader home"><span class="mark">R</span><span>RSS Reader</span></button>
+<label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search articles" aria-label="Search articles"><button type="button" id="searchClear" aria-label="Clear search" hidden>×</button><kbd>/</kbd></label>
+<div class="side-tools"><button id="add" class="primary">+ Add feed</button><button id="refresh" title="Refresh feeds (r)" aria-label="Refresh feeds">↻</button><button id="theme" title="Toggle theme" aria-label="Toggle theme">◐</button><button id="settings" title="Settings" aria-label="Settings">⚙</button></div>
 <div class="side-label">LIBRARY</div>
 <button class="nav active" data-view="all">All articles <span id="allCount">0</span></button><button class="nav" data-view="unread">Unread <span id="unreadCount">0</span></button><button class="nav" data-view="saved">Saved <span id="savedCount">0</span></button>
-<div class="feed-head"><span class="side-label">YOUR FEEDS</span><button id="add" aria-label="Add feed">+</button></div><div id="feeds" class="feeds"><p class="muted">Your feeds will appear here.</p></div>
+<div class="feed-head"><span class="side-label">YOUR FEEDS</span></div><div id="feeds" class="feeds"><p class="muted">Your feeds will appear here.</p></div>
 <div class="feed-head"><span class="side-label">TAGS</span></div><div id="tags" class="tag-list"><p class="muted">Tag articles from the reader to find them here.</p></div>
 <div class="side-bottom"><button id="organize" class="wide">Folders &amp; tags</button><button id="importOpml">Import OPML</button><button id="exportOpml">Export OPML</button><input id="opmlFile" type="file" accept=".opml,.xml" hidden></div>
 <p class="local-note">Your subscriptions and preferences stay in this browser.</p>

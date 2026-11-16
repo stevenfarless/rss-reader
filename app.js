@@ -482,14 +482,22 @@ async function refresh() {
   const now = Date.now();
   if (now - refreshAt < 2000) return; // debounce repeated refreshes (incl. holding "r")
   refreshAt = now;
-  const results = await Promise.all(state.feeds.map(f => refreshFeed(f)));
-  const ok = results.filter(Boolean).length;
-  const failed = state.feeds.filter((f, i) => !results[i]).map(f => f.title);
-  saveFeeds();
-  render();
-  toast(ok === state.feeds.length
-    ? `Refreshed ${ok} of ${state.feeds.length} feeds.`
-    : `Refreshed ${ok} of ${state.feeds.length} feeds. Failed: ${failed.join(", ")}.`);
+  const btn = $("#refresh");
+  btn.disabled = true;
+  btn.setAttribute("aria-busy", "true");
+  try {
+    const results = await Promise.all(state.feeds.map(f => refreshFeed(f)));
+    const ok = results.filter(Boolean).length;
+    const failed = state.feeds.filter((f, i) => !results[i]).map(f => f.title);
+    saveFeeds();
+    render();
+    toast(ok === state.feeds.length
+      ? `Refreshed ${ok} of ${state.feeds.length} feeds.`
+      : `Refreshed ${ok} of ${state.feeds.length} feeds. Failed: ${failed.join(", ")}.`);
+  } finally {
+    btn.disabled = false;
+    btn.removeAttribute("aria-busy");
+  }
 }
 
 /* ---------- list / render ---------- */
@@ -1217,7 +1225,8 @@ function bind() {
     local(S, state.settings);
     applySettings();
   };
-  $("#search").oninput = e => { state.query = e.target.value.toLowerCase(); renderList(); };
+  $("#search").oninput = e => { state.query = e.target.value.toLowerCase(); $("#searchClear").hidden = !e.target.value; renderList(); };
+  $("#searchClear").onclick = () => { $("#search").value = ""; state.query = ""; $("#searchClear").hidden = true; renderList(); $("#search").focus(); };
   $("#sort").onclick = () => {
     state.sort = state.sort === "newest" ? "oldest" : "newest";
     $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
