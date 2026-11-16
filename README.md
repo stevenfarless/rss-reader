@@ -18,6 +18,9 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Article cache and read/saved state stored in IndexedDB
 - Responsive desktop and mobile layout
 - Collapsible sidebar: the ‹/› toggle in the top left folds the sidebar to a narrow rail, remembered across visits
+- Refresh on launch when the newest article is stale, with a last-updated time under the heading
+- Undo for bulk actions (mark visible read, unsubscribe)
+- Article thumbnails, per-feed favicons, and relative dates ("5m ago")
 - Dark mode by default, with light and system options
 - Adjustable reading width and text size
 - Keyboard shortcuts: / search, j/k navigate, n/p next/previous unread, o or Enter open, v open original, m toggle read, s save, t add a tag, a mark visible read, u back to list, g then a/u/s go to All/Unread/Saved, r refresh, Space scroll, ? help, Esc close
