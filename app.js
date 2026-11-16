@@ -60,7 +60,9 @@ const fmtDateTime = d => d.toLocaleDateString() + " · " + d.toLocaleTimeString(
    marker with the leading header tokens dropped. */
 const NAV_MARKERS = ["Today's APOD", "Archive Submissions", "Previous APOD"];
 const cleanSummary = s => {
-  s = (s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  // Curly apostrophes/quotes (e.g. "Today’s APOD" from a decoded
+  // excerpt) must be normalized before the marker match below.
+  s = (s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').trim();
   const hn = s.match(/Article URL:.*?Points:\s*(\d+)\s*# Comments:\s*(\d+)/i);
   if (hn) return `${hn[1]} points · ${hn[2]} comments`;
   const cutAt = NAV_MARKERS.map(m => s.indexOf(m)).filter(i => i > 0);
@@ -69,6 +71,21 @@ const cleanSummary = s => {
     s = s.replace(/^(?:(?:APOD|Science)\b[\s·:–-]*)+/i, "").replace(/^APOD:\s*/i, "").trim();
   }
   return s;
+};
+/* Feed label for a list card. The stored feedTitle can be empty for
+   items saved by an older build, and the feed may have been re-added
+   since (new id), so fall back to the feed's current title, then to
+   matching the article's origin against the feeds' sites. */
+const feedTitleFor = x => {
+  if (x.feedTitle) return x.feedTitle;
+  const byId = state.feeds.find(f => f.id === x.feedId);
+  if (byId?.title) return byId.title;
+  try {
+    const origin = new URL(x.url).origin;
+    const byOrigin = state.feeds.find(f => { try { return f.site && new URL(f.site).origin === origin; } catch { return false; } });
+    if (byOrigin?.title) return byOrigin.title;
+  } catch {}
+  return "";
 };
 
 function toast(s) {
@@ -613,7 +630,7 @@ function renderList() {
     : "Your subscriptions, gathered in one place.";
   $("#articleList").innerHTML = a.length ? a.map(x => {
     const d = date(x.published);
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="${esc(x.title)}"><div class="article-meta"><span>${esc(x.feedTitle || state.feeds.find(f => f.id === x.feedId)?.title || "")}</span><span>·</span><time>${esc(d ? d.toLocaleDateString() : "No date")}</time></div><h2>${esc(x.title)}</h2><p>${esc(snippet(x.summary, 210))}</p><div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="Toggle read" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button></span></div></article>`;
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="${esc(x.title)}"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time>${esc(d ? d.toLocaleDateString() : "No date")}</time></div><h2>${esc(x.title)}</h2><p>${esc(snippet(cleanSummary(x.summary), 210))}</p><div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="Toggle read" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button></span></div></article>`;
   }).join("") : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>';
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
