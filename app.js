@@ -75,15 +75,19 @@ const cleanSummary = s => {
 /* Feed label for a list card. The stored feedTitle can be empty for
    items saved by an older build, and the feed may have been re-added
    since (new id), so fall back to the feed's current title, then to
-   matching the article's origin against the feeds' sites. */
+   matching the article's host against the feeds' sites and feed URLs.
+   The host match ignores scheme and www, since older saved links can
+   be http: while the feed is now https:. */
 const feedTitleFor = x => {
   if (x.feedTitle) return x.feedTitle;
   const byId = state.feeds.find(f => f.id === x.feedId);
   if (byId?.title) return byId.title;
   try {
-    const origin = new URL(x.url).origin;
-    const byOrigin = state.feeds.find(f => { try { return f.site && new URL(f.site).origin === origin; } catch { return false; } });
-    if (byOrigin?.title) return byOrigin.title;
+    const host = new URL(x.url).hostname.replace(/^www\./, "");
+    const byHost = state.feeds.find(f => [f.site, f.url].some(u => {
+      try { return u && new URL(u).hostname.replace(/^www\./, "") === host; } catch { return false; }
+    }));
+    if (byHost?.title) return byHost.title;
   } catch {}
   return "";
 };
