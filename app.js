@@ -527,7 +527,9 @@ function renderNav() {
   for (const f of state.feeds) (groups[f.group || ""] ||= []).push(f);
   const groupNames = Object.keys(groups).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
   $("#feeds").innerHTML = state.feeds.length ? groupNames.map(g => {
-    const label = g ? `<div class="folder-head"><span class="feed-group">${esc(g)}</span><span class="folder-actions"><button type="button" data-folder-rename="${esc(g)}" title="Rename folder" aria-label="Rename folder ${esc(g)}">✎</button><button type="button" data-folder-delete="${esc(g)}" title="Delete folder" aria-label="Delete folder ${esc(g)}">×</button></span></div>` : "";
+    // Ungrouped feeds render last, after the folders; label them so they
+    // are not misread as belonging to the folder above them.
+    const label = g ? `<div class="folder-head"><span class="feed-group">${esc(g)}</span><span class="folder-actions"><button type="button" data-folder-rename="${esc(g)}" title="Rename folder" aria-label="Rename folder ${esc(g)}">✎</button><button type="button" data-folder-delete="${esc(g)}" title="Delete folder" aria-label="Delete folder ${esc(g)}">×</button></span></div>` : (groupNames.length > 1 ? `<div class="feed-group">Ungrouped</div>` : "");
     return label + groups[g].map(f => {
       const unreadCount = state.items.filter(x => x.feedId === f.id && !x.read).length;
       const err = f.error ? ` feed-error" title="${esc(f.error)}` : "";
