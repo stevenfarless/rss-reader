@@ -43,13 +43,24 @@ const decodeHtml = s => {
   return t.value;
 };
 const plainText = s => decodeHtml(stripTags(s));
+/* Shorten text for list cards: cut at a word boundary and add an
+   ellipsis, instead of slicing mid-word. */
+const snippet = (s, n) => {
+  s = (s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  if (s.length <= n) return s;
+  const cut = s.slice(0, n).replace(/\s+\S*$/, "");
+  return (cut || s.slice(0, n)) + "…";
+};
+/* Byline timestamp without seconds ("11/16/2026 · 11:00 AM"). */
+const fmtDateTime = d => d.toLocaleDateString() + " · " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 function toast(s) {
   const e = $("#toast");
   e.textContent = s;
   e.classList.add("show");
   clearTimeout(timer);
-  timer = setTimeout(() => e.classList.remove("show"), 3200);
+  // Long messages stay up longer so they can actually be read.
+  timer = setTimeout(() => e.classList.remove("show"), Math.min(9000, 3200 + Math.max(0, s.length - 60) * 30));
 }
 function local(k, v) {
   try { localStorage.setItem(k, JSON.stringify(v)); }
@@ -582,7 +593,7 @@ function renderList() {
     : "Your subscriptions, gathered in one place.";
   $("#articleList").innerHTML = a.length ? a.map(x => {
     const d = date(x.published);
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="${esc(x.title)}"><div class="article-meta"><span>${esc(x.feedTitle)}</span><span>·</span><time>${esc(d ? d.toLocaleDateString() : "No date")}</time></div><h2>${esc(x.title)}</h2><p>${esc((x.summary || "").replace(/<[^>]*>/g, " ").slice(0, 210))}</p><div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="Toggle read" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button></span></div></article>`;
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="${esc(x.title)}"><div class="article-meta"><span>${esc(x.feedTitle)}</span><span>·</span><time>${esc(d ? d.toLocaleDateString() : "No date")}</time></div><h2>${esc(x.title)}</h2><p>${esc(snippet(x.summary, 210))}</p><div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="Toggle read" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button></span></div></article>`;
   }).join("") : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>';
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
@@ -743,7 +754,7 @@ async function loadFullText(item) {
       item.fullContent = body.innerHTML;
     }
     await put(item);
-    openItem(item.id, true);
+    openItem(item.id);
     toast("Full article loaded.");
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = "Load full article"; }
@@ -774,7 +785,7 @@ function renderReader(x) {
      guess mislabelled as full and left with no way to fetch the rest. */
   const alreadyFull = !showingFull && f?.via === "wp" && stripTags(x.content || "").length > 200;
   const canFull = !showingFull && !x.fullContent && !alreadyFull;
-  $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">×</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? d.toLocaleString() : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">×</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : x.fullContent ? "Show full article" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>`;
+  $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">×</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">×</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>`;
   const bodyEl = $("#body");
   bodyEl.append(cleanHTML(body, x.url));
   $("#reader").classList.add("open");
@@ -1308,7 +1319,7 @@ function bind() {
     if (e.key === "/") { e.preventDefault(); $("#search").focus(); return; }
     if (e.key === "?") { e.preventDefault(); showHelp(); return; }
     if (pendingG) {
-      const g = pendingG; pendingG = null;
+      pendingG = null;
       if (e.key === "a") goView("all");
       else if (e.key === "u") goView("unread");
       else if (e.key === "s") goView("saved");
