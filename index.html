@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#171916"><meta name="description" content="A private RSS reader that runs entirely in your browser.">
+<title>RSS Reader</title><link rel="manifest" href="./manifest.webmanifest"><link rel="icon" href="./assets/icon.svg" type="image/svg+xml"><link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<header class="topbar">
+<button class="brand" id="home" aria-label="RSS Reader home"><span class="mark">R</span><span>RSS Reader</span></button>
+<label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search articles" aria-label="Search articles"><kbd>/</kbd></label>
+<div class="tools"><button id="refresh" title="Refresh feeds" aria-label="Refresh feeds">↻</button><button id="theme" title="Toggle theme" aria-label="Toggle theme">◐</button><button id="settings" title="Settings" aria-label="Settings">⚙</button></div>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+<div class="side-label">LIBRARY</div>
+<button class="nav active" data-view="all">All articles <span id="allCount">0</span></button><button class="nav" data-view="unread">Unread <span id="unreadCount">0</span></button><button class="nav" data-view="saved">Saved <span id="savedCount">0</span></button>
+<div class="feed-head"><span class="side-label">YOUR FEEDS</span><button id="add" aria-label="Add feed">+</button></div><div id="feeds" class="feeds"><p class="muted">Your feeds will appear here.</p></div>
+<div class="side-bottom"><button id="importOpml">Import OPML</button><button id="exportOpml">Export OPML</button><input id="opmlFile" type="file" accept=".opml,.xml" hidden></div>
+<p class="local-note">Your subscriptions and preferences stay in this browser.</p>
+</aside>
+<main class="list-pane">
+<div class="mobile-bar"><button id="menu">☰</button><span id="mobileTitle">All articles</span><button id="mobileAdd">+</button></div>
+<div class="list-heading"><div><p class="eyebrow">YOUR READING DESK</p><h1 id="heading">All articles</h1><p id="subtitle">Your subscriptions, gathered in one place.</p></div><button id="markRead" class="quiet">Mark visible read</button></div>
+<div class="filters"><div><button class="filter active" data-filter="all">Everything</button><button class="filter" data-filter="today">Today</button><button class="filter" data-filter="week">This week</button></div><button id="sort" class="quiet">Newest first ↓</button></div>
+<div id="articleList" class="article-list"><div class="empty"><div class="empty-mark">R</div><h2>Your reading starts here.</h2><p>Add a feed to begin. Your subscriptions and reading history stay in this browser.</p><button id="firstAdd" class="primary">Add your first feed</button></div></div>
+</main>
+<article class="reader" id="reader"><div class="reader-empty"><span>✳</span><p>Select an article to read.</p><small>Use j and k to move through the list.</small></div></article>
+</div>
+<dialog id="feedDialog"><form id="feedForm" method="dialog"><button class="x" value="cancel" aria-label="Close">×</button><p class="eyebrow">SUBSCRIPTIONS</p><h2>Add a feed</h2><p>Enter a feed URL or a publisher's website address.</p><label for="feedUrl">Feed or website URL</label><input id="feedUrl" type="url" placeholder="https://example.com/feed.xml" required><p id="feedError" class="error"></p><div class="dialog-actions"><button value="cancel" class="quiet">Cancel</button><button id="saveFeed" value="default" class="primary">Add feed</button></div></form></dialog>
+<dialog id="settingsDialog"><form method="dialog"><button class="x" value="cancel" aria-label="Close">×</button><p class="eyebrow">PREFERENCES</p><h2>Settings</h2>
+<label class="setting">Appearance<select id="themeSelect"><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select></label>
+<label class="setting">Reading width<select id="widthSelect"><option value="narrow">Narrow</option><option value="comfortable">Comfortable</option><option value="wide">Wide</option></select></label>
+<label class="setting">Text size<select id="sizeSelect"><option value="small">Small</option><option value="normal">Normal</option><option value="large">Large</option></select></label>
+<div class="backup"><strong>Preferences backup</strong><p>Export or restore your settings as JSON.</p><button type="button" id="exportSettings" class="quiet">Export JSON</button><button type="button" id="importSettings" class="quiet">Import JSON</button><input id="settingsFile" type="file" accept=".json,application/json" hidden></div>
+<p class="privacy">Subscriptions and preferences use localStorage. Articles and reading state are cached in IndexedDB. This site has no account, backend, proxy, analytics, or external feed service. Feed loading depends on each publisher's CORS policy.</p><div class="dialog-actions"><button value="default" id="saveSettings" class="primary">Done</button></div></form></dialog>
+<div id="toast" role="status" aria-live="polite"></div><script src="./app.js" defer></script>
+</body></html>
