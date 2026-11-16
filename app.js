@@ -57,6 +57,10 @@ function loadLocal() {
 function saveFeeds() { local(K, state.feeds); }
 
 /* ---------- storage ---------- */
+/* IndexedDB connections can be closed by the browser (versionchange from
+   another tab, storage pressure). A closed connection makes every
+   transaction throw "The database connection is closing", so every
+   operation retries once after reopening. */
 function openDB() {
   return new Promise((res, rej) => {
     const r = indexedDB.open(DB, 1);
@@ -64,31 +68,41 @@ function openDB() {
       const d = r.result;
       if (!d.objectStoreNames.contains("items")) d.createObjectStore("items", { keyPath: "id" });
     };
-    r.onsuccess = () => res(r.result);
+    r.onsuccess = () => {
+      r.result.onclose = () => { db = null; };
+      res(r.result);
+    };
     r.onerror = () => rej(r.error);
   });
 }
-function dbAll() {
-  return new Promise((res, rej) => {
-    const r = db.transaction("items").objectStore("items").getAll();
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
+function runTx(mode, op) {
+  return new Promise((resolve, reject) => {
+    let retries = 0;
+    const attempt = () => {
+      if (!db) {
+        openDB().then(ndb => { db = ndb; attempt(); }).catch(reject);
+        return;
+      }
+      let req;
+      try {
+        req = op(db.transaction("items", mode).objectStore("items"));
+      } catch (e) {
+        if (retries < 1) {
+          retries++;
+          db = null;
+          attempt();
+        } else reject(e);
+        return;
+      }
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    };
+    attempt();
   });
 }
-function put(item) {
-  return new Promise((res, rej) => {
-    const r = db.transaction("items", "readwrite").objectStore("items").put(item);
-    r.onsuccess = () => res();
-    r.onerror = () => rej(r.error);
-  });
-}
-function dbDelete(itemId) {
-  return new Promise((res, rej) => {
-    const r = db.transaction("items", "readwrite").objectStore("items").delete(itemId);
-    r.onsuccess = () => res();
-    r.onerror = () => rej(r.error);
-  });
-}
+function dbAll() { return runTx("readonly", s => s.getAll()); }
+function put(item) { return runTx("readwrite", s => s.put(item)); }
+function dbDelete(itemId) { return runTx("readwrite", s => s.delete(itemId)); }
 
 /* ---------- settings ---------- */
 function applySettings() {
@@ -363,7 +377,17 @@ async function addFeed(raw) {
   };
   state.feeds.push(feed);
   saveFeeds();
-  await saveItems(feed, loaded.parsed.items);
+  try {
+    await saveItems(feed, loaded.parsed.items);
+  } catch (e) {
+    // The subscription itself is saved; a storage failure must not leave
+    // an invisible feed that blocks re-adding. Show it with its error.
+    feed.error = classifyError(e);
+    saveFeeds();
+    render();
+    toast("Feed added, but its articles failed to save. Refresh to retry.");
+    return;
+  }
   render();
   toast("Feed added" + (loaded.via === "feed" ? "." : loaded.via === "wp" ? " (via the site's WordPress API)." : " (via the proxy fallback)."));
 }
@@ -597,7 +621,29 @@ function readerBodyHTML(x) {
   const body = showingFull ? x.fullContent : (x.content || x.summary || "<p>No article text was included in this feed.</p>");
   return { showingFull, body };
 }
-function openItem(itemId, keepFull) {
+/* Build the reader pane for an item without changing its read state.
+   openItem() marks the item read first; toggles (m, list buttons) call
+   this directly so marking an item unread is not immediately undone. */
+function renderReader(x) {
+  const f = state.feeds.find(f => f.id === x.feedId);
+  const d = date(x.published);
+  const { showingFull, body } = readerBodyHTML(x);
+  // WordPress API items already carry the full article, and so does any
+  // feed item with long content — do not offer to "load" what is there.
+  const alreadyFull = !showingFull && (f?.via === "wp" || stripTags(x.content || "").length > 1500);
+  const canFull = !showingFull && !x.fullContent && !alreadyFull;
+  $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">×</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? d.toLocaleString() : "No date")}</div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : x.fullContent ? "Show full article" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>`;
+  const bodyEl = $("#body");
+  bodyEl.append(cleanHTML(body, x.url));
+  $("#reader").classList.add("open");
+  if (history.state?.reader !== x.id) {
+    try {
+      if (history.state?.reader) history.replaceState({ reader: x.id }, "");
+      else history.pushState({ reader: x.id }, "");
+    } catch {}
+  }
+}
+function openItem(itemId) {
   const x = state.items.find(i => i.id === itemId);
   if (!x) return;
   state.selected = itemId;
@@ -606,31 +652,14 @@ function openItem(itemId, keepFull) {
   renderList();
   const row = document.querySelector(`[data-item="${CSS.escape(itemId)}"]`);
   if (row) { row.scrollIntoView({ block: "nearest" }); row.focus({ preventScroll: true }); }
-  const f = state.feeds.find(f => f.id === x.feedId);
-  const d = date(x.published);
-  const { showingFull, body } = readerBodyHTML(x);
-  const canFull = !showingFull && !x.fullContent;
-  $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button><button data-reader="read" title="Mark unread (m)" aria-label="Mark unread">◉</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">×</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? d.toLocaleString() : "No date")}</div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : x.fullContent ? "Show full article" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>`;
-  const bodyEl = $("#body");
-  if (showingFull) {
-    bodyEl.innerHTML = "";
-    bodyEl.append(cleanHTML(body, x.url));
-  } else {
-    bodyEl.append(cleanHTML(body, x.url));
-  }
-  $("#reader").classList.add("open");
-  if (history.state?.reader !== itemId) {
-    try {
-      if (history.state?.reader) history.replaceState({ reader: itemId }, "");
-      else history.pushState({ reader: itemId }, "");
-    } catch {}
-  }
+  renderReader(x);
 }
 function closeReader() {
+  const wasOpen = $("#reader").classList.contains("open") || !!state.selected;
   $("#reader").classList.remove("open");
   state.selected = null;
-  renderList();
-  if (history.state?.reader) {
+  render(); // resets the reader pane to "Select an article to read"
+  if (wasOpen && history.state?.reader) {
     try { history.back(); } catch {}
   }
 }
@@ -773,7 +802,9 @@ function bind() {
         x[key] = !x[key];
         await put(x);
         render();
-        if (state.selected === x.id) openItem(x.id);
+        // renderReader, not openItem: opening would mark an item read
+        // again right after the user marked it unread.
+        if (state.selected === x.id) renderReader(x);
       }
       return;
     }
@@ -782,7 +813,7 @@ function bind() {
       const x = selectedItem();
       if (!x) return;
       if (ra.dataset.reader === "save") { x.saved = !x.saved; await put(x); openItem(x.id); return; }
-      if (ra.dataset.reader === "read") { x.read = false; await put(x); renderNav(); renderList(); toast("Article marked unread."); return; }
+      if (ra.dataset.reader === "read") { x.read = !x.read; await put(x); renderNav(); renderList(); renderReader(x); toast(x.read ? "Article marked read." : "Article marked unread."); return; }
       if (ra.dataset.reader === "open") { window.open(x.url, "_blank", "noopener"); return; }
       if (ra.dataset.reader === "fulltext") { loadFullText(x); return; }
       if (ra.dataset.reader === "close") { closeReader(); return; }
@@ -846,10 +877,10 @@ function bind() {
     $("#scrim").classList.toggle("show", open);
   };
   window.addEventListener("popstate", () => {
-    if ($("#reader").classList.contains("open")) {
+    if ($("#reader").classList.contains("open") || state.selected) {
       $("#reader").classList.remove("open");
       state.selected = null;
-      renderList();
+      render();
     }
   });
   document.onkeydown = e => {
@@ -857,11 +888,9 @@ function bind() {
     if (["INPUT", "SELECT", "TEXTAREA"].includes(tag) || $("dialog[open]")) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "Escape") {
-      $("#reader").classList.remove("open");
       $("#sidebar").classList.remove("open");
       $("#scrim").classList.remove("show");
-      state.selected = null;
-      renderList();
+      closeReader();
       return;
     }
     if (e.key === "/") { e.preventDefault(); $("#search").focus(); return; }
@@ -900,8 +929,10 @@ function bind() {
     const sel = selectedItem();
     if (e.key === "v" && sel) { window.open(sel.url, "_blank", "noopener"); return; }
     if (e.key === "m" && sel) {
-      sel.read = !sel.read; put(sel); render();
-      if (!sel.read) openItem(sel.id);
+      sel.read = !sel.read;
+      put(sel);
+      render();
+      renderReader(sel);
       return;
     }
     if (e.key === "s" && sel) { sel.saved = !sel.saved; put(sel); render(); openItem(sel.id); return; }
