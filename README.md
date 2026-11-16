@@ -32,7 +32,7 @@ Subscriptions and preferences belong to the current browser profile and site ori
 
 ## Fonts
 
-Gentium Book Plus is loaded from the WOFF2 files in the `fonts/` directory of the `stevenfarless/misc-notes` repository. The font files are served as static assets from GitHub.
+Gentium Book Plus is bundled locally in `fonts/`. All four WOFF2 styles are served by this repository, with no font CDN or cross-repository dependency.
 
 ## License
 
