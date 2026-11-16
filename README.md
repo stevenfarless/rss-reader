@@ -8,6 +8,7 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Add feed URLs or discover feed links from publisher pages
 - Feed refresh, unread and saved article views, and per-feed navigation
 - Feed folders: create, rename, delete, and move feeds between folders (OPML folders are kept on import)
+- Unsubscribe from a feed with the × beside it in the sidebar, or from the Folders &amp; tags dialog; the feed's articles are removed, except ones you saved
 - Article tags: create, rename, and delete tags; apply them from the reader (t); filter by tag from the sidebar; search covers tags
 - Full-article view: "Load full article" extracts the article text from the original page
 - Search, date filters, and newest/oldest sorting

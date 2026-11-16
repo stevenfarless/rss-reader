@@ -539,7 +539,8 @@ function renderNav() {
     return label + groups[g].map(f => {
       const unreadCount = state.items.filter(x => x.feedId === f.id && !x.read).length;
       const err = f.error ? ` feed-error" title="${esc(f.error)}` : "";
-      return `<button class="feed-row${state.feed === f.id ? " active" : ""}${err}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}><span class="feed-dot"></span><span class="feed-name">${esc(f.title)}</span>${f.error ? '<span class="feed-err" aria-hidden="true">!</span>' : ""}<small>${unreadCount || ""}</small></button>`;
+      const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id;
+      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${err}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}><span class="feed-dot"></span><span class="feed-name">${esc(f.title)}</span>${f.error ? '<span class="feed-err" aria-hidden="true">!</span>' : ""}<small>${unreadCount || ""}</small></button><button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">×</button></div>`;
     }).join("");
   }).join("") : '<p class="muted">Your feeds will appear here.</p>';
   const tagCounts = {};
@@ -920,6 +921,45 @@ function moveFeed(feedId, folder) {
   render();
   toast(folder ? `Moved to “${folder}”.` : "Moved out of its folder.");
 }
+/* Unsubscribing uses the same two-step confirm as folder and tag
+   deletes (click once to arm, click again to confirm) instead of a
+   native confirm(), which some browsers dismiss without the user ever
+   seeing it. The feed's articles go with it, except ones the user
+   saved — those stay in Saved, and merge back if the feed is ever
+   re-added (saveItems preserves saved/read/tags/fullContent). */
+function requestUnsubscribe(id) {
+  const f = state.feeds.find(f => f.id === id);
+  if (!f) return;
+  if (!pendingDelete || pendingDelete.kind !== "feed" || pendingDelete.id !== id) {
+    pendingDelete = { kind: "feed", id };
+    renderNav();
+    renderOrganize();
+    toast(`Click again to unsubscribe from “${f.title}”.`);
+    return;
+  }
+  unsubscribeFeed(id);
+}
+async function unsubscribeFeed(id) {
+  const f = state.feeds.find(f => f.id === id);
+  if (!f) return;
+  pendingDelete = null;
+  state.feeds = state.feeds.filter(x => x.id !== id);
+  saveFeeds();
+  for (const x of state.items.filter(x => x.feedId === id && !x.saved)) await dbDelete(x.id);
+  state.items = state.items.filter(x => x.feedId !== id || x.saved);
+  const used = new Set();
+  for (const x of state.items) for (const t of x.tags || []) used.add(t);
+  if (state.tags.some(t => !used.has(t))) { state.tags = state.tags.filter(t => used.has(t)); saveTags(); }
+  if (state.view === "feed" && state.feed === id) { state.view = "all"; state.feed = ""; }
+  render();
+  renderOrganize();
+  if (state.selected) {
+    const x = selectedItem();
+    if (x) renderReader(x);
+    else closeReader();
+  }
+  toast(`Unsubscribed from “${f.title}”. Saved articles were kept.`);
+}
 async function doRename(rawName) {
   if (!orgEdit) return;
   const { kind, old } = orgEdit;
@@ -949,7 +989,7 @@ function renderOrganize() {
   };
   $("#organizeBody").innerHTML = `
     <div class="org-section"><h3>Folders</h3><p class="muted">Group your feeds. Deleting a folder keeps its feeds, ungrouped.</p>${state.folders.map(folderRow).join("") || '<p class="muted">No folders yet.</p>'}<div class="org-new"><input id="newFolder" placeholder="New folder name" aria-label="New folder name"><button type="button" class="primary" data-org-add-folder>Add</button></div></div>
-    <div class="org-section"><h3>Feeds</h3><p class="muted">Move each feed into a folder.</p>${state.feeds.map(f => `<div class="org-row"><span class="org-name">${esc(f.title)}</span><select data-org-move="${esc(f.id)}" aria-label="Folder for ${esc(f.title)}"><option value="">No folder</option>${state.folders.map(g => `<option value="${esc(g)}" ${f.group === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select></div>`).join("") || '<p class="muted">No feeds yet.</p>'}</div>
+    <div class="org-section"><h3>Feeds</h3><p class="muted">Move each feed into a folder, or unsubscribe from it.</p>${state.feeds.map(f => { const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id; return `<div class="org-row"><span class="org-name">${esc(f.title)}</span><select data-org-move="${esc(f.id)}" aria-label="Folder for ${esc(f.title)}"><option value="">No folder</option>${state.folders.map(g => `<option value="${esc(g)}" ${f.group === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select><button type="button" class="quiet" data-org-unsub="${esc(f.id)}">${armed ? "Confirm unsubscribe" : "Unsubscribe"}</button></div>`; }).join("") || '<p class="muted">No feeds yet.</p>'}</div>
     <div class="org-section"><h3>Tags</h3><p class="muted">Tags are applied to articles from the reader (press t). Renaming a tag updates every article that has it.</p>${state.tags.map(tagRow).join("") || '<p class="muted">No tags yet.</p>'}<div class="org-new"><input id="newTag" placeholder="New tag name" aria-label="New tag name"><button type="button" class="primary" data-org-add-tag>Add</button></div></div>`;
 }
 function showOrganize() {
@@ -1083,6 +1123,8 @@ function bind() {
     if (folderRename) { orgEdit = { kind: "folder", old: folderRename.dataset.folderRename }; showOrganize(); return; }
     const folderDelete = e.target.closest("[data-folder-delete]");
     if (folderDelete) { pendingDelete = { kind: "folder", name: folderDelete.dataset.folderDelete }; showOrganize(); return; }
+    const unsub = e.target.closest("[data-unsub]");
+    if (unsub) { requestUnsubscribe(unsub.dataset.unsub); return; }
     const feed = e.target.closest("[data-feed]");
     if (feed) {
       state.view = "feed"; state.feed = feed.dataset.feed; state.tag = null; state.selected = null;
@@ -1154,6 +1196,8 @@ function bind() {
     if (delFolder) { deleteFolder(delFolder.dataset.orgDeleteFolder); return; }
     const delTag = e.target.closest("[data-org-delete-tag]");
     if (delTag) { await deleteTag(delTag.dataset.orgDeleteTag); return; }
+    const orgUnsub = e.target.closest("[data-org-unsub]");
+    if (orgUnsub) { await requestUnsubscribe(orgUnsub.dataset.orgUnsub); return; }
     if (e.target.closest("#organizeDone") || e.target.closest("#organizeClose")) $("#organizeDialog").close();
   });
   $("#organizeDialog").addEventListener("change", e => {
