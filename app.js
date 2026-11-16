@@ -181,6 +181,10 @@ function applySettings() {
   let t = state.settings.theme;
   if (t === "system") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   document.documentElement.dataset.theme = t;
+  // Keep the browser chrome (status bar, task switcher) on the same
+  // color as the theme, so the theme never flashes the wrong color.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = t === "light" ? "#f4f2ec" : "#171916";
   document.documentElement.dataset.width = state.settings.width;
   document.documentElement.dataset.size = state.settings.size;
   applySidebarCollapsed();
