@@ -27,7 +27,7 @@ const state = {
   feeds: [], items: [], view: "all", feed: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null,
   folders: [], tags: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", proxyFallback: false }
+  settings: { theme: "dark", width: "comfortable", size: "normal", proxyFallback: false, sidebarCollapsed: false }
 };
 let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null;
 
@@ -134,6 +134,20 @@ function applySettings() {
   document.documentElement.dataset.theme = t;
   document.documentElement.dataset.width = state.settings.width;
   document.documentElement.dataset.size = state.settings.size;
+  applySidebarCollapsed();
+}
+/* Sidebar collapse: the sidebar becomes a 52px rail holding only the
+   toggle (top left), so the list and reader get the full width. The
+   choice persists with the other settings. */
+function applySidebarCollapsed() {
+  const collapsed = !!state.settings.sidebarCollapsed;
+  document.body.classList.toggle("sidebar-collapsed", collapsed);
+  const btn = $("#sideToggle");
+  if (!btn) return;
+  btn.setAttribute("aria-expanded", String(!collapsed));
+  btn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+  btn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+  btn.textContent = collapsed ? "›" : "‹";
 }
 
 /* Dates: null when missing/unparseable, so dateless items sort after dated
@@ -1256,7 +1270,8 @@ function bind() {
   $("#saveSettings").onclick = () => {
     state.settings = {
       theme: $("#themeSelect").value, width: $("#widthSelect").value, size: $("#sizeSelect").value,
-      proxyFallback: $("#proxyToggle").checked
+      proxyFallback: $("#proxyToggle").checked,
+      sidebarCollapsed: state.settings.sidebarCollapsed || false
     };
     local(S, state.settings);
     applySettings();
@@ -1267,6 +1282,11 @@ function bind() {
   $("#menu").onclick = () => {
     const open = $("#sidebar").classList.toggle("open");
     $("#scrim").classList.toggle("show", open);
+  };
+  $("#sideToggle").onclick = () => {
+    state.settings.sidebarCollapsed = !state.settings.sidebarCollapsed;
+    local(S, state.settings);
+    applySidebarCollapsed();
   };
   window.addEventListener("popstate", () => {
     if ($("#reader").classList.contains("open") || state.selected) {
