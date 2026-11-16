@@ -9,7 +9,8 @@
    3. A public feed-to-JSON service (rss2json), only when the user opts in
       in Settings ("proxyFallback"): the feed passes through a third party.
    Full-article text is fetched the same way: directly, or via the
-   WordPress API (which returns full content), or via the opt-in proxy. */
+   WordPress API looked up by the article slug (which returns full
+   content), or via the opt-in reader/proxy services. */
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -17,7 +18,9 @@ const K = "rss-reader.feeds.v1", S = "rss-reader.settings.v1", DB = "rss-reader-
 const KF = "rss-reader.folders.v1", KT = "rss-reader.tags.v1";
 const PROXY_API = "https://api.rss2json.com/v1/api.json?rss_url=";
 const ALLORIGINS = "https://api.allorigins.win/raw?url=";
+const JINA = "https://r.jina.ai/";
 const FETCH_TIMEOUT_MS = 15000;
+const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 
 const state = {
@@ -159,8 +162,8 @@ function classifyError(e) {
 }
 
 /* ---------- fetching ---------- */
-async function fetchWithTimeout(url, opts = {}) {
-  const r = await fetch(url, { ...opts, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+async function fetchWithTimeout(url, opts = {}, ms = FETCH_TIMEOUT_MS) {
+  const r = await fetch(url, { ...opts, signal: AbortSignal.timeout(ms) });
   return r;
 }
 async function fetchText(url) {
@@ -176,7 +179,10 @@ const looksLikeFeed = t => {
   return s.startsWith("<?xml") || /<(rss|feed|rdf:RDF)\b/i.test(s) || s.startsWith("{");
 };
 function normalizeFeedUrl(raw) {
-  const u = new URL(raw);
+  let s = String(raw || "").trim();
+  // Accept a bare address ("example.com/feed", "example.com") — assume https.
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(s)) s = "https://" + s;
+  const u = new URL(s);
   if (u.protocol === "http:") u.protocol = "https:";
   return u.href;
 }
@@ -388,7 +394,7 @@ async function loadFeedFromUrl(rawUrl) {
 }
 
 async function addFeed(raw) {
-  const url = normalizeFeedUrl(new URL(raw).href);
+  const url = normalizeFeedUrl(raw);
   if (state.feeds.some(f => sameFeedUrl(f.url, url))) throw Error("You already subscribe to this feed.");
   const loaded = await loadFeedFromUrl(url);
   const feed = {
@@ -613,6 +619,7 @@ function extractArticle(html, base) {
   return cleanHTML(clone.innerHTML, base);
 }
 async function fetchArticleHtml(url) {
+  let directErr = null;
   try {
     const r = await fetchWithTimeout(url, {
       headers: { Accept: "text/html,application/xhtml+xml,*/*" }, cache: "no-store"
@@ -621,29 +628,105 @@ async function fetchArticleHtml(url) {
     const text = await r.text();
     if (!/<(article|main|body|div|p)[\s>]/i.test(text)) throw Error("Not an article page.");
     return text;
-  } catch (e) {
-    if (!state.settings.proxyFallback) throw e;
-    const r = await fetchWithTimeout(ALLORIGINS + encodeURIComponent(url), { cache: "no-store" });
+  } catch (e) { directErr = e; }
+  if (!state.settings.proxyFallback) throw directErr;
+  // Reader service (returns the article as Markdown). Fast when it works;
+  // it rate-limits shared IPs, so a failure here just falls through.
+  try {
+    const r = await fetchWithTimeout(JINA + url, {
+      headers: { Accept: "text/plain" }, cache: "no-store"
+    }, PROXY_TIMEOUT_MS);
+    if (!r.ok) throw Error("HTTP " + r.status);
+    const md = await r.text();
+    if (/RateLimitTriggeredError/i.test(md)) throw Error("Reader service rate-limited.");
+    const html = markdownToHTML(md);
+    if (stripTags(html).length < 200) throw Error("No article text found.");
+    return html;
+  } catch {}
+  // Generic proxy (returns the raw page HTML). Slow and flaky per site.
+  try {
+    const r = await fetchWithTimeout(ALLORIGINS + encodeURIComponent(url), { cache: "no-store" }, PROXY_TIMEOUT_MS);
     if (!r.ok) throw Error("HTTP " + r.status);
     const text = await r.text();
     if (!/<(article|main|body|div|p)[\s>]/i.test(text)) throw Error("Not an article page.");
     return text;
+  } catch (e) { throw directErr || e; }
+}
+/* The site's own WordPress API, looked up by the article slug. No third
+   party is involved, so this runs whether or not the proxy is on — the
+   same principle as feed loading. Returns the post HTML, or null. */
+async function fetchViaWordPress(url) {
+  let origin, slug;
+  try {
+    const u = new URL(url);
+    origin = u.origin;
+    const parts = u.pathname.split("/").filter(Boolean);
+    slug = parts[parts.length - 1] || "";
+  } catch { return null; }
+  if (!slug) return null;
+  try {
+    const r = await fetchWithTimeout(`${origin}/wp-json/wp/v2/posts?slug=${encodeURIComponent(slug)}&per_page=1`, {
+      headers: { Accept: "application/json" }, cache: "no-store"
+    });
+    if (!r.ok) return null;
+    const posts = await r.json();
+    if (!Array.isArray(posts) || !posts.length) return null;
+    const content = posts[0]?.content?.rendered || "";
+    if (stripTags(content).length < 200) return null;
+    return content;
+  } catch { return null; }
+}
+/* Small Markdown → HTML converter for the reader service's output.
+   The source is escaped first, so raw HTML in the article cannot inject. */
+function markdownToHTML(md) {
+  const start = md.indexOf("Markdown Content:");
+  const text = start >= 0 ? md.slice(start + "Markdown Content:".length) : md;
+  const escMd = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const inline = s => escMd(s)
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, u) => `<img src="${u}" alt="${escMd(alt)}">`)
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) => `<a href="${u}">${t}</a>`)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  const lines = text.split("\n");
+  let html = "", para = [];
+  const flush = () => { if (para.length) { html += "<p>" + para.join(" ") + "</p>"; para = []; } };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { flush(); continue; }
+    const h = line.match(/^(#{1,3})\s+(.*)$/);
+    if (h) { flush(); const lvl = h[1].length + 1; html += `<h${lvl}>${inline(h[2])}</h${lvl}>`; continue; }
+    if (/^---+$/.test(line)) { flush(); html += "<hr>"; continue; }
+    if (/^>\s?/.test(line)) { flush(); html += `<blockquote>${inline(line.replace(/^>\s?/, ""))}</blockquote>`; continue; }
+    if (/^[-*]\s+/.test(line)) { flush(); html += `<ul><li>${inline(line.replace(/^[-*]\s+/, ""))}</li></ul>`; continue; }
+    if (/^\d+[.)]\s+/.test(line)) { flush(); html += `<ol><li>${inline(line.replace(/^\d+[.)]\s+/, ""))}</li></ol>`; continue; }
+    para.push(inline(line));
   }
+  flush();
+  return html;
 }
 async function loadFullText(item) {
   const btn = $('[data-reader="fulltext"]');
   if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
   try {
-    const html = await fetchArticleHtml(item.url);
-    const body = extractArticle(html, item.url);
-    if (!body || !body.textContent.trim()) throw Error("No article text found.");
-    item.fullContent = body.innerHTML;
+    // The site's own WordPress API first: fast, reliable, no third party.
+    const wp = await fetchViaWordPress(item.url);
+    if (wp) {
+      item.fullContent = wp;
+    } else {
+      const html = await fetchArticleHtml(item.url);
+      const body = extractArticle(html, item.url);
+      if (!body || !body.textContent.trim()) throw Error("No article text found.");
+      item.fullContent = body.innerHTML;
+    }
     await put(item);
     openItem(item.id, true);
     toast("Full article loaded.");
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = "Load full article"; }
-    toast("Full text unavailable — showing the feed excerpt.");
+    toast(state.settings.proxyFallback
+      ? "Full text unavailable — the publisher blocks direct access and the reader services could not fetch this page."
+      : "Full text unavailable — showing the feed excerpt. Turn on the proxy fallback in Settings to try reader services.");
   }
 }
 
