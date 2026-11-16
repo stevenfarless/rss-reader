@@ -15,7 +15,7 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const K = "rss-reader.feeds.v1", S = "rss-reader.settings.v1", DB = "rss-reader-cache";
-const KF = "rss-reader.folders.v1", KT = "rss-reader.tags.v1";
+const KF = "rss-reader.folders.v1", KT = "rss-reader.tags.v1", LR = "rss-reader.lastRefresh.v1";
 const PROXY_API = "https://api.rss2json.com/v1/api.json?rss_url=";
 const ALLORIGINS = "https://api.allorigins.win/raw?url=";
 const JINA = "https://r.jina.ai/";
@@ -27,7 +27,7 @@ const state = {
   feeds: [], items: [], view: "all", feed: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null,
   folders: [], tags: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", proxyFallback: false, sidebarCollapsed: false }
+  settings: { theme: "dark", width: "comfortable", size: "normal", proxyFallback: false, sidebarCollapsed: false, sort: "newest", filter: "all" }
 };
 let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null;
 
@@ -43,6 +43,21 @@ const decodeHtml = s => {
   return t.value;
 };
 const plainText = s => decodeHtml(stripTags(s));
+/* Inline SVG icons from the <symbol> sprite in index.html. */
+const icon = (name, cls) => `<svg class="ic${cls ? " " + cls : ""}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+/* Relative dates for list cards ("5m ago", "Yesterday"), with the full
+   date kept in the title attribute. */
+const relDate = d => {
+  if (!d) return "No date";
+  const s = Math.max(0, (Date.now() - d.getTime()) / 1000);
+  if (s < 60) return "Just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  const days = Math.floor(s / 86400);
+  if (days === 1) return "Yesterday";
+  if (days < 7) return days + "d ago";
+  return d.toLocaleDateString();
+};
 /* Shorten text for list cards: cut at a word boundary and add an
    ellipsis, instead of slicing mid-word. */
 const snippet = (s, n) => {
@@ -92,26 +107,52 @@ const feedTitleFor = x => {
   return "";
 };
 
-function toast(s) {
+function toast(s, action) {
   const e = $("#toast");
   e.textContent = s;
+  if (action) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = action.label;
+    b.onclick = () => { e.classList.remove("show"); action.fn(); };
+    e.appendChild(b);
+  }
   e.classList.add("show");
   clearTimeout(timer);
-  // Long messages stay up longer so they can actually be read.
-  timer = setTimeout(() => e.classList.remove("show"), Math.min(9000, 3200 + Math.max(0, s.length - 60) * 30));
+  // Long messages stay up longer so they can actually be read; an
+  // action (e.g. Undo) gets a full 8 seconds to be noticed and used.
+  const ms = action ? 8000 : Math.min(9000, 3200 + Math.max(0, s.length - 60) * 30);
+  timer = setTimeout(() => e.classList.remove("show"), ms);
 }
 function local(k, v) {
   try { localStorage.setItem(k, JSON.stringify(v)); }
   catch (e) { toast("Browser storage is full."); }
 }
 function loadLocal() {
-  try { state.feeds = JSON.parse(localStorage.getItem(K) || "[]"); } catch {}
+  try {
+    state.feeds = JSON.parse(localStorage.getItem(K) || "[]");
+    if (!Array.isArray(state.feeds)) throw Error("bad feeds");
+  } catch {
+    try {
+      state.feeds = JSON.parse(localStorage.getItem(K + ".bak") || "[]");
+      if (!Array.isArray(state.feeds)) throw Error("bad backup");
+      state.feedsRestored = true;
+    } catch { state.feeds = []; }
+  }
   try { state.settings = { ...state.settings, ...JSON.parse(localStorage.getItem(S) || "{}") }; } catch {}
+  state.sort = state.settings.sort === "oldest" ? "oldest" : "newest";
+  state.filter = ["all", "today", "week"].includes(state.settings.filter) ? state.settings.filter : "all";
   try { state.folders = JSON.parse(localStorage.getItem(KF) || "[]"); } catch {}
   try { state.tags = JSON.parse(localStorage.getItem(KT) || "[]"); } catch {}
+  try { state.lastRefresh = Number(localStorage.getItem(LR) || 0) || 0; } catch { state.lastRefresh = 0; }
   syncFolders();
 }
-function saveFeeds() { local(K, state.feeds); }
+function saveFeeds() {
+  // Keep a backup copy: a corrupt primary entry must not silently
+  // erase every subscription (loadLocal restores from it).
+  local(K, state.feeds);
+  local(K + ".bak", state.feeds);
+}
 function saveFolders() { local(KF, state.folders); }
 function saveTags() { local(KT, state.tags); }
 /* Folders come from the stored list plus any group a feed already has
@@ -175,6 +216,24 @@ function runTx(mode, op) {
 function dbAll() { return runTx("readonly", s => s.getAll()); }
 function put(item) { return runTx("readwrite", s => s.put(item)); }
 function dbDelete(itemId) { return runTx("readwrite", s => s.delete(itemId)); }
+/* Batch IndexedDB writes: one transaction for many items, with the
+   same reopen-and-retry as runTx. */
+function runBatch(mode, fn) {
+  return new Promise((resolve, reject) => {
+    let retries = 0;
+    const attempt = () => {
+      if (!db) { openDB().then(ndb => { db = ndb; attempt(); }).catch(reject); return; }
+      let tx;
+      try { tx = db.transaction("items", mode); fn(tx.objectStore("items")); }
+      catch (e) { if (retries < 1) { retries++; db = null; attempt(); } else reject(e); return; }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    };
+    attempt();
+  });
+}
+function putMany(items) { return runBatch("readwrite", s => { for (const x of items) s.put(x); }); }
+function deleteMany(ids) { return runBatch("readwrite", s => { for (const id of ids) s.delete(id); }); }
 
 /* ---------- settings ---------- */
 function applySettings() {
@@ -200,7 +259,7 @@ function applySidebarCollapsed() {
   btn.setAttribute("aria-expanded", String(!collapsed));
   btn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
   btn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
-  btn.textContent = collapsed ? "›" : "‹";
+  // The chevron icon flips via CSS (body.sidebar-collapsed rotates it).
 }
 
 /* Dates: null when missing/unparseable, so dateless items sort after dated
@@ -490,13 +549,18 @@ async function addFeed(raw) {
 
 async function saveItems(feed, items) {
   const seen = new Set();
+  // Map lookups instead of a linear scan per item, and one batched
+  // write instead of a transaction per item.
+  const byId = new Map(state.items.map(i => [i.id, i]));
+  const byUrl = new Map();
+  for (const i of state.items) if (!byUrl.has(i.feedId + "|" + i.url)) byUrl.set(i.feedId + "|" + i.url, i);
+  const fresh = [];
   for (const x of items) {
     const link = x.url || feed.url;
     const key = feed.id + "|" + (x.guid || link);
     seen.add(key);
-    const old = state.items.find(i => i.id === key)
-      || state.items.find(i => i.feedId === feed.id && i.url === link);
-    const item = {
+    const old = byId.get(key) || byUrl.get(feed.id + "|" + link);
+    fresh.push({
       id: key, feedId: feed.id, feedTitle: feed.title,
       title: x.title, url: link, guid: x.guid || "",
       summary: cleanSummary(x.summary || ""), content: x.content || "",
@@ -507,21 +571,19 @@ async function saveItems(feed, items) {
       enclosure: x.enclosure || old?.enclosure || null,
       read: old?.read || false, saved: old?.saved || false,
       tags: old?.tags || []
-    };
-    await put(item);
+    });
   }
+  await putMany(fresh);
   // Prune items no longer in the feed, unless the user saved them or read them.
   // Cap each feed at MAX_ITEMS_PER_FEED newest items.
   const mine = state.items.filter(i => i.feedId === feed.id);
-  for (const old of mine) {
-    if (!seen.has(old.id) && !old.saved && !old.read) await dbDelete(old.id);
-  }
+  const pruneIds = mine.filter(old => !seen.has(old.id) && !old.saved && !old.read).map(o => o.id);
+  if (pruneIds.length) await deleteMany(pruneIds);
   state.items = await dbAll();
-  const fresh = state.items.filter(i => i.feedId === feed.id)
+  const freshMine = state.items.filter(i => i.feedId === feed.id)
     .sort((a, b) => (dateSortKey(b) ?? -1) - (dateSortKey(a) ?? -1));
-  for (const extra of fresh.slice(MAX_ITEMS_PER_FEED)) {
-    if (!extra.saved) await dbDelete(extra.id);
-  }
+  const extraIds = freshMine.slice(MAX_ITEMS_PER_FEED).filter(x => !x.saved).map(x => x.id);
+  if (extraIds.length) await deleteMany(extraIds);
   state.items = await dbAll();
 }
 
@@ -560,6 +622,8 @@ async function refresh() {
     const ok = results.filter(Boolean).length;
     const failed = state.feeds.filter((f, i) => !results[i]).map(f => f.title);
     saveFeeds();
+    state.lastRefresh = Date.now();
+    try { localStorage.setItem(LR, String(state.lastRefresh)); } catch {}
     render();
     toast(ok === state.feeds.length
       ? `Refreshed ${ok} of ${state.feeds.length} feeds.`
@@ -618,13 +682,20 @@ function renderNav() {
       const unreadCount = state.items.filter(x => x.feedId === f.id && !x.read).length;
       const err = f.error ? ` feed-error" title="${esc(f.error)}` : "";
       const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id;
-      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${err}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}><span class="feed-dot"></span><span class="feed-name">${esc(f.title)}</span>${f.error ? '<span class="feed-err" aria-hidden="true">!</span>' : ""}<small>${unreadCount || ""}</small></button><button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">×</button></div>`;
+      // The site's own favicon marks the row; if it fails to load the
+      // dot comes back (the img hides itself and unhides the dot).
+      let fav = "";
+      try { fav = new URL(f.site || f.url).origin + "/favicon.ico"; } catch {}
+      const mark = fav
+        ? `<img class="feed-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><span class="feed-dot" style="display:none"></span>`
+        : `<span class="feed-dot"></span>`;
+      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${err}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span>${f.error ? '<span class="feed-err" aria-hidden="true">!</span>' : ""}<small>${unreadCount || ""}</small></button><button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">×</button></div>`;
     }).join("");
   }).join("") : '<p class="muted">Your feeds will appear here.</p>';
   const tagCounts = {};
   for (const x of state.items) for (const t of x.tags || []) tagCounts[t] = (tagCounts[t] || 0) + 1;
   $("#tags").innerHTML = state.tags.length ? state.tags.map(t =>
-    `<button class="nav tag-row${state.view === "tag" && state.tag === t ? " active" : ""}" data-tag="${esc(t)}" ${state.view === "tag" && state.tag === t ? 'aria-current="true"' : ""}>🏷 ${esc(t)}<span>${tagCounts[t] || 0}</span></button>`
+    `<button class="nav tag-row${state.view === "tag" && state.tag === t ? " active" : ""}" data-tag="${esc(t)}" ${state.view === "tag" && state.tag === t ? 'aria-current="true"' : ""}>${icon("tag")} ${esc(t)}<span>${tagCounts[t] || 0}</span></button>`
   ).join("") : '<p class="muted">Tag articles from the reader to find them here.</p>';
 }
 function renderList() {
@@ -632,13 +703,19 @@ function renderList() {
   const titles = { all: "All articles", unread: "Unread", saved: "Saved", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", tag: state.tag ? "Tag: " + state.tag : "Tag" };
   $("#heading").textContent = titles[state.view];
   $("#mobileTitle").textContent = titles[state.view];
-  $("#subtitle").textContent = state.view === "saved" ? "Articles you have kept for later."
+  // Keep the sort button and filter pills in step with the persisted
+  // sort/filter, so a reload restores them.
+  $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
+  $$(".filter").forEach(x => x.classList.toggle("active", x.dataset.filter === state.filter));
+  const base = state.view === "saved" ? "Articles you have kept for later."
     : state.view === "unread" ? "Stories you have not read yet."
     : state.view === "tag" ? `Articles tagged “${state.tag}”.`
     : "Your subscriptions, gathered in one place.";
+  const upd = state.lastRefresh ? " · Updated " + new Date(state.lastRefresh).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  $("#subtitle").textContent = base + upd;
   $("#articleList").innerHTML = a.length ? a.map(x => {
     const d = date(x.published);
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time>${esc(d ? d.toLocaleDateString() : "No date")}</time></div><h2>${esc(x.title)}</h2><p>${esc(snippet(cleanSummary(x.summary), 210))}</p><div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button></span></div></article>`;
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0"><div class="article-main"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time></div><h2>${esc(x.title)}</h2><p>${esc(snippet(cleanSummary(x.summary), 210))}</p><div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button></span></div></div>${x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : ""}</article>`;
   }).join("") : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>';
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
@@ -851,7 +928,7 @@ function renderReader(x) {
      guess mislabelled as full and left with no way to fetch the rest. */
   const alreadyFull = !showingFull && f?.via === "wp" && stripTags(x.content || "").length > 200;
   const canFull = !showingFull && !x.fullContent && !alreadyFull;
-  $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">×</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">×</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>`;
+  $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>`;
   const bodyEl = $("#body");
   // Append the cleaned body's children, not the <body> element itself.
   bodyEl.append(...cleanHTML(body, x.url).childNodes);
@@ -886,7 +963,7 @@ function closeReader() {
 function render() {
   renderNav();
   renderList();
-  if (!state.selected) $("#reader").innerHTML = '<div class="reader-empty"><span>✳</span><p>Select an article to read.</p><small>Use j and k to move, o to open, ? for all shortcuts.</small></div>';
+  if (!state.selected) $("#reader").innerHTML = '<div class="reader-empty">' + icon("rss", "big") + '<h2>Nothing open yet</h2><p>Pick an article from the list to read it here.</p><small>Use j and k to move, o to open, ? for all shortcuts.</small></div>';
 }
 
 /* ---------- folders & tags ---------- */
@@ -1043,9 +1120,11 @@ async function unsubscribeFeed(id) {
   const f = state.feeds.find(f => f.id === id);
   if (!f) return;
   pendingDelete = null;
+  const idx = state.feeds.findIndex(x => x.id === id);
+  const removed = state.items.filter(x => x.feedId === id && !x.saved);
   state.feeds = state.feeds.filter(x => x.id !== id);
   saveFeeds();
-  for (const x of state.items.filter(x => x.feedId === id && !x.saved)) await dbDelete(x.id);
+  if (removed.length) await deleteMany(removed.map(x => x.id));
   state.items = state.items.filter(x => x.feedId !== id || x.saved);
   const used = new Set();
   for (const x of state.items) for (const t of x.tags || []) used.add(t);
@@ -1058,7 +1137,12 @@ async function unsubscribeFeed(id) {
     if (x) renderReader(x);
     else closeReader();
   }
-  toast(`Unsubscribed from “${f.title}”. Saved articles were kept.`);
+  toast(`Unsubscribed from “${f.title}”. Saved articles were kept.`, { label: "Undo", fn: async () => {
+    state.feeds.splice(idx, 0, f);
+    saveFeeds();
+    if (removed.length) { await putMany(removed); state.items = [...state.items, ...removed]; }
+    render();
+  } });
 }
 async function doRename(rawName) {
   if (!orgEdit) return;
@@ -1085,7 +1169,7 @@ function renderOrganize() {
     if (orgEdit?.kind === "tag" && orgEdit.old === name) {
       return `<div class="org-row"><input id="orgEditInput" value="${esc(name)}" aria-label="Tag name"><button type="button" class="quiet" data-org-save-rename>Save</button><button type="button" class="quiet" data-org-cancel-rename>Cancel</button></div>`;
     }
-    return `<div class="org-row"><span class="org-name">🏷 ${esc(name)}</span><small>${count} article${count === 1 ? "" : "s"}</small><button type="button" class="quiet" data-org-rename-tag="${esc(name)}">Rename</button><button type="button" class="quiet" data-org-delete-tag="${esc(name)}">${armed ? "Confirm delete" : "Delete"}</button></div>`;
+    return `<div class="org-row"><span class="org-name">${icon("tag")} ${esc(name)}</span><small>${count} article${count === 1 ? "" : "s"}</small><button type="button" class="quiet" data-org-rename-tag="${esc(name)}">Rename</button><button type="button" class="quiet" data-org-delete-tag="${esc(name)}">${armed ? "Confirm delete" : "Delete"}</button></div>`;
   };
   $("#organizeBody").innerHTML = `
     <div class="org-section"><h3>Folders</h3><p class="muted">Group your feeds. Deleting a folder keeps its feeds, ungrouped.</p>${state.folders.map(folderRow).join("") || '<p class="muted">No folders yet.</p>'}<div class="org-new"><input id="newFolder" placeholder="New folder name" aria-label="New folder name"><button type="button" class="primary" data-org-add-folder>Add</button></div></div>
@@ -1169,10 +1253,25 @@ function exportSettings() {
 async function importSettings(file) {
   try {
     const d = JSON.parse(await file.text());
-    if (d.format !== "rss-reader-settings" || d.version !== 1) throw Error("Unsupported settings file.");
-    state.settings = { ...state.settings, ...d.settings };
+    if (d.format !== "rss-reader-settings" || d.version !== 1 || !d.settings || typeof d.settings !== "object") throw Error("Unsupported settings file.");
+    // Whitelist + validate: unknown keys and out-of-range values are
+    // dropped instead of silently corrupting the settings.
+    const pick = (sel, val) => { const opts = [...$(sel).options].map(o => o.value); return opts.includes(val) ? val : null; };
+    const next = {};
+    const theme = pick("#themeSelect", d.settings.theme); if (theme) next.theme = theme;
+    const width = pick("#widthSelect", d.settings.width); if (width) next.width = width;
+    const size = pick("#sizeSelect", d.settings.size); if (size) next.size = size;
+    if (typeof d.settings.proxyFallback === "boolean") next.proxyFallback = d.settings.proxyFallback;
+    if (typeof d.settings.sidebarCollapsed === "boolean") next.sidebarCollapsed = d.settings.sidebarCollapsed;
+    if (d.settings.sort === "newest" || d.settings.sort === "oldest") next.sort = d.settings.sort;
+    if (["all", "today", "week"].includes(d.settings.filter)) next.filter = d.settings.filter;
+    if (!Object.keys(next).length) throw Error("No valid settings found in this file.");
+    state.settings = { ...state.settings, ...next };
+    state.sort = state.settings.sort || "newest";
+    state.filter = state.settings.filter || "all";
     local(S, state.settings);
     applySettings();
+    render();
     toast("Settings imported.");
   } catch (e) { toast(e.message); }
 }
@@ -1216,9 +1315,16 @@ function goView(view) {
   render();
 }
 async function markVisibleRead() {
-  for (const x of visible()) { x.read = true; await put(x); }
+  const targets = visible().filter(x => !x.read);
+  if (!targets.length) { toast("Visible articles are already read."); return; }
+  for (const x of targets) x.read = true;
+  await putMany(targets);
   render();
-  toast("Visible articles marked read.");
+  toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} read.`, { label: "Undo", fn: async () => {
+    for (const x of targets) x.read = false;
+    await putMany(targets);
+    render();
+  } });
 }
 
 function bind() {
@@ -1333,12 +1439,16 @@ function bind() {
   $("#searchClear").onclick = () => { $("#search").value = ""; state.query = ""; $("#searchClear").hidden = true; renderList(); $("#search").focus(); };
   $("#sort").onclick = () => {
     state.sort = state.sort === "newest" ? "oldest" : "newest";
+    state.settings.sort = state.sort;
+    local(S, state.settings);
     $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
     renderList();
   };
   $$(".filter").forEach(b => b.onclick = () => {
     $$(".filter").forEach(x => x.classList.toggle("active", x === b));
     state.filter = b.dataset.filter;
+    state.settings.filter = state.filter;
+    local(S, state.settings);
     renderList();
   });
   $("#markRead").onclick = markVisibleRead;
@@ -1384,6 +1494,10 @@ function bind() {
       state.selected = null;
       render();
     }
+  });
+  // Follow the OS theme live when the user chose "System".
+  matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+    if (state.settings.theme === "system") applySettings();
   });
   document.onkeydown = e => {
     const tag = document.activeElement?.tagName;
@@ -1452,18 +1566,36 @@ function bind() {
 
 async function init() {
   loadLocal();
-  try {
-    db = await openDB();
-    state.items = await dbAll();
-    syncTags();
-    saveTags();
-    bind();
-    applySettings();
-    render();
-    if (state.feeds.length && !state.items.length) refresh();
-  } catch (e) {
-    console.error(e);
-    toast("Could not open browser storage.");
+  // Open storage with one retry: a transient failure must not leave a
+  // dead page. If it still fails, show the shell with a retry instead.
+  let opened = false;
+  for (let attempt = 0; attempt < 2 && !opened; attempt++) {
+    try { db = await openDB(); opened = true; }
+    catch (e) { if (attempt === 0) await new Promise(r => setTimeout(r, 600)); }
+  }
+  bind();
+  applySettings();
+  if (opened) {
+    try {
+      state.items = await dbAll();
+      syncTags();
+      saveTags();
+    } catch (e) {
+      console.error(e);
+      toast("Could not load your articles.");
+    }
+  }
+  render();
+  if (!opened) {
+    toast("Could not open browser storage. Your articles are unavailable.", { label: "Retry", fn: () => location.reload() });
+  } else {
+    if (state.feedsRestored) toast("Your subscriptions were restored from a backup copy.");
+    // Refresh on launch when the newest cached article is stale, so
+    // the list is never silently days old.
+    if (state.feeds.length) {
+      const newest = state.items.reduce((m, x) => Math.max(m, dateSortKey(x) ?? 0), 0);
+      if (!state.items.length || Date.now() - newest > 30 * 60 * 1000) refresh();
+    }
   }
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
