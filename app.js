@@ -744,7 +744,12 @@ function renderReader(x) {
   const { showingFull, body } = readerBodyHTML(x);
   // WordPress API items already carry the full article, and so does any
   // feed item with long content — do not offer to "load" what is there.
-  const alreadyFull = !showingFull && (f?.via === "wp" || stripTags(x.content || "").length > 1500);
+  /* "Full article included in feed" only when we know it: the feed was
+     loaded from the site's own WordPress API, whose posts carry full
+     content. Length is NOT a signal — some feeds (e.g. NASA) ship long
+     excerpts padded with site boilerplate, which the old >1500-char
+     guess mislabelled as full and left with no way to fetch the rest. */
+  const alreadyFull = !showingFull && f?.via === "wp" && stripTags(x.content || "").length > 200;
   const canFull = !showingFull && !x.fullContent && !alreadyFull;
   $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">×</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? d.toLocaleString() : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">×</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : x.fullContent ? "Show full article" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>`;
   const bodyEl = $("#body");
