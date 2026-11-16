@@ -1,0 +1,1 @@
+{"name":"RSS Reader","short_name":"RSS Reader","description":"A private RSS reader hosted on GitHub Pages.","start_url":"./","display":"standalone","background_color":"#171916","theme_color":"#171916","icons":[{"src":"./assets/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}
