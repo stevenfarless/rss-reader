@@ -35,6 +35,8 @@ Browsers enforce cross-origin resource sharing (CORS). This reader loads feeds e
 
 Feeds that block cross-origin requests and offer none of the above still cannot load from a browser page; that is a browser security rule, not a bug in this reader.
 
+"Load full article" fetches the article the same way: directly, then the site's own WordPress API looked up by the article's slug (no third party involved), then — with the proxy fallback on — public reader services (a Markdown reader, then a generic proxy). Those services are free and rate-limited, and some publishers block them, so full text is not guaranteed for every site.
+
 ## Local data
 
 Subscriptions and preferences belong to the current browser profile and site origin. Export OPML and JSON backups before clearing site data or moving to another browser or device. Cached articles and reading state use IndexedDB.
