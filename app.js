@@ -27,7 +27,7 @@ const state = {
   feeds: [], items: [], view: "all", feed: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null,
   folders: [], tags: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", proxyFallback: false }
+  settings: { theme: "dark", width: "comfortable", size: "normal", proxyFallback: false, sidebarCollapsed: false }
 };
 let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null;
 
@@ -134,6 +134,20 @@ function applySettings() {
   document.documentElement.dataset.theme = t;
   document.documentElement.dataset.width = state.settings.width;
   document.documentElement.dataset.size = state.settings.size;
+  applySidebarCollapsed();
+}
+/* Sidebar collapse: the sidebar becomes a 52px rail holding only the
+   toggle (top left), so the list and reader get the full width. The
+   choice persists with the other settings. */
+function applySidebarCollapsed() {
+  const collapsed = !!state.settings.sidebarCollapsed;
+  document.body.classList.toggle("sidebar-collapsed", collapsed);
+  const btn = $("#sideToggle");
+  if (!btn) return;
+  btn.setAttribute("aria-expanded", String(!collapsed));
+  btn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+  btn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+  btn.textContent = collapsed ? "›" : "‹";
 }
 
 /* Dates: null when missing/unparseable, so dateless items sort after dated
@@ -482,14 +496,22 @@ async function refresh() {
   const now = Date.now();
   if (now - refreshAt < 2000) return; // debounce repeated refreshes (incl. holding "r")
   refreshAt = now;
-  const results = await Promise.all(state.feeds.map(f => refreshFeed(f)));
-  const ok = results.filter(Boolean).length;
-  const failed = state.feeds.filter((f, i) => !results[i]).map(f => f.title);
-  saveFeeds();
-  render();
-  toast(ok === state.feeds.length
-    ? `Refreshed ${ok} of ${state.feeds.length} feeds.`
-    : `Refreshed ${ok} of ${state.feeds.length} feeds. Failed: ${failed.join(", ")}.`);
+  const btn = $("#refresh");
+  btn.disabled = true;
+  btn.setAttribute("aria-busy", "true");
+  try {
+    const results = await Promise.all(state.feeds.map(f => refreshFeed(f)));
+    const ok = results.filter(Boolean).length;
+    const failed = state.feeds.filter((f, i) => !results[i]).map(f => f.title);
+    saveFeeds();
+    render();
+    toast(ok === state.feeds.length
+      ? `Refreshed ${ok} of ${state.feeds.length} feeds.`
+      : `Refreshed ${ok} of ${state.feeds.length} feeds. Failed: ${failed.join(", ")}.`);
+  } finally {
+    btn.disabled = false;
+    btn.removeAttribute("aria-busy");
+  }
 }
 
 /* ---------- list / render ---------- */
@@ -1217,7 +1239,8 @@ function bind() {
     local(S, state.settings);
     applySettings();
   };
-  $("#search").oninput = e => { state.query = e.target.value.toLowerCase(); renderList(); };
+  $("#search").oninput = e => { state.query = e.target.value.toLowerCase(); $("#searchClear").hidden = !e.target.value; renderList(); };
+  $("#searchClear").onclick = () => { $("#search").value = ""; state.query = ""; $("#searchClear").hidden = true; renderList(); $("#search").focus(); };
   $("#sort").onclick = () => {
     state.sort = state.sort === "newest" ? "oldest" : "newest";
     $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
@@ -1247,7 +1270,8 @@ function bind() {
   $("#saveSettings").onclick = () => {
     state.settings = {
       theme: $("#themeSelect").value, width: $("#widthSelect").value, size: $("#sizeSelect").value,
-      proxyFallback: $("#proxyToggle").checked
+      proxyFallback: $("#proxyToggle").checked,
+      sidebarCollapsed: state.settings.sidebarCollapsed || false
     };
     local(S, state.settings);
     applySettings();
@@ -1258,6 +1282,11 @@ function bind() {
   $("#menu").onclick = () => {
     const open = $("#sidebar").classList.toggle("open");
     $("#scrim").classList.toggle("show", open);
+  };
+  $("#sideToggle").onclick = () => {
+    state.settings.sidebarCollapsed = !state.settings.sidebarCollapsed;
+    local(S, state.settings);
+    applySidebarCollapsed();
   };
   window.addEventListener("popstate", () => {
     if ($("#reader").classList.contains("open") || state.selected) {
