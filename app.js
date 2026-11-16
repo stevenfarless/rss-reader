@@ -14,6 +14,7 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const K = "rss-reader.feeds.v1", S = "rss-reader.settings.v1", DB = "rss-reader-cache";
+const KF = "rss-reader.folders.v1", KT = "rss-reader.tags.v1";
 const PROXY_API = "https://api.rss2json.com/v1/api.json?rss_url=";
 const ALLORIGINS = "https://api.allorigins.win/raw?url=";
 const FETCH_TIMEOUT_MS = 15000;
@@ -21,10 +22,11 @@ const MAX_ITEMS_PER_FEED = 200;
 
 const state = {
   feeds: [], items: [], view: "all", feed: null, filter: "all",
-  sort: "newest", query: "", selected: null,
+  sort: "newest", query: "", selected: null, tag: null,
+  folders: [], tags: [],
   settings: { theme: "dark", width: "comfortable", size: "normal", proxyFallback: false }
 };
-let db, timer, pendingG = null, refreshAt = 0;
+let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null;
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -53,8 +55,26 @@ function local(k, v) {
 function loadLocal() {
   try { state.feeds = JSON.parse(localStorage.getItem(K) || "[]"); } catch {}
   try { state.settings = { ...state.settings, ...JSON.parse(localStorage.getItem(S) || "{}") }; } catch {}
+  try { state.folders = JSON.parse(localStorage.getItem(KF) || "[]"); } catch {}
+  try { state.tags = JSON.parse(localStorage.getItem(KT) || "[]"); } catch {}
+  syncFolders();
 }
 function saveFeeds() { local(K, state.feeds); }
+function saveFolders() { local(KF, state.folders); }
+function saveTags() { local(KT, state.tags); }
+/* Folders come from the stored list plus any group a feed already has
+   (e.g. from an OPML import), so imported folders never vanish. */
+function syncFolders() {
+  const names = new Set(state.folders);
+  for (const f of state.feeds) if (f.group) names.add(f.group);
+  state.folders = [...names].sort((a, b) => a.localeCompare(b));
+}
+/* Tags likewise: the stored list plus any tag already on an article. */
+function syncTags() {
+  const names = new Set(state.tags);
+  for (const x of state.items) for (const t of x.tags || []) names.add(t);
+  state.tags = [...names].sort((a, b) => a.localeCompare(b));
+}
 
 /* ---------- storage ---------- */
 /* IndexedDB connections can be closed by the browser (versionchange from
@@ -409,7 +429,8 @@ async function saveItems(feed, items) {
       published: date(x.date) ? date(x.date).toISOString() : null,
       image: x.image || old?.image || "",
       enclosure: x.enclosure || old?.enclosure || null,
-      read: old?.read || false, saved: old?.saved || false
+      read: old?.read || false, saved: old?.saved || false,
+      tags: old?.tags || []
     };
     await put(item);
   }
@@ -470,7 +491,9 @@ function visible() {
   let a = state.items.filter(x =>
     state.view === "unread" ? !x.read
     : state.view === "saved" ? x.saved
-    : state.view === "feed" ? x.feedId === state.feed : true);
+    : state.view === "feed" ? x.feedId === state.feed
+    : state.view === "tag" ? (x.tags || []).includes(state.tag)
+    : true);
   if (state.filter === "today") {
     a = a.filter(x => { const d = date(x.published); return d && d.toDateString() === new Date().toDateString(); });
   }
@@ -479,7 +502,7 @@ function visible() {
   }
   if (state.query) {
     const q = state.query.toLowerCase();
-    a = a.filter(x => [x.title, x.summary, x.author, x.feedTitle].join(" ").toLowerCase().includes(q));
+    a = a.filter(x => [x.title, x.summary, x.author, x.feedTitle, (x.tags || []).join(" ")].join(" ").toLowerCase().includes(q));
   }
   const newest = state.sort === "newest";
   return a.sort((x, y) => {
@@ -504,21 +527,27 @@ function renderNav() {
   for (const f of state.feeds) (groups[f.group || ""] ||= []).push(f);
   const groupNames = Object.keys(groups).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
   $("#feeds").innerHTML = state.feeds.length ? groupNames.map(g => {
-    const label = g ? `<div class="feed-group">${esc(g)}</div>` : "";
+    const label = g ? `<div class="folder-head"><span class="feed-group">${esc(g)}</span><span class="folder-actions"><button type="button" data-folder-rename="${esc(g)}" title="Rename folder" aria-label="Rename folder ${esc(g)}">✎</button><button type="button" data-folder-delete="${esc(g)}" title="Delete folder" aria-label="Delete folder ${esc(g)}">×</button></span></div>` : "";
     return label + groups[g].map(f => {
       const unreadCount = state.items.filter(x => x.feedId === f.id && !x.read).length;
       const err = f.error ? ` feed-error" title="${esc(f.error)}` : "";
       return `<button class="feed-row${state.feed === f.id ? " active" : ""}${err}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}><span class="feed-dot"></span><span class="feed-name">${esc(f.title)}</span>${f.error ? '<span class="feed-err" aria-hidden="true">!</span>' : ""}<small>${unreadCount || ""}</small></button>`;
     }).join("");
   }).join("") : '<p class="muted">Your feeds will appear here.</p>';
+  const tagCounts = {};
+  for (const x of state.items) for (const t of x.tags || []) tagCounts[t] = (tagCounts[t] || 0) + 1;
+  $("#tags").innerHTML = state.tags.length ? state.tags.map(t =>
+    `<button class="nav tag-row${state.view === "tag" && state.tag === t ? " active" : ""}" data-tag="${esc(t)}" ${state.view === "tag" && state.tag === t ? 'aria-current="true"' : ""}>🏷 ${esc(t)}<span>${tagCounts[t] || 0}</span></button>`
+  ).join("") : '<p class="muted">Tag articles from the reader to find them here.</p>';
 }
 function renderList() {
   const a = visible();
-  const titles = { all: "All articles", unread: "Unread", saved: "Saved", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed" };
+  const titles = { all: "All articles", unread: "Unread", saved: "Saved", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", tag: state.tag ? "Tag: " + state.tag : "Tag" };
   $("#heading").textContent = titles[state.view];
   $("#mobileTitle").textContent = titles[state.view];
   $("#subtitle").textContent = state.view === "saved" ? "Articles you have kept for later."
     : state.view === "unread" ? "Stories you have not read yet."
+    : state.view === "tag" ? `Articles tagged “${state.tag}”.`
     : "Your subscriptions, gathered in one place.";
   $("#articleList").innerHTML = a.length ? a.map(x => {
     const d = date(x.published);
@@ -632,7 +661,7 @@ function renderReader(x) {
   // feed item with long content — do not offer to "load" what is there.
   const alreadyFull = !showingFull && (f?.via === "wp" || stripTags(x.content || "").length > 1500);
   const canFull = !showingFull && !x.fullContent && !alreadyFull;
-  $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">×</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? d.toLocaleString() : "No date")}</div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : x.fullContent ? "Show full article" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>`;
+  $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">×</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? d.toLocaleString() : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">×</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : x.fullContent ? "Show full article" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>`;
   const bodyEl = $("#body");
   bodyEl.append(cleanHTML(body, x.url));
   $("#reader").classList.add("open");
@@ -667,6 +696,176 @@ function render() {
   renderNav();
   renderList();
   if (!state.selected) $("#reader").innerHTML = '<div class="reader-empty"><span>✳</span><p>Select an article to read.</p><small>Use j and k to move, o to open, ? for all shortcuts.</small></div>';
+}
+
+/* ---------- folders & tags ---------- */
+function goTag(tag) {
+  state.view = "tag"; state.tag = tag; state.feed = null; state.selected = null;
+  $("#reader").classList.remove("open");
+  render();
+}
+async function addTagToItem(x, rawName) {
+  const name = String(rawName || "").trim().replace(/\s+/g, " ").slice(0, 40);
+  if (!name) return;
+  x.tags = x.tags || [];
+  if (x.tags.some(t => t.toLowerCase() === name.toLowerCase())) return;
+  x.tags.push(name);
+  if (!state.tags.some(t => t.toLowerCase() === name.toLowerCase())) {
+    state.tags.push(name);
+    state.tags.sort((a, b) => a.localeCompare(b));
+    saveTags();
+  }
+  await put(x);
+  render();
+  renderReader(x);
+  $("#tagInput")?.focus();
+}
+async function removeTagFromItem(x, name) {
+  x.tags = (x.tags || []).filter(t => t !== name);
+  await put(x);
+  // A tag left on no article stops being listed (tags created in the
+  // dialog but never applied stay until deleted there).
+  if (!state.items.some(i => (i.tags || []).includes(name))) {
+    state.tags = state.tags.filter(t => t !== name);
+    saveTags();
+  }
+  render();
+  renderReader(x);
+}
+function createFolder(rawName) {
+  const name = String(rawName || "").trim().slice(0, 60);
+  if (!name) return toast("Enter a folder name.");
+  if (state.folders.some(f => f.toLowerCase() === name.toLowerCase())) return toast("That folder already exists.");
+  state.folders.push(name);
+  state.folders.sort((a, b) => a.localeCompare(b));
+  saveFolders();
+  renderOrganize();
+  render();
+  toast("Folder added.");
+}
+function createTag(rawName) {
+  const name = String(rawName || "").trim().replace(/\s+/g, " ").slice(0, 40);
+  if (!name) return toast("Enter a tag name.");
+  if (state.tags.some(t => t.toLowerCase() === name.toLowerCase())) return toast("That tag already exists.");
+  state.tags.push(name);
+  state.tags.sort((a, b) => a.localeCompare(b));
+  saveTags();
+  renderOrganize();
+  render();
+  toast("Tag added.");
+}
+function renameFolder(oldName, rawName) {
+  const name = String(rawName || "").trim().slice(0, 60);
+  if (!name || name === oldName) return;
+  if (state.folders.some(f => f.toLowerCase() === name.toLowerCase())) return toast("That folder already exists.");
+  state.folders = state.folders.map(f => f === oldName ? name : f);
+  for (const f of state.feeds) if (f.group === oldName) f.group = name;
+  saveFolders();
+  saveFeeds();
+  toast("Folder renamed.");
+}
+/* Deletes use a two-step confirm inside the dialog (click Delete, then
+   click Confirm delete) instead of a native confirm(), which some
+   browsers dismiss without the user ever seeing it. */
+function deleteFolder(name) {
+  if (!pendingDelete || pendingDelete.kind !== "folder" || pendingDelete.name !== name) {
+    pendingDelete = { kind: "folder", name };
+    renderOrganize();
+    toast("Click Delete again to remove the folder.");
+    return;
+  }
+  pendingDelete = null;
+  for (const f of state.feeds) if (f.group === name) f.group = "";
+  state.folders = state.folders.filter(f => f !== name);
+  saveFeeds();
+  saveFolders();
+  renderOrganize();
+  render();
+  toast("Folder deleted.");
+}
+async function renameTag(oldName, rawName) {
+  const name = String(rawName || "").trim().replace(/\s+/g, " ").slice(0, 40);
+  if (!name || name === oldName) return;
+  if (state.tags.some(t => t.toLowerCase() === name.toLowerCase())) return toast("That tag already exists.");
+  state.tags = state.tags.map(t => t === oldName ? name : t);
+  for (const x of state.items) {
+    if ((x.tags || []).includes(oldName)) {
+      x.tags = x.tags.map(t => t === oldName ? name : t);
+      await put(x);
+    }
+  }
+  if (state.view === "tag" && state.tag === oldName) state.tag = name;
+  saveTags();
+  toast("Tag renamed.");
+}
+async function deleteTag(name) {
+  if (!pendingDelete || pendingDelete.kind !== "tag" || pendingDelete.name !== name) {
+    pendingDelete = { kind: "tag", name };
+    renderOrganize();
+    toast("Click Delete again to remove the tag.");
+    return;
+  }
+  pendingDelete = null;
+  for (const x of state.items) {
+    if ((x.tags || []).includes(name)) {
+      x.tags = x.tags.filter(t => t !== name);
+      await put(x);
+    }
+  }
+  state.tags = state.tags.filter(t => t !== name);
+  if (state.view === "tag" && state.tag === name) goView("all");
+  saveTags();
+  renderOrganize();
+  render();
+  if (state.selected) { const x = selectedItem(); if (x) renderReader(x); }
+  toast("Tag deleted.");
+}
+function moveFeed(feedId, folder) {
+  const f = state.feeds.find(f => f.id === feedId);
+  if (!f) return;
+  f.group = folder;
+  saveFeeds();
+  syncFolders();
+  renderOrganize();
+  render();
+  toast(folder ? `Moved to “${folder}”.` : "Moved out of its folder.");
+}
+async function doRename(rawName) {
+  if (!orgEdit) return;
+  const { kind, old } = orgEdit;
+  orgEdit = null;
+  if (kind === "folder") renameFolder(old, rawName);
+  else await renameTag(old, rawName);
+  renderOrganize();
+  render();
+  if (state.selected) { const x = selectedItem(); if (x) renderReader(x); }
+}
+function renderOrganize() {
+  const folderRow = name => {
+    const count = state.feeds.filter(f => f.group === name).length;
+    const armed = pendingDelete?.kind === "folder" && pendingDelete.name === name;
+    if (orgEdit?.kind === "folder" && orgEdit.old === name) {
+      return `<div class="org-row"><input id="orgEditInput" value="${esc(name)}" aria-label="Folder name"><button type="button" class="quiet" data-org-save-rename>Save</button><button type="button" class="quiet" data-org-cancel-rename>Cancel</button></div>`;
+    }
+    return `<div class="org-row"><span class="org-name">${esc(name)}</span><small>${count} feed${count === 1 ? "" : "s"}</small><button type="button" class="quiet" data-org-rename-folder="${esc(name)}">Rename</button><button type="button" class="quiet" data-org-delete-folder="${esc(name)}">${armed ? "Confirm delete" : "Delete"}</button></div>`;
+  };
+  const tagRow = name => {
+    const count = state.items.filter(x => (x.tags || []).includes(name)).length;
+    const armed = pendingDelete?.kind === "tag" && pendingDelete.name === name;
+    if (orgEdit?.kind === "tag" && orgEdit.old === name) {
+      return `<div class="org-row"><input id="orgEditInput" value="${esc(name)}" aria-label="Tag name"><button type="button" class="quiet" data-org-save-rename>Save</button><button type="button" class="quiet" data-org-cancel-rename>Cancel</button></div>`;
+    }
+    return `<div class="org-row"><span class="org-name">🏷 ${esc(name)}</span><small>${count} article${count === 1 ? "" : "s"}</small><button type="button" class="quiet" data-org-rename-tag="${esc(name)}">Rename</button><button type="button" class="quiet" data-org-delete-tag="${esc(name)}">${armed ? "Confirm delete" : "Delete"}</button></div>`;
+  };
+  $("#organizeBody").innerHTML = `
+    <div class="org-section"><h3>Folders</h3><p class="muted">Group your feeds. Deleting a folder keeps its feeds, ungrouped.</p>${state.folders.map(folderRow).join("") || '<p class="muted">No folders yet.</p>'}<div class="org-new"><input id="newFolder" placeholder="New folder name" aria-label="New folder name"><button type="button" class="primary" data-org-add-folder>Add</button></div></div>
+    <div class="org-section"><h3>Feeds</h3><p class="muted">Move each feed into a folder.</p>${state.feeds.map(f => `<div class="org-row"><span class="org-name">${esc(f.title)}</span><select data-org-move="${esc(f.id)}" aria-label="Folder for ${esc(f.title)}"><option value="">No folder</option>${state.folders.map(g => `<option value="${esc(g)}" ${f.group === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select></div>`).join("") || '<p class="muted">No feeds yet.</p>'}</div>
+    <div class="org-section"><h3>Tags</h3><p class="muted">Tags are applied to articles from the reader (press t). Renaming a tag updates every article that has it.</p>${state.tags.map(tagRow).join("") || '<p class="muted">No tags yet.</p>'}<div class="org-new"><input id="newTag" placeholder="New tag name" aria-label="New tag name"><button type="button" class="primary" data-org-add-tag>Add</button></div></div>`;
+}
+function showOrganize() {
+  orgEdit = null;
+  renderOrganize();
+  $("#organizeDialog").showModal();
 }
 function showFeed() {
   $("#feedError").textContent = "";
@@ -719,6 +918,8 @@ async function importOPML(file) {
   }
   await Promise.all(jobs);
   saveFeeds();
+  syncFolders();
+  saveFolders();
   render();
   toast(`Imported ${added} feed${added === 1 ? "" : "s"}${skipped ? `, ${skipped} skipped (duplicate or invalid)` : ""}${failed ? `, ${failed} failed to load` : ""}.`);
 }
@@ -770,7 +971,7 @@ function moveUnread(dir) {
   openItem(a[n].id);
 }
 function goView(view) {
-  state.view = view; state.feed = null; state.selected = null;
+  state.view = view; state.feed = null; state.tag = null; state.selected = null;
   $("#reader").classList.remove("open");
   render();
 }
@@ -786,9 +987,15 @@ function bind() {
     if (scrim) { $("#sidebar").classList.remove("open"); scrim.classList.remove("show"); return; }
     const nav = e.target.closest("[data-view]");
     if (nav) { goView(nav.dataset.view); $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show"); return; }
+    const tagBtn = e.target.closest("[data-tag]");
+    if (tagBtn) { goTag(tagBtn.dataset.tag); $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show"); return; }
+    const folderRename = e.target.closest("[data-folder-rename]");
+    if (folderRename) { orgEdit = { kind: "folder", old: folderRename.dataset.folderRename }; showOrganize(); return; }
+    const folderDelete = e.target.closest("[data-folder-delete]");
+    if (folderDelete) { pendingDelete = { kind: "folder", name: folderDelete.dataset.folderDelete }; showOrganize(); return; }
     const feed = e.target.closest("[data-feed]");
     if (feed) {
-      state.view = "feed"; state.feed = feed.dataset.feed; state.selected = null;
+      state.view = "feed"; state.feed = feed.dataset.feed; state.tag = null; state.selected = null;
       render();
       $("#sidebar").classList.remove("open");
       $("#scrim").classList.remove("show");
@@ -808,6 +1015,12 @@ function bind() {
       }
       return;
     }
+    const tagRemove = e.target.closest("[data-tag-remove]");
+    if (tagRemove && state.selected) {
+      const x = selectedItem();
+      if (x) removeTagFromItem(x, tagRemove.dataset.tagRemove);
+      return;
+    }
     const ra = e.target.closest("[data-reader]");
     if (ra && state.selected) {
       const x = selectedItem();
@@ -824,9 +1037,45 @@ function bind() {
   document.addEventListener("keydown", e => {
     const row = e.target.closest?.("[data-item]");
     if (row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openItem(row.dataset.item); }
+    if (e.target.id === "tagInput" && e.key === "Enter") {
+      e.preventDefault();
+      const x = selectedItem();
+      if (x) addTagToItem(x, e.target.value);
+    }
   });
   $("#home").onclick = () => { goView("all"); };
   $("#add").onclick = $("#mobileAdd").onclick = $("#firstAdd").onclick = showFeed;
+  $("#organize").onclick = showOrganize;
+  $("#organizeDialog").addEventListener("close", () => { pendingDelete = null; orgEdit = null; });
+  $("#organizeDialog").addEventListener("click", async e => {
+    const addFolder = e.target.closest("[data-org-add-folder]");
+    if (addFolder) { createFolder($("#newFolder")?.value); return; }
+    const addTag = e.target.closest("[data-org-add-tag]");
+    if (addTag) { createTag($("#newTag")?.value); return; }
+    const renameFolderBtn = e.target.closest("[data-org-rename-folder]");
+    if (renameFolderBtn) { orgEdit = { kind: "folder", old: renameFolderBtn.dataset.orgRenameFolder }; renderOrganize(); $("#orgEditInput")?.focus(); return; }
+    const renameTagBtn = e.target.closest("[data-org-rename-tag]");
+    if (renameTagBtn) { orgEdit = { kind: "tag", old: renameTagBtn.dataset.orgRenameTag }; renderOrganize(); $("#orgEditInput")?.focus(); return; }
+    const saveRename = e.target.closest("[data-org-save-rename]");
+    if (saveRename) { await doRename($("#orgEditInput")?.value); return; }
+    const cancelRename = e.target.closest("[data-org-cancel-rename]");
+    if (cancelRename) { orgEdit = null; renderOrganize(); return; }
+    const delFolder = e.target.closest("[data-org-delete-folder]");
+    if (delFolder) { deleteFolder(delFolder.dataset.orgDeleteFolder); return; }
+    const delTag = e.target.closest("[data-org-delete-tag]");
+    if (delTag) { await deleteTag(delTag.dataset.orgDeleteTag); return; }
+    if (e.target.closest("#organizeDone") || e.target.closest("#organizeClose")) $("#organizeDialog").close();
+  });
+  $("#organizeDialog").addEventListener("change", e => {
+    const sel = e.target.closest("[data-org-move]");
+    if (sel) moveFeed(sel.dataset.orgMove, sel.value);
+  });
+  $("#organizeDialog").addEventListener("keydown", e => {
+    if (e.key !== "Enter") return;
+    if (e.target.id === "newFolder") { e.preventDefault(); createFolder(e.target.value); }
+    else if (e.target.id === "newTag") { e.preventDefault(); createTag(e.target.value); }
+    else if (e.target.id === "orgEditInput") { e.preventDefault(); doRename(e.target.value); }
+  });
   $("#refresh").onclick = refresh;
   $("#settings").onclick = showSettings;
   $("#theme").onclick = () => {
@@ -936,6 +1185,12 @@ function bind() {
       return;
     }
     if (e.key === "s" && sel) { sel.saved = !sel.saved; put(sel); render(); openItem(sel.id); return; }
+    if (e.key === "t" && sel) {
+      e.preventDefault(); // otherwise the "t" is typed into the input
+      const inp = $("#tagInput");
+      if (inp) { inp.focus(); inp.select(); }
+      return;
+    }
   };
 }
 
@@ -944,6 +1199,8 @@ async function init() {
   try {
     db = await openDB();
     state.items = await dbAll();
+    syncTags();
+    saveTags();
     bind();
     applySettings();
     render();
