@@ -53,6 +53,44 @@ const snippet = (s, n) => {
 };
 /* Byline timestamp without seconds ("11/16/2026 · 11:00 AM"). */
 const fmtDateTime = d => d.toLocaleDateString() + " · " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+/* Strip publisher boilerplate out of summaries before they reach the
+   list. Hacker News descriptions are "Article URL: … Comments URL: …
+   Points: N # Comments: M"; some feeds (e.g. NASA APOD via WordPress)
+   ship site navigation in the summary, which is cut at the first nav
+   marker with the leading header tokens dropped. */
+const NAV_MARKERS = ["Today's APOD", "Archive Submissions", "Previous APOD"];
+const cleanSummary = s => {
+  // Curly apostrophes/quotes (e.g. "Today’s APOD" from a decoded
+  // excerpt) must be normalized before the marker match below.
+  s = (s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').trim();
+  const hn = s.match(/Article URL:.*?Points:\s*(\d+)\s*# Comments:\s*(\d+)/i);
+  if (hn) return `${hn[1]} points · ${hn[2]} comments`;
+  const cutAt = NAV_MARKERS.map(m => s.indexOf(m)).filter(i => i > 0);
+  if (cutAt.length) {
+    s = s.slice(0, Math.min(...cutAt)).trim();
+    s = s.replace(/^(?:(?:APOD|Science)\b[\s·:–-]*)+/i, "").replace(/^APOD:\s*/i, "").trim();
+  }
+  return s;
+};
+/* Feed label for a list card. The stored feedTitle can be empty for
+   items saved by an older build, and the feed may have been re-added
+   since (new id), so fall back to the feed's current title, then to
+   matching the article's host against the feeds' sites and feed URLs.
+   The host match ignores scheme and www, since older saved links can
+   be http: while the feed is now https:. */
+const feedTitleFor = x => {
+  if (x.feedTitle) return x.feedTitle;
+  const byId = state.feeds.find(f => f.id === x.feedId);
+  if (byId?.title) return byId.title;
+  try {
+    const host = new URL(x.url).hostname.replace(/^www\./, "");
+    const byHost = state.feeds.find(f => [f.site, f.url].some(u => {
+      try { return u && new URL(u).hostname.replace(/^www\./, "") === host; } catch { return false; }
+    }));
+    if (byHost?.title) return byHost.title;
+  } catch {}
+  return "";
+};
 
 function toast(s) {
   const e = $("#toast");
@@ -174,10 +212,13 @@ function dateSortKey(x) {
 }
 
 /* ---------- error classification ---------- */
-function classifyError(e) {
+function classifyError(e, wasHttp) {
   if (e && e.name === "AbortError") return "Timed out after " + (FETCH_TIMEOUT_MS / 1000) + "s. The publisher did not respond in time.";
   const msg = String((e && e.message) || e || "");
   if (/Failed to fetch|NetworkError|Load failed|Network request failed/i.test(msg)) {
+    // The address was http: and was rewritten to https: for the fetch, so
+    // name the original scheme instead of blaming the rewritten one.
+    if (wasHttp) return "Could not be reached from this browser. This feed only serves http:, which a secure page cannot load. Try the site's https address, if it has one.";
     return "Could not be reached from this browser. This usually means the publisher does not allow cross-origin requests (CORS), or the address uses http: on a secure page.";
   }
   if (/^HTTP \d+/.test(msg)) return "The publisher answered with " + msg + ".";
@@ -323,7 +364,7 @@ function parseFeed(text, url) {
    /wp-json/ even when /feed sends none, and its posts carry full content. */
 async function loadWordPressFeed(origin) {
   const base = origin.replace(/\/$/, "") + "/wp-json/wp/v2/posts";
-  const r = await fetchWithTimeout(base + "?per_page=20&_embed&orderby=date&order=desc", {
+  const r = await fetchWithTimeout(base + "?per_page=100&_embed&orderby=date&order=desc", {
     headers: { Accept: "application/json" }, cache: "no-store"
   });
   if (!r.ok) throw Error("HTTP " + r.status);
@@ -454,7 +495,7 @@ async function saveItems(feed, items) {
     const item = {
       id: key, feedId: feed.id, feedTitle: feed.title,
       title: x.title, url: link, guid: x.guid || "",
-      summary: x.summary || "", content: x.content || "",
+      summary: cleanSummary(x.summary || ""), content: x.content || "",
       fullContent: old?.fullContent || "",
       author: x.author || "",
       published: date(x.date) ? date(x.date).toISOString() : null,
@@ -593,7 +634,7 @@ function renderList() {
     : "Your subscriptions, gathered in one place.";
   $("#articleList").innerHTML = a.length ? a.map(x => {
     const d = date(x.published);
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="${esc(x.title)}"><div class="article-meta"><span>${esc(x.feedTitle)}</span><span>·</span><time>${esc(d ? d.toLocaleDateString() : "No date")}</time></div><h2>${esc(x.title)}</h2><p>${esc(snippet(x.summary, 210))}</p><div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="Toggle read" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button></span></div></article>`;
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="${esc(x.title)}"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time>${esc(d ? d.toLocaleDateString() : "No date")}</time></div><h2>${esc(x.title)}</h2><p>${esc(snippet(cleanSummary(x.summary), 210))}</p><div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="Toggle read" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button></span></div></article>`;
   }).join("") : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>';
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
@@ -630,7 +671,15 @@ function cleanHTML(html, base) {
       if (a.name === "style") n.removeAttribute(a.name);
     });
     if (n.tagName === "A" && n.getAttribute("href")) { n.target = "_blank"; n.rel = "noopener noreferrer"; }
-    if (n.tagName === "IMG" && !n.getAttribute("src")) n.remove();
+    if (n.tagName === "IMG") {
+      // Lazy-loaded images only carry data-src until the page's scripts
+      // run; promote it so the image survives extraction.
+      if (!n.getAttribute("src")) {
+        const ds = n.getAttribute("data-src") || n.getAttribute("data-lazy-src") || n.getAttribute("data-original");
+        if (ds) { n.setAttribute("src", ds); resolveAttr(n, "src", base); }
+      }
+      if (!n.getAttribute("src")) n.remove();
+    }
   });
   return doc.body;
 }
@@ -723,8 +772,18 @@ function markdownToHTML(md) {
     .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
     .replace(/`([^`\n]+)`/g, "<code>$1</code>");
   const lines = text.split("\n");
-  let html = "", para = [];
-  const flush = () => { if (para.length) { html += "<p>" + para.join(" ") + "</p>"; para = []; } };
+  let html = "", para = [], list = null;
+  /* Consecutive list items belong in ONE list element, not a stack of
+     one-item lists. */
+  const flushList = () => {
+    if (!list) return;
+    html += `<${list.tag}>` + list.items.map(i => `<li>${i}</li>`).join("") + `</${list.tag}>`;
+    list = null;
+  };
+  const flush = () => { flushList(); if (para.length) { html += "<p>" + para.join(" ") + "</p>"; para = []; } };
+  const startList = tag => {
+    if (!list || list.tag !== tag) { flush(); list = { tag, items: [] }; }
+  };
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) { flush(); continue; }
@@ -732,8 +791,8 @@ function markdownToHTML(md) {
     if (h) { flush(); const lvl = h[1].length + 1; html += `<h${lvl}>${inline(h[2])}</h${lvl}>`; continue; }
     if (/^---+$/.test(line)) { flush(); html += "<hr>"; continue; }
     if (/^>\s?/.test(line)) { flush(); html += `<blockquote>${inline(line.replace(/^>\s?/, ""))}</blockquote>`; continue; }
-    if (/^[-*]\s+/.test(line)) { flush(); html += `<ul><li>${inline(line.replace(/^[-*]\s+/, ""))}</li></ul>`; continue; }
-    if (/^\d+[.)]\s+/.test(line)) { flush(); html += `<ol><li>${inline(line.replace(/^\d+[.)]\s+/, ""))}</li></ol>`; continue; }
+    if (/^[-*]\s+/.test(line)) { startList("ul"); list.items.push(inline(line.replace(/^[-*]\s+/, ""))); continue; }
+    if (/^\d+[.)]\s+/.test(line)) { startList("ol"); list.items.push(inline(line.replace(/^\d+[.)]\s+/, ""))); continue; }
     para.push(inline(line));
   }
   flush();
@@ -743,8 +802,11 @@ async function loadFullText(item) {
   const btn = $('[data-reader="fulltext"]');
   if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
   try {
-    // The site's own WordPress API first: fast, reliable, no third party.
-    const wp = await fetchViaWordPress(item.url);
+    // The site's own WordPress API first — but only for sites we know
+    // are WordPress (their feed loaded via the WP API). Asking every
+    // other publisher's origin for /wp-json/ can only 404.
+    const f = state.feeds.find(f => f.id === item.feedId);
+    const wp = (f?.via === "wp" || f?.wpRoot) ? await fetchViaWordPress(item.url) : null;
     if (wp) {
       item.fullContent = wp;
     } else {
@@ -787,7 +849,8 @@ function renderReader(x) {
   const canFull = !showingFull && !x.fullContent && !alreadyFull;
   $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="Save article" aria-pressed="${x.saved}">${x.saved ? "★" : "☆"}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">×</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">×</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>`;
   const bodyEl = $("#body");
-  bodyEl.append(cleanHTML(body, x.url));
+  // Append the cleaned body's children, not the <body> element itself.
+  bodyEl.append(...cleanHTML(body, x.url).childNodes);
   $("#reader").classList.add("open");
   if (history.state?.reader !== x.id) {
     try {
@@ -1057,16 +1120,18 @@ function exportOPML() {
 async function importOPML(file) {
   const d = new DOMParser().parseFromString(await file.text(), "text/xml");
   if (d.querySelector("parsererror") || d.documentElement.localName !== "opml") return toast("Invalid OPML file.");
-  let added = 0, skipped = 0, failed = 0;
+  let added = 0, skipped = 0, failed = 0, done = 0;
   const jobs = [];
+  const seenBatch = new Set();
   for (const o of d.querySelectorAll("outline[xmlUrl]")) {
     const rawUrl = o.getAttribute("xmlUrl");
     let url;
     try { url = normalizeFeedUrl(rawUrl); } catch { skipped++; continue; }
-    if (state.feeds.some(f => sameFeedUrl(f.url, url))) { skipped++; continue; }
+    if (state.feeds.some(f => sameFeedUrl(f.url, url)) || seenBatch.has(url)) { skipped++; continue; }
+    seenBatch.add(url);
     const parent = o.parentElement;
     const group = parent && parent.localName === "outline" ? (parent.getAttribute("text") || parent.getAttribute("title") || "") : "";
-    jobs.push((async () => {
+    jobs.push(async () => {
       try {
         const loaded = await loadFeedFromUrl(url);
         const feed = {
@@ -1077,9 +1142,17 @@ async function importOPML(file) {
         await saveItems(feed, loaded.parsed.items);
         added++;
       } catch (e) { failed++; }
-    })());
+      finally { done++; toast(`Importing feeds… ${done} of ${jobs.length}`); }
+    });
   }
-  await Promise.all(jobs);
+  // Cap concurrency so a large import does not fire all fetches at once.
+  const pool = async (fns, n) => {
+    let i = 0;
+    await Promise.all(Array.from({ length: Math.min(n, fns.length) }, async () => {
+      while (i < fns.length) { const fn = fns[i++]; await fn(); }
+    }));
+  };
+  await pool(jobs, 3);
   saveFeeds();
   syncFolders();
   saveFolders();
@@ -1275,7 +1348,7 @@ function bind() {
       await addFeed($("#feedUrl").value.trim());
       $("#feedDialog").close();
     } catch (err) {
-      $("#feedError").textContent = classifyError(err);
+      $("#feedError").textContent = classifyError(err, /^http:/i.test($("#feedUrl").value.trim()));
     } finally { b.disabled = false; }
   };
   $("#saveSettings").onclick = () => {
