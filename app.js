@@ -945,6 +945,19 @@ function renderDiscoveryResults(items) {
       (added ? ' disabled' : '') + '>' + (added ? 'Added' : 'Add') + '</button></article>';
   }).join("");
 }
+async function runDiscoveryProvider(provider, query, parentSignal) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (parentSignal.aborted) controller.abort();
+  else parentSignal.addEventListener("abort", abort, { once: true });
+  const timeout = setTimeout(() => controller.abort(), 7000);
+  try {
+    return await provider.search(query, controller.signal);
+  } finally {
+    clearTimeout(timeout);
+    parentSignal.removeEventListener("abort", abort);
+  }
+}
 async function searchFeeds(raw) {
   const q = String(raw || "").trim(), status = $("#feedSearchStatus"), root = $("#feedSearchResults");
   if (q.length < 2) { status.textContent = "Enter at least two characters."; root.innerHTML = ""; return; }
@@ -956,7 +969,7 @@ async function searchFeeds(raw) {
   status.textContent = "Searching feed directories…";
   root.innerHTML = "";
   try {
-    const settled = await Promise.allSettled(DISCOVERY_PROVIDERS.map(p => p.search(q, controller.signal)));
+    const settled = await Promise.allSettled(DISCOVERY_PROVIDERS.map(p => runDiscoveryProvider(p, q, controller.signal)));
     if (run !== discoveryRun) return;
     const groups = settled.map(r => r.status === "fulfilled" ? r.value : []);
     const items = mergeDiscoveryResults(groups);
