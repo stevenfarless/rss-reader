@@ -638,7 +638,10 @@ function parseFeed(text, url) {
    /wp-json/ even when /feed sends none, and its posts carry full content. */
 async function loadWordPressFeed(origin) {
   const base = origin.replace(/\/$/, "") + "/wp-json/wp/v2/posts";
-  const r = await fetchWithTimeout(base + "?per_page=100&_embed&orderby=date&order=desc", {
+  // 30 posts, not 100: with _embed the 100-post payload is ~4.5 MB and
+  // ~5.6 s on rethinkinghell.com, which can exceed the 15 s fetch timeout
+  // on a slow connection and fail the add/refresh entirely.
+  const r = await fetchWithTimeout(base + "?per_page=30&_embed&orderby=date&order=desc", {
     headers: { Accept: "application/json" }, cache: "no-store"
   });
   if (!r.ok) throw Error("HTTP " + r.status);
