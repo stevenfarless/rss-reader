@@ -1832,8 +1832,17 @@ function bind() {
     local(S, state.settings);
     applySettings();
     // The progress bar's place in the reader is set when an article opens;
-    // re-render the open article so a changed position applies at once.
-    if (state.selected) { const x = selectedItem(); if (x) renderReader(x); }
+    // re-render the open article so a changed position applies at once,
+    // keeping the reader's scroll position (renderReader resets it).
+    if (state.selected) {
+      const x = selectedItem();
+      if (x) {
+        const sc = $("#reader").scrollTop;
+        renderReader(x);
+        $("#reader").scrollTop = sc;
+        updateReadProgress();
+      }
+    }
   };
   $("#exportSettings").onclick = exportSettings;
   $("#importSettings").onclick = () => $("#settingsFile").click();
