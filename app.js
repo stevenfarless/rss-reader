@@ -1253,7 +1253,12 @@ async function loadFullText(item) {
 
 function readerBodyHTML(x) {
   const showingFull = !!x.fullContent;
-  const body = showingFull ? x.fullContent : (x.content || x.summary || "<p>No article text was included in this feed.</p>");
+  let body = showingFull ? x.fullContent : (x.content || x.summary || "<p>No article text was included in this feed.</p>");
+  // Convert plain-text Markdown locally; preserve existing HTML feeds.
+  const hasHTML = /^\\s*<(?:!doctype|html|body|article|main|div|p|h[1-6]|section|ul|ol|table|blockquote|pre|figure|img|a)\\b/i.test(body);
+  if (window.RSSMarkdown && window.DOMPurify && !hasHTML && RSSMarkdown.looksLikeMarkdown(body)) {
+    body = DOMPurify.sanitize(RSSMarkdown.render(body), { USE_PROFILES: { html: true } });
+  }
   return { showingFull, body };
 }
 /* Build the reader pane for an item without changing its read state.
