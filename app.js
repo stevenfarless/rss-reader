@@ -27,7 +27,7 @@ const state = {
   feeds: [], items: [], view: "all", feed: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null,
   folders: [], tags: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", proxyFallback: false, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom" }
+  settings: { theme: "dark", width: "comfortable", size: "normal", proxyFallback: false, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false }
 };
 let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null;
 
@@ -270,6 +270,7 @@ function saveFeeds() {
   // erase every subscription (loadLocal restores from it).
   local(K, state.feeds);
   local(K + ".bak", state.feeds);
+  mirrorSync();
 }
 function saveFolders() { local(KF, state.folders); }
 function saveTags() { local(KT, state.tags); }
@@ -294,10 +295,14 @@ function syncTags() {
    operation retries once after reopening. */
 function openDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open(DB, 1);
+    const r = indexedDB.open(DB, 2);
     r.onupgradeneeded = () => {
       const d = r.result;
       if (!d.objectStoreNames.contains("items")) d.createObjectStore("items", { keyPath: "id" });
+      // The service worker reads this store for background refresh:
+      // it cannot see localStorage, so the feed list and the
+      // sync-relevant settings are mirrored here.
+      if (!d.objectStoreNames.contains("sync")) d.createObjectStore("sync", { keyPath: "key" });
     };
     r.onsuccess = () => {
       r.result.onclose = () => { db = null; };
@@ -306,7 +311,7 @@ function openDB() {
     r.onerror = () => rej(r.error);
   });
 }
-function runTx(mode, op) {
+function runTx(mode, op, store = "items") {
   return new Promise((resolve, reject) => {
     let retries = 0;
     const attempt = () => {
@@ -316,7 +321,7 @@ function runTx(mode, op) {
       }
       let req;
       try {
-        req = op(db.transaction("items", mode).objectStore("items"));
+        req = op(db.transaction(store, mode).objectStore(store));
       } catch (e) {
         if (retries < 1) {
           retries++;
@@ -336,13 +341,13 @@ function put(item) { return runTx("readwrite", s => s.put(item)); }
 function dbDelete(itemId) { return runTx("readwrite", s => s.delete(itemId)); }
 /* Batch IndexedDB writes: one transaction for many items, with the
    same reopen-and-retry as runTx. */
-function runBatch(mode, fn) {
+function runBatch(mode, fn, store = "items") {
   return new Promise((resolve, reject) => {
     let retries = 0;
     const attempt = () => {
       if (!db) { openDB().then(ndb => { db = ndb; attempt(); }).catch(reject); return; }
       let tx;
-      try { tx = db.transaction("items", mode); fn(tx.objectStore("items")); }
+      try { tx = db.transaction(store, mode); fn(tx.objectStore(store)); }
       catch (e) { if (retries < 1) { retries++; db = null; attempt(); } else reject(e); return; }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -352,6 +357,70 @@ function runBatch(mode, fn) {
 }
 function putMany(items) { return runBatch("readwrite", s => { for (const x of items) s.put(x); }); }
 function deleteMany(ids) { return runBatch("readwrite", s => { for (const id of ids) s.delete(id); }); }
+/* Mirror the feed list and the sync-relevant settings into IndexedDB,
+   where the service worker can read them for background refresh.
+   Fire-and-forget: a mirror failure must not break the UI. */
+function mirrorSync() {
+  const feeds = state.feeds.map(f => ({ id: f.id, url: f.url, title: f.title, via: f.via, wpRoot: f.wpRoot, site: f.site }));
+  const settings = { proxyFallback: !!state.settings.proxyFallback, notifyNew: !!state.settings.notifyNew };
+  runBatch("readwrite", s => {
+    s.put({ key: "feeds", value: feeds });
+    s.put({ key: "settings", value: settings });
+  }, "sync").catch(() => {});
+}
+/* Periodic Background Sync registration. Only Chrome on Android (for an
+   installed PWA) supports it; elsewhere the registration throws and the
+   setting is turned back off with an explanation. Notifications only
+   come from a background refresh, so turning refresh off also turns
+   notifications off. */
+async function applyBackgroundSync(quiet) {
+  const off = (msg) => {
+    state.settings.backgroundSync = false;
+    state.settings.notifyNew = false;
+    local(S, state.settings);
+    mirrorSync();
+    const b = $("#backgroundSyncToggle"), n = $("#notifyNewToggle");
+    if (b) b.checked = false;
+    if (n) n.checked = false;
+    if (msg && !quiet) toast(msg);
+  };
+  if (!("serviceWorker" in navigator)) { if (state.settings.backgroundSync) off("Background refresh is not available in this browser."); return; }
+  let reg;
+  try { reg = await navigator.serviceWorker.ready; } catch { reg = null; }
+  if (!reg || !("periodicSync" in reg)) { if (state.settings.backgroundSync) off("Background refresh is not available in this browser. It needs Chrome on Android with the app installed."); return; }
+  if (state.settings.backgroundSync) {
+    try {
+      const status = await navigator.permissions.query({ name: "periodic-background-sync" });
+      if (status.state === "denied") throw Error("denied");
+      // 12 hours is the minimum the browser allows; it decides the
+      // actual timing and may run less often.
+      await reg.periodicSync.register("refresh-feeds", { minInterval: 12 * 60 * 60 * 1000 });
+    } catch (e) {
+      off("Background refresh could not be turned on. It needs Chrome on Android with the app installed, and the browser grants it based on use.");
+      return;
+    }
+    if (state.settings.notifyNew && "Notification" in window) {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        state.settings.notifyNew = false;
+        local(S, state.settings);
+        mirrorSync();
+        const n = $("#notifyNewToggle");
+        if (n) n.checked = false;
+        if (!quiet) toast("Notifications are blocked in this browser, so new-article notifications are off.");
+      }
+    }
+  } else {
+    try { await reg.periodicSync.unregister("refresh-feeds"); } catch {}
+    if (state.settings.notifyNew) {
+      state.settings.notifyNew = false;
+      local(S, state.settings);
+      mirrorSync();
+      const n = $("#notifyNewToggle");
+      if (n) n.checked = false;
+    }
+  }
+}
 
 /* ---------- settings ---------- */
 function applySettings() {
@@ -556,6 +625,13 @@ function atomLink(node) {
     || links[0];
   return pick ? (pick.getAttribute("href") || "") : "";
 }
+/* First image in a block of HTML. Many feeds carry the photo in the
+   article's own description, not in a media tag, so this is the
+   fallback that makes card thumbnails actually appear. */
+function firstImgSrc(html) {
+  const m = (html || "").match(/<img[^>]+src\s*=\s*["']([^"']+)["']/i);
+  return m ? m[1] : "";
+}
 function itemImage(n) {
   const thumb = childEl(n, "thumbnail");
   if (thumb && thumb.getAttribute("url")) return thumb.getAttribute("url");
@@ -563,7 +639,7 @@ function itemImage(n) {
   if (media && media.getAttribute("url") && /^image\//.test(media.getAttribute("type") || "")) return media.getAttribute("url");
   const enc = childEl(n, "enclosure");
   if (enc && enc.getAttribute("url") && /^image\//.test(enc.getAttribute("type") || "")) return enc.getAttribute("url");
-  return "";
+  return firstImgSrc(childText(n, "encoded") || childText(n, "content") || childText(n, "description") || childText(n, "summary") || "");
 }
 function itemEnclosure(n) {
   const enc = childEl(n, "enclosure");
@@ -668,7 +744,7 @@ async function loadWordPressFeed(origin) {
       content: p.content?.rendered || "",
       author: p._embedded?.author?.[0]?.name || "",
       date: p.date || p.modified || "",
-      image: p._embedded?.["wp:featuredmedia"]?.[0]?.source_url || "",
+      image: p._embedded?.["wp:featuredmedia"]?.[0]?.source_url || firstImgSrc(p.content?.rendered || ""),
       enclosure: null
     }))
   };
@@ -693,7 +769,7 @@ async function loadViaProxy(feedUrl) {
       content: x.content || x.description || "",
       author: x.author || "",
       date: x.pubDate || "",
-      image: x.thumbnail || x.enclosure?.link || "",
+      image: x.thumbnail || x.enclosure?.link || firstImgSrc(x.content || x.description || ""),
       enclosure: x.enclosure?.link ? { url: x.enclosure.link, type: x.enclosure.type || "" } : null
     }))
   };
@@ -957,7 +1033,11 @@ function renderList() {
   $("#subtitle").textContent = base + upd;
   $("#articleList").innerHTML = a.length ? a.map(x => {
     const d = date(x.published);
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0"><div class="article-main"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time></div><h2>${esc(x.title)}</h2><p>${esc(snippet(cleanSummary(x.summary), 210))}</p><div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button></span></div></div>${x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : ""}</article>`;
+    // Card options: how much preview text, and whether to show the thumbnail.
+    const exc = state.settings.cardExcerpt || "full";
+    const excerpt = exc === "none" ? "" : `<p>${esc(snippet(cleanSummary(x.summary), exc === "short" ? 100 : 210))}</p>`;
+    const thumb = state.settings.cardImage !== false && x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : "";
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0"><div class="article-main"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time></div><h2>${esc(x.title)}</h2>${excerpt}<div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button></span></div></div>${thumb}</article>`;
   }).join("") : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>';
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
@@ -1585,6 +1665,10 @@ async function importSettings(file) {
     const width = pick("#widthSelect", d.settings.width); if (width) next.width = width;
     const size = pick("#sizeSelect", d.settings.size); if (size) next.size = size;
     const prog = pick("#progressSelect", d.settings.progressPosition); if (prog) next.progressPosition = prog;
+    const exc = pick("#cardExcerptSelect", d.settings.cardExcerpt); if (exc) next.cardExcerpt = exc;
+    if (typeof d.settings.cardImage === "boolean") next.cardImage = d.settings.cardImage;
+    if (typeof d.settings.backgroundSync === "boolean") next.backgroundSync = d.settings.backgroundSync;
+    if (typeof d.settings.notifyNew === "boolean") next.notifyNew = d.settings.notifyNew;
     if (typeof d.settings.proxyFallback === "boolean") next.proxyFallback = d.settings.proxyFallback;
     if (typeof d.settings.sidebarCollapsed === "boolean") next.sidebarCollapsed = d.settings.sidebarCollapsed;
     if (typeof d.settings.sidebarWidth === "number" && d.settings.sidebarWidth >= 180 && d.settings.sidebarWidth <= 420) next.sidebarWidth = d.settings.sidebarWidth;
@@ -1597,6 +1681,8 @@ async function importSettings(file) {
     state.filter = state.settings.filter || "all";
     local(S, state.settings);
     applySettings();
+    mirrorSync();
+    applyBackgroundSync();
     render();
     toast("Settings imported.");
   } catch (e) { toast(e.message); }
@@ -1606,6 +1692,10 @@ function showSettings() {
   $("#widthSelect").value = state.settings.width;
   $("#sizeSelect").value = state.settings.size;
   $("#progressSelect").value = state.settings.progressPosition || "bottom";
+  $("#cardExcerptSelect").value = state.settings.cardExcerpt || "full";
+  $("#cardImageToggle").checked = state.settings.cardImage !== false;
+  $("#backgroundSyncToggle").checked = !!state.settings.backgroundSync;
+  $("#notifyNewToggle").checked = !!state.settings.notifyNew;
   $("#proxyToggle").checked = !!state.settings.proxyFallback;
   $("#settingsDialog").showModal();
 }
@@ -1740,7 +1830,9 @@ function bind() {
   });
   $("#home").onclick = () => { goView("all"); };
   $("#add").onclick = $("#mobileAdd").onclick = $("#firstAdd").onclick = showFeed;
-  $("#organize").onclick = showOrganize;
+  // Folders & tags lives in Settings now: close Settings, then open the
+  // manage dialog on its own.
+  $("#organize").onclick = () => { $("#settingsDialog").close(); showOrganize(); };
   $("#organizeDialog").addEventListener("close", () => { pendingDelete = null; orgEdit = null; });
   $("#organizeDialog").addEventListener("click", async e => {
     const addFolder = e.target.closest("[data-org-add-folder]");
@@ -1826,11 +1918,18 @@ function bind() {
     state.settings = {
       theme: $("#themeSelect").value, width: $("#widthSelect").value, size: $("#sizeSelect").value,
       proxyFallback: $("#proxyToggle").checked, progressPosition: $("#progressSelect").value,
+      cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
+      backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
       sidebarCollapsed: state.settings.sidebarCollapsed || false,
       sidebarWidth: state.settings.sidebarWidth, listWidth: state.settings.listWidth
     };
     local(S, state.settings);
     applySettings();
+    mirrorSync();
+    applyBackgroundSync();
+    // Card options apply to the list; the progress bar's place is set
+    // when an article opens, so re-render both at once.
+    renderList();
     // The progress bar's place in the reader is set when an article opens;
     // re-render the open article so a changed position applies at once,
     // keeping the reader's scroll position (renderReader resets it).
@@ -1948,6 +2047,7 @@ async function init() {
       state.items = await dbAll();
       syncTags();
       saveTags();
+      mirrorSync();
     } catch (e) {
       console.error(e);
       toast("Could not load your articles.");
@@ -1968,6 +2068,9 @@ async function init() {
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
+  // Re-register the periodic sync if it was on: a browser restart or
+  // a service worker update can drop the registration.
+  if (state.settings.backgroundSync) applyBackgroundSync(true);
 }
 init();
 })();
