@@ -1,0 +1,9 @@
+{
+  "name": "rss-reader",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Client-only RSS reader hosted on GitHub Pages",
+  "scripts": {
+    "test": "node --test"
+  }
+}

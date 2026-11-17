@@ -64,3 +64,6 @@ body.sidebar-collapsed #splitSide{display:none}
 .reader-actions button:disabled{opacity:.4;cursor:default}
 @media(max-width:760px){.splitter{display:none}}
 @media(pointer:coarse){#refresh{min-width:44px;min-height:44px}.feed-count{min-height:44px;min-width:34px}}
+
+/* Markdown article typography */
+.reader-body h1,.reader-body h2,.reader-body h3,.reader-body h4,.reader-body h5,.reader-body h6{font-family:var(--serif);line-height:1.25;margin:1.5em 0 .55em}.reader-body h1{font-size:1.8em}.reader-body h2{font-size:1.5em}.reader-body h3{font-size:1.25em}.reader-body ul,.reader-body ol{padding-left:1.5em;margin:0 0 1.2em}.reader-body li{padding-left:.2em;margin:.25em 0}.reader-body pre{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:14px;font:.82em/1.55 ui-monospace,monospace}.reader-body :not(pre)>code{background:var(--panel2);border-radius:3px;padding:.1em .3em;font-size:.88em}.reader-body th,.reader-body td{border:1px solid var(--line);padding:7px 10px;text-align:left}.reader-body th{background:var(--panel2);font-weight:650}.reader-body hr{border:0;border-top:1px solid var(--line);margin:2em 0}
