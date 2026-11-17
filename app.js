@@ -1742,7 +1742,7 @@ function showFeed() {
   window.feedDiscoveryResults = [];
   $("#feedUrl").value = "";
   $("#feedDialog").showModal();
-  $("#feedUrl").focus();
+  $("#feedSearchInput").focus();
 }
 function download(data, name, type) {
   const u = URL.createObjectURL(new Blob([data], { type }));
