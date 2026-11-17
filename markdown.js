@@ -6,7 +6,7 @@
     return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[c]);
   }
   function urlOK(value, image) {
-    const u = String(value || "").replace(/\\\\([\\\\*{}\\[\\]()#+.!_>~-])/g, "$1").trim();
+    const u = String(value || "").replace(/\\([\\*{}\[\]()#+.!_>~-])/g, "$1").trim();
     if (/^(https?:|#)/i.test(u)) return u;
     if (!image && /^(mailto:|tel:)/i.test(u)) return u;
     if (!/^[a-z][a-z0-9+.-]*:/i.test(u) && u.slice(0, 2) !== "//") return u;
@@ -64,7 +64,7 @@
       const h = /^\s*(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
       if (h) {
         const n = h[1].length;
-        const base = h[2].replace(/<[^>]*>/g, "").toLowerCase().replace(/&amp;/g, "and").replace(/[^a-z0-9\\s-]/g, "").trim().replace(/\\s+/g, "-").replace(/-+/g, "-") || "section";
+        const base = h[2].replace(/<[^>]*>/g, "").toLowerCase().replace(/&amp;/g, "and").replace(/[^a-z0-9 -]/g, "").trim().replace(/ +/g, "-").replace(/-+/g, "-") || "section";
         const count = context.slugs[base] || 0; context.slugs[base] = count + 1;
         const slug = base + (count ? "-" + count : "");
         out.push('<h' + n + ' id="' + slug + '">' + inline(h[2]) + "</h" + n + ">"); i++; continue;
