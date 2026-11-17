@@ -42,7 +42,8 @@
       /^\s*(?:[-+*]|\d+[.)])\s+/.test(s) ||
       (i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1]));
   }
-  function blocks(lines) {
+  function blocks(lines, context) {
+    context = context || { slugs: Object.create(null) };
     const out = [];
     let i = 0;
     while (i < lines.length) {
@@ -60,7 +61,13 @@
         continue;
       }
       const h = /^\s*(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
-      if (h) { const n = h[1].length; out.push("<h" + n + ">" + inline(h[2]) + "</h" + n + ">"); i++; continue; }
+      if (h) {
+        const n = h[1].length;
+        const base = h[2].replace(/<[^>]*>/g, "").toLowerCase().replace(/&amp;/g, "and").replace(/[^a-z0-9\\s-]/g, "").trim().replace(/\\s+/g, "-").replace(/-+/g, "-") || "section";
+        const count = context.slugs[base] || 0; context.slugs[base] = count + 1;
+        const slug = base + (count ? "-" + count : "");
+        out.push('<h' + n + ' id="' + slug + '">' + inline(h[2]) + "</h" + n + ">"); i++; continue;
+      }
       if (i + 1 < lines.length && /^\s*(?:=+|-+)\s*$/.test(lines[i + 1]) && line.trim()) {
         const n = lines[i + 1].trim()[0] === "=" ? 1 : 2;
         out.push("<h" + n + ">" + inline(line.trim()) + "</h" + n + ">"); i += 2; continue;
@@ -69,7 +76,7 @@
       if (/^\s*>/.test(line)) {
         const quote = [];
         while (i < lines.length && /^\s*>/.test(lines[i])) quote.push(lines[i++].replace(/^\s*> ?/, ""));
-        out.push("<blockquote>" + blocks(quote) + "</blockquote>"); continue;
+        out.push("<blockquote>" + blocks(quote, context) + "</blockquote>"); continue;
       }
       if (i + 1 < lines.length && /^\s*\|?.*\|.*$/.test(line) &&
           /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[i + 1])) {
