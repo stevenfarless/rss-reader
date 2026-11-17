@@ -146,6 +146,42 @@ function stripLeadingNavEl(body) {
   };
   return strip(body);
 }
+/* Position of the article title inside a body of text, as the longest run
+   of consecutive title words (at least 3) that appears in the text, or -1
+   when no such run exists. Title prefixes (a site name, a date, "APOD: …")
+   are skipped by trying shorter runs from the front. */
+function titleAnchorPos(text, title) {
+  const words = String(title || "").split(/\s+/).filter(Boolean);
+  for (let len = words.length; len >= 3; len--) {
+    for (let i = 0; i + len <= words.length; i++) {
+      const phrase = words.slice(i, i + len).join(" ");
+      const pos = text.indexOf(phrase);
+      if (pos >= 0) return pos;
+    }
+  }
+  return -1;
+}
+/* Drop everything before the first block containing the article title.
+   Reader-service output (and some feed content) can carry the whole page
+   — site menus, nav, footer — flattened into plain blocks with no
+   structure to strip by tag or class. The title is the one reliable
+   anchor: it sits at the head of the article itself. Only cuts when the
+   title is found near the start (within the first 8000 characters and the
+   first 60% of the text); a title that appears late is a mention, not the
+   article head, and is left alone. Returns true when it removed anything. */
+function cutBeforeTitleEl(body, title) {
+  const text = body.textContent || "";
+  const pos = titleAnchorPos(text, title);
+  if (pos < 0 || pos > 8000 || pos > text.length * 0.6) return false;
+  let seen = 0;
+  for (const child of [...body.children]) {
+    const len = (child.textContent || "").length;
+    if (seen + len > pos) break;
+    seen += len;
+    body.removeChild(child);
+  }
+  return seen > 0;
+}
 /* Feed label for a list card. The stored feedTitle can be empty for
    items saved by an older build, and the feed may have been re-added
    since (new id), so fall back to the feed's current title, then to
@@ -876,7 +912,7 @@ function extractArticle(html, base) {
   const clone = root.cloneNode(true);
   return cleanHTML(clone.innerHTML, base);
 }
-async function fetchArticleHtml(url) {
+async function fetchArticleHtml(url, title) {
   let directErr = null;
   try {
     const r = await fetchWithTimeout(url, {
@@ -890,6 +926,10 @@ async function fetchArticleHtml(url) {
   if (!state.settings.proxyFallback) throw directErr;
   // Reader service (returns the article as Markdown). Fast when it works;
   // it rate-limits shared IPs, so a failure here just falls through.
+  // If the title appears only after a long run of navigation text, the
+  // service returned the whole page, not the article: keep its output as
+  // a last resort, but prefer the raw page HTML below.
+  let jinaHtml = null;
   try {
     const r = await fetchWithTimeout(JINA + url, {
       headers: { Accept: "text/plain" }, cache: "no-store"
@@ -899,7 +939,9 @@ async function fetchArticleHtml(url) {
     if (/RateLimitTriggeredError/i.test(md)) throw Error("Reader service rate-limited.");
     const html = markdownToHTML(md);
     if (stripTags(html).length < 200) throw Error("No article text found.");
-    return html;
+    const pos = titleAnchorPos(stripTags(html), title);
+    if (pos < 0 || pos <= 1200) return html;
+    jinaHtml = html;
   } catch {}
   // Generic proxy (returns the raw page HTML). Slow and flaky per site.
   try {
@@ -908,7 +950,10 @@ async function fetchArticleHtml(url) {
     const text = await r.text();
     if (!/<(article|main|body|div|p)[\s>]/i.test(text)) throw Error("Not an article page.");
     return text;
-  } catch (e) { throw directErr || e; }
+  } catch (e) {
+    if (jinaHtml) return jinaHtml;
+    throw directErr || e;
+  }
 }
 /* The site's own WordPress API, looked up by the article slug. No third
    party is involved, so this runs whether or not the proxy is on — the
@@ -985,7 +1030,7 @@ async function loadFullText(item) {
     if (wp) {
       item.fullContent = wp;
     } else {
-      const html = await fetchArticleHtml(item.url);
+      const html = await fetchArticleHtml(item.url, item.title);
       const body = extractArticle(html, item.url);
       if (!body || !body.textContent.trim()) throw Error("No article text found.");
       item.fullContent = body.innerHTML;
@@ -1031,6 +1076,10 @@ function renderReader(x) {
   // runs on a clone, so if it would gut the article the un-stripped
   // body is used instead.
   const cleaned = cleanHTML(body, x.url);
+  // The title is the anchor for reader-service output that flattened the
+  // whole page into plain blocks: drop everything before it, then strip
+  // any leading nav block that remains.
+  cutBeforeTitleEl(cleaned, x.title);
   const stripped = cleaned.cloneNode(true);
   bodyEl.append(...(stripLeadingNavEl(stripped) ? stripped : cleaned).childNodes);
   $("#reader").classList.add("open");
