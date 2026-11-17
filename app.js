@@ -694,6 +694,8 @@ function parseFeed(text, url) {
     items: nodes.map(n => {
       const link = atom ? atomLink(n) : (childText(n, "link") || "");
       const guid = childText(n, "guid") || "";
+      const encodedContent = childEl(n, "encoded");
+      const atomContent = atom && childEl(n, "content");
       const content = childText(n, "encoded") || childText(n, "content") || childText(n, "description") || childText(n, "summary");
       const summary = childText(n, "summary") || childText(n, "description") || content;
       return {
@@ -701,6 +703,7 @@ function parseFeed(text, url) {
         url: link || guid || url,
         guid,
         summary, content,
+        fullContentIncluded: !!(encodedContent || atomContent),
         author: itemAuthor(n),
         date: childText(n, "pubDate") || childText(n, "published") || childText(n, "updated") || childText(n, "date") || "",
         image: itemImage(n),
@@ -1266,7 +1269,10 @@ function renderReader(x) {
      content. Length is NOT a signal — some feeds (e.g. NASA) ship long
      excerpts padded with site boilerplate, which the old >1500-char
      guess mislabelled as full and left with no way to fetch the rest. */
-  const alreadyFull = !showingFull && f?.via === "wp" && stripTags(x.content || "").length > 200;
+  const alreadyFull = !showingFull && (
+    (f?.via === "wp" && stripTags(x.content || "").length > 200) ||
+    (x.fullContentIncluded && stripTags(x.content || "").length > 200)
+  );
   const canFull = !showingFull && !x.fullContent && !alreadyFull;
   // The progress bar sits at the very edge of the reader (top or bottom,
   // per the setting), so it is placed before the content for top and
