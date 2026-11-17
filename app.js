@@ -861,6 +861,10 @@ function searchCuratedPublisherFeeds(query) {
 
 const DISCOVERY_PROVIDERS = [
   {
+    name: "Verified publisher feeds",
+    search: async q => searchCuratedPublisherFeeds(q)
+  },
+  {
     name: "Apple Podcasts",
     search: async (q, signal) => {
       const params = new URLSearchParams({
