@@ -6,10 +6,10 @@
     return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[c]);
   }
   function urlOK(value, image) {
-    const u = String(value || "").replace(/\\([\\*{}\[\]()#+.!_>~-])/g, "$1").trim();
+    const u = String(value || "").replace(/\\\\([\\\\*{}\\[\\]()#+.!_>~-])/g, "$1").trim();
     if (/^(https?:|#)/i.test(u)) return u;
     if (!image && /^(mailto:|tel:)/i.test(u)) return u;
-    if (!/^[a-z][a-z0-9+.-]*:/i.test(u) && !/^\\/\\//.test(u)) return u;
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(u) && u.slice(0, 2) !== "//") return u;
     return "";
   }
   function inline(s) {
