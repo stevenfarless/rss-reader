@@ -61,7 +61,7 @@ test("does not create links for unsafe URL schemes", () => {
 });
 
 test("creates heading anchors that preserve punctuation separators", () => {
-  const html = Markdown.render("## Domain & Evidence\\n\\n## Position A -- Critique of Position B");
+  const html = Markdown.render("## Domain & Evidence\n\n## Position A -- Critique of Position B");
   assert.match(html, /id="domain--evidence"/);
   assert.match(html, /id="position-a----critique-of-position-b"/);
 });
