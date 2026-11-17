@@ -865,7 +865,7 @@ const DISCOVERY_PROVIDERS = [
   {
     name: "Feedsearch",
     search: async (q, signal) => {
-      if (!/^(https?:\\/\\/)?(?:[a-z0-9-]+\\.)+[a-z]{2,}(?:\\/\\S*)?$/i.test(q.trim())) return [];
+      if (!/^(https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?$/i.test(q.trim())) return [];
       const data = await discoveryJSON("https://origin.feedsearch.dev/api/v1/search?url=" + encodeURIComponent(q.trim()), signal);
       return discoveryRecords(data).map(x => discoveryNormalize(x, "Feedsearch")).filter(Boolean);
     }
