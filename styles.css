@@ -81,3 +81,5 @@ body.sidebar-collapsed #splitSide{display:none}
 .discovery-empty{padding:12px 0}
 .discovery-manual{border-top:1px solid var(--line);margin-top:15px;padding-top:3px}
 .discovery-manual>p{font-size:12px;color:var(--soft)}
+
+.discovery-privacy{font-size:11px!important;color:var(--soft)!important;margin:0 0 10px!important}
