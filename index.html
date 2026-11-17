@@ -50,6 +50,7 @@
 <label class="setting">Appearance<select id="themeSelect"><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select></label>
 <label class="setting">Reading width<select id="widthSelect"><option value="narrow">Narrow</option><option value="comfortable">Comfortable</option><option value="wide">Wide</option></select></label>
 <label class="setting">Text size<select id="sizeSelect"><option value="small">Small</option><option value="normal">Normal</option><option value="large">Large</option></select></label>
+<label class="setting">Reading progress bar<select id="progressSelect"><option value="bottom">Bottom</option><option value="top">Top</option></select></label>
 <label class="setting">Proxy fallback for blocked feeds<input id="proxyToggle" type="checkbox"></label>
 <p class="privacy">When a feed cannot be loaded directly, the reader first tries the site's own WordPress API. With the proxy fallback on, it will also try public feed-to-JSON and reader services as a last resort — those services see the feed or article address. It is off by default. "Load full article" also tries the site's own WordPress API first, then the reader services when the fallback is on.</p>
 <div class="backup"><strong>Preferences backup</strong><p>Export or restore your settings as JSON.</p><button type="button" id="exportSettings" class="quiet">Export JSON</button><button type="button" id="importSettings" class="quiet">Import JSON</button><input id="settingsFile" type="file" accept=".json,application/json" hidden></div>
