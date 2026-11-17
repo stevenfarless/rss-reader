@@ -10,6 +10,7 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Feed folders: create, rename, delete, and move feeds between folders (OPML folders are kept on import)
 - Unsubscribe from a feed with the × beside it in the sidebar, or from the Folders &amp; tags dialog; the feed's articles are removed, except ones you saved
 - Article tags: create, rename, and delete tags; apply them from the reader (t); filter by tag from the sidebar; search covers tags
+- Markdown article rendering for plain-text RSS, Atom, and JSON Feed content, including headings, links, lists, tables, and code blocks
 - Full-article view: "Load full article" extracts the article text from the original page
 - Search, date filters, and newest/oldest sorting
 - OPML subscription import and export
@@ -45,6 +46,11 @@ Feeds that block cross-origin requests and offer none of the above still cannot 
 ## Local data
 
 Subscriptions and preferences belong to the current browser profile and site origin. Export OPML and JSON backups before clearing site data or moving to another browser or device. Cached articles and reading state use IndexedDB.
+
+## Bundled libraries
+
+- [DOMPurify](https://github.com/cure53/DOMPurify) 3.4.18 sanitizes converted feed content before it enters the page. Its license is included in `licenses/DOMPurify-LICENSE.txt`.
+- `markdown.js` is a small local Markdown renderer maintained in this repository.
 
 ## Fonts
 
