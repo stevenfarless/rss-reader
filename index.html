@@ -30,7 +30,6 @@
 <button class="nav active" data-view="all">All articles <span id="allCount">0</span></button><button class="nav" data-view="unread">Unread <span id="unreadCount">0</span></button><button class="nav" data-view="saved">Saved <span id="savedCount">0</span></button>
 <div class="feed-head"><span class="side-label">YOUR FEEDS</span></div><div id="feeds" class="feeds"><p class="muted">Your feeds will appear here.</p></div>
 <div class="feed-head"><span class="side-label">TAGS</span></div><div id="tags" class="tag-list"><p class="muted">Tag articles from the reader to find them here.</p></div>
-<div class="side-bottom"><button id="organize" class="wide">Folders &amp; tags</button><button id="importOpml">Import OPML</button><button id="exportOpml">Export OPML</button><input id="opmlFile" type="file" accept=".opml,.xml" hidden></div>
 <p class="local-note">Your subscriptions and preferences stay in this browser.</p>
 </aside>
 <div class="splitter" id="splitSide" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0"></div>
@@ -51,9 +50,16 @@
 <label class="setting">Reading width<select id="widthSelect"><option value="narrow">Narrow</option><option value="comfortable">Comfortable</option><option value="wide">Wide</option></select></label>
 <label class="setting">Text size<select id="sizeSelect"><option value="small">Small</option><option value="normal">Normal</option><option value="large">Large</option></select></label>
 <label class="setting">Reading progress bar<select id="progressSelect"><option value="bottom">Bottom</option><option value="top">Top</option></select></label>
+<label class="setting">Preview text<select id="cardExcerptSelect"><option value="none">None</option><option value="short">Short</option><option value="full">Full</option></select></label>
+<label class="setting">Show thumbnails<input id="cardImageToggle" type="checkbox"></label>
+<label class="setting">Background refresh<input id="backgroundSyncToggle" type="checkbox"></label>
+<label class="setting">New article notifications<input id="notifyNewToggle" type="checkbox"></label>
 <label class="setting">Proxy fallback for blocked feeds<input id="proxyToggle" type="checkbox"></label>
 <p class="privacy">When a feed cannot be loaded directly, the reader first tries the site's own WordPress API. With the proxy fallback on, it will also try public feed-to-JSON and reader services as a last resort — those services see the feed or article address. It is off by default. "Load full article" also tries the site's own WordPress API first, then the reader services when the fallback is on.</p>
+<p class="privacy">Background refresh and notifications only work where the browser allows them (Chrome on Android, for an installed app, and only if the browser grants it based on use). They refresh about every 12 hours at most, and only the article text is kept offline — images are not stored.</p>
 <div class="backup"><strong>Preferences backup</strong><p>Export or restore your settings as JSON.</p><button type="button" id="exportSettings" class="quiet">Export JSON</button><button type="button" id="importSettings" class="quiet">Import JSON</button><input id="settingsFile" type="file" accept=".json,application/json" hidden></div>
+<div class="backup"><strong>Folders &amp; tags</strong><p>Organize feeds into folders and manage article tags.</p><button type="button" id="organize" class="quiet">Manage folders &amp; tags</button></div>
+<div class="backup"><strong>Feeds (OPML)</strong><p>Import or export your feeds as an OPML file.</p><button type="button" id="importOpml" class="quiet">Import OPML</button><button type="button" id="exportOpml" class="quiet">Export OPML</button><input id="opmlFile" type="file" accept=".opml,.xml" hidden></div>
 <p class="privacy">Subscriptions and preferences use localStorage. Articles and reading state are cached in IndexedDB. This site has no account or backend of its own. Feed loading depends on each publisher's CORS policy; feeds that block cross-origin requests load through the site's own WordPress API or, if enabled, the proxy fallback.</p><div class="dialog-actions"><button value="default" id="saveSettings" class="primary">Done</button></div></form></dialog>
 <dialog id="organizeDialog" aria-labelledby="organizeDialogTitle"><button class="x" id="organizeClose" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button><p class="eyebrow">ORGANIZE</p><h2 id="organizeDialogTitle">Folders &amp; tags</h2><div id="organizeBody"></div><div class="dialog-actions"><button id="organizeDone" class="primary">Done</button></div></dialog>
 <dialog id="helpDialog" aria-labelledby="helpDialogTitle"><form method="dialog"><button class="x" value="cancel" aria-label="Close" formnovalidate><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button><p class="eyebrow">KEYBOARD</p><h2 id="helpDialogTitle">Keyboard shortcuts</h2>
