@@ -7,8 +7,9 @@
   }
   function urlOK(value, image) {
     const u = String(value || "").replace(/\\([\\*{}\[\]()#+.!_>~-])/g, "$1").trim();
-    if (/^(https?:|mailto:|tel:|#|\/(?!\/)|\.\/|\.\.\/)/i.test(u)) return u;
-    if (!/^[a-z][a-z0-9+.-]*:/i.test(u) && !image) return u;
+    if (/^(https?:|#)/i.test(u)) return u;
+    if (!image && /^(mailto:|tel:)/i.test(u)) return u;
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(u) && !/^\\/\\//.test(u)) return u;
     return "";
   }
   function inline(s) {
@@ -109,7 +110,7 @@
             if (/^\s+/.test(next)) { part.push(next.slice(Math.min(next.length, indent + 2))); i++; continue; }
             break;
           }
-          items.push("<li>" + blocks(part).replace(/^<p>([\s\S]*?)<\/p>/, "$1") + "</li>");
+          items.push("<li>" + blocks(part, context).replace(/^<p>([\s\S]*?)<\/p>/, "$1") + "</li>");
         }
         out.push("<" + tag + ">" + items.join("") + "</" + tag + ">"); continue;
       }
