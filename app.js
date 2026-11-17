@@ -560,6 +560,9 @@ async function discover(url) {
 
 /* Try every in-page source for a feed URL, in order. Returns
    { parsed, via, url, wpRoot }. Throws the direct-fetch error when all fail. */
+/* Conventional feed locations, tried in order when only a bare website
+   address is given, or when the page advertises no feed link. */
+const FEED_PATHS = ["/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml", "/index.xml"];
 async function loadFeedFromUrl(rawUrl) {
   const url = normalizeFeedUrl(rawUrl);
   let directError = null;
@@ -568,6 +571,20 @@ async function loadFeedFromUrl(rawUrl) {
     return { parsed: parseFeed(found.text, found.url), via: "feed", url: found.url, wpRoot: "" };
   } catch (e) { directError = e; }
   const origin = new URL(url).origin;
+  // A bare site address, or a page that advertises no feed: probe the
+  // conventional locations before falling back to the WordPress API.
+  // A specific feed URL that failed (404, bad XML) is not probed — the
+  // user asked for that address, so its error is the answer.
+  const bare = new URL(url).pathname.replace(/\/$/, "") === "";
+  const noLink = /No feed link found/.test(directError?.message || "");
+  if (bare || noLink) {
+    for (const p of FEED_PATHS) {
+      try {
+        const found = await discover(origin + p);
+        return { parsed: parseFeed(found.text, found.url), via: "feed", url: found.url, wpRoot: "" };
+      } catch {}
+    }
+  }
   try {
     const parsed = await loadWordPressFeed(origin);
     if (parsed.items.length) return { parsed, via: "wp", url, wpRoot: origin };
@@ -585,6 +602,16 @@ async function addFeed(raw) {
   const url = normalizeFeedUrl(raw);
   if (state.feeds.some(f => sameFeedUrl(f.url, url))) throw Error("You already subscribe to this feed.");
   const loaded = await loadFeedFromUrl(url);
+  // The check above only sees the address typed in. The same feed can
+  // be reached another way (the bare site vs its /feed, or a probed
+  // /rss), so check the resolved feed too: same feed URL, or the same
+  // site under the same title.
+  const originOf = s => { try { return new URL(s).origin; } catch { return ""; } };
+  const dup = state.feeds.find(f =>
+    sameFeedUrl(f.url, loaded.url) ||
+    (f.site && loaded.parsed.site && originOf(f.site) && originOf(f.site) === originOf(loaded.parsed.site) &&
+      (f.title || "").trim().toLowerCase() === (loaded.parsed.title || "").trim().toLowerCase()));
+  if (dup) throw Error(`You already subscribe to this feed (“${dup.title}”).`);
   const feed = {
     id: id(), url: loaded.url, title: loaded.parsed.title, site: loaded.parsed.site,
     added: new Date().toISOString(), error: "", via: loaded.via, wpRoot: loaded.wpRoot || "", group: ""
@@ -669,7 +696,7 @@ async function refreshFeed(f) {
   }
 }
 async function refresh() {
-  if (!state.feeds.length) { showFeed(); return; }
+  if (!state.feeds.length) { toast("Add a feed first."); return; }
   const now = Date.now();
   if (now - refreshAt < 2000) return; // debounce repeated refreshes (incl. holding "r")
   refreshAt = now;
