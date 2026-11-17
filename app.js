@@ -625,6 +625,13 @@ function atomLink(node) {
     || links[0];
   return pick ? (pick.getAttribute("href") || "") : "";
 }
+/* First image in a block of HTML. Many feeds carry the photo in the
+   article's own description, not in a media tag, so this is the
+   fallback that makes card thumbnails actually appear. */
+function firstImgSrc(html) {
+  const m = (html || "").match(/<img[^>]+src\s*=\s*["']([^"']+)["']/i);
+  return m ? m[1] : "";
+}
 function itemImage(n) {
   const thumb = childEl(n, "thumbnail");
   if (thumb && thumb.getAttribute("url")) return thumb.getAttribute("url");
@@ -632,7 +639,7 @@ function itemImage(n) {
   if (media && media.getAttribute("url") && /^image\//.test(media.getAttribute("type") || "")) return media.getAttribute("url");
   const enc = childEl(n, "enclosure");
   if (enc && enc.getAttribute("url") && /^image\//.test(enc.getAttribute("type") || "")) return enc.getAttribute("url");
-  return "";
+  return firstImgSrc(childText(n, "encoded") || childText(n, "content") || childText(n, "description") || childText(n, "summary") || "");
 }
 function itemEnclosure(n) {
   const enc = childEl(n, "enclosure");
@@ -737,7 +744,7 @@ async function loadWordPressFeed(origin) {
       content: p.content?.rendered || "",
       author: p._embedded?.author?.[0]?.name || "",
       date: p.date || p.modified || "",
-      image: p._embedded?.["wp:featuredmedia"]?.[0]?.source_url || "",
+      image: p._embedded?.["wp:featuredmedia"]?.[0]?.source_url || firstImgSrc(p.content?.rendered || ""),
       enclosure: null
     }))
   };
@@ -762,7 +769,7 @@ async function loadViaProxy(feedUrl) {
       content: x.content || x.description || "",
       author: x.author || "",
       date: x.pubDate || "",
-      image: x.thumbnail || x.enclosure?.link || "",
+      image: x.thumbnail || x.enclosure?.link || firstImgSrc(x.content || x.description || ""),
       enclosure: x.enclosure?.link ? { url: x.enclosure.link, type: x.enclosure.type || "" } : null
     }))
   };
