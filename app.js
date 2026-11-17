@@ -1255,7 +1255,7 @@ function readerBodyHTML(x) {
   const showingFull = !!x.fullContent;
   let body = showingFull ? x.fullContent : (x.content || x.summary || "<p>No article text was included in this feed.</p>");
   // Convert plain-text Markdown locally; preserve existing HTML feeds.
-  const hasHTML = /^\\s*<(?:!doctype|html|body|article|main|div|p|h[1-6]|section|ul|ol|table|blockquote|pre|figure|img|a)\\b/i.test(body);
+  const hasHTML = body.trimStart().startsWith("<");
   if (window.RSSMarkdown && window.DOMPurify && !hasHTML && RSSMarkdown.looksLikeMarkdown(body)) {
     body = DOMPurify.sanitize(RSSMarkdown.render(body), { USE_PROFILES: { html: true } });
   }
