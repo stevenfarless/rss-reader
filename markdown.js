@@ -64,7 +64,7 @@
       const h = /^\s*(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
       if (h) {
         const n = h[1].length;
-        const base = h[2].replace(/<[^>]*>/g, "").toLowerCase().replace(/&amp;/g, "and").replace(/[^a-z0-9 -]/g, "").trim().replace(/ +/g, "-").replace(/-+/g, "-") || "section";
+        const base = h[2].replace(/<[^>]*>/g, "").toLowerCase().replace(/&amp;/g, "&").replace(/&/g, "-").replace(/[^a-z0-9 -]/g, "").trim().replace(/ /g, "-") || "section";
         const count = context.slugs[base] || 0; context.slugs[base] = count + 1;
         const slug = base + (count ? "-" + count : "");
         out.push('<h' + n + ' id="' + slug + '">' + inline(h[2]) + "</h" + n + ">"); i++; continue;
