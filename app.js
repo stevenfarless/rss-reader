@@ -835,19 +835,41 @@ async function loadFeedFromUrl(rawUrl) {
 
 /* ---------- unified feed discovery ---------- */
 const DISCOVERY_PROVIDERS = [
-  { name: "RSSAmp", search: async (q, signal) => {
-    const d = await discoveryJSON("https://rssamp.com/api/search?q=" + encodeURIComponent(q), signal);
-    return discoveryRecords(d).map(x => discoveryNormalize(x, "RSSAmp")).filter(Boolean);
-  }},
-  { name: "RSS.mobi", search: async (q, signal) => {
-    const d = await discoveryJSON("https://rss.mobi/api/v1/feeds?q=" + encodeURIComponent(q) + "&limit=50", signal);
-    return discoveryRecords(d).map(x => discoveryNormalize(x, "RSS.mobi")).filter(Boolean);
-  }},
-  { name: "Feedsearch", search: async (q, signal) => {
-    if (!/^(https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?$/i.test(q.trim())) return [];
-    const d = await discoveryJSON("https://origin.feedsearch.dev/api/v1/search?url=" + encodeURIComponent(q.trim()), signal);
-    return discoveryRecords(d).map(x => discoveryNormalize(x, "Feedsearch")).filter(Boolean);
-  }}
+  {
+    name: "Apple Podcasts",
+    search: async (q, signal) => {
+      const params = new URLSearchParams({
+        term: q, media: "podcast", entity: "podcast", country: "us", limit: "50"
+      });
+      const data = await discoveryJSON("https://itunes.apple.com/search?" + params, signal);
+      return (Array.isArray(data.results) ? data.results : [])
+        .map(x => discoveryNormalize(x, "Apple Podcasts"))
+        .filter(Boolean);
+    }
+  },
+  {
+    name: "RSS.mobi",
+    search: async (q, signal) => {
+      const params = new URLSearchParams({ q, limit: "100" });
+      const data = await discoveryJSON("https://rss.mobi/api/v1/feeds?" + params, signal);
+      return discoveryRecords(data).map(x => discoveryNormalize(x, "RSS.mobi")).filter(Boolean);
+    }
+  },
+  {
+    name: "RSSAmp",
+    search: async (q, signal) => {
+      const data = await discoveryJSON("https://rssamp.com/api/search?q=" + encodeURIComponent(q), signal);
+      return discoveryRecords(data).map(x => discoveryNormalize(x, "RSSAmp")).filter(Boolean);
+    }
+  },
+  {
+    name: "Feedsearch",
+    search: async (q, signal) => {
+      if (!/^(https?:\\/\\/)?(?:[a-z0-9-]+\\.)+[a-z]{2,}(?:\\/\\S*)?$/i.test(q.trim())) return [];
+      const data = await discoveryJSON("https://origin.feedsearch.dev/api/v1/search?url=" + encodeURIComponent(q.trim()), signal);
+      return discoveryRecords(data).map(x => discoveryNormalize(x, "Feedsearch")).filter(Boolean);
+    }
+  }
 ];
 let discoveryTimer = null, discoveryController = null, discoveryRun = 0;
 function discoveryText(x) { return String(x ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(); }
@@ -878,12 +900,12 @@ function discoveryNormalize(record, source) {
     [...u.searchParams.keys()].forEach(k => { if (/^(utm_|fbclid|gclid)/i.test(k)) u.searchParams.delete(k); });
     url = u.href;
   } catch { return null; }
-  const siteRaw = x.site || x.siteUrl || x.site_url || x.homepage || x.website || x.link || "";
+  const siteRaw = x.site || x.siteUrl || x.site_url || x.homepage || x.website || x.link || x.collectionViewUrl || "";
   let site = "";
   try { if (typeof siteRaw === "string" && /^https?:\/\//i.test(siteRaw)) site = new URL(siteRaw).href; } catch {}
   return {
     url, site: site || url,
-    title: discoveryText(x.title || x.name || x.feedTitle || x.feed_title || x.blogTitle || x.blog_title || x.label) || host(site || url),
+    title: discoveryText(x.title || x.name || x.collectionName || x.collectionCensoredName || x.feedTitle || x.feed_title || x.blogTitle || x.blog_title || x.label) || host(site || url),
     description: discoveryText(x.description || x.summary || x.subtitle || x.about || ""),
     source
   };
@@ -923,6 +945,19 @@ function renderDiscoveryResults(items) {
       (added ? ' disabled' : '') + '>' + (added ? 'Added' : 'Add') + '</button></article>';
   }).join("");
 }
+async function runDiscoveryProvider(provider, query, parentSignal) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (parentSignal.aborted) controller.abort();
+  else parentSignal.addEventListener("abort", abort, { once: true });
+  const timeout = setTimeout(() => controller.abort(), 7000);
+  try {
+    return await provider.search(query, controller.signal);
+  } finally {
+    clearTimeout(timeout);
+    parentSignal.removeEventListener("abort", abort);
+  }
+}
 async function searchFeeds(raw) {
   const q = String(raw || "").trim(), status = $("#feedSearchStatus"), root = $("#feedSearchResults");
   if (q.length < 2) { status.textContent = "Enter at least two characters."; root.innerHTML = ""; return; }
@@ -930,17 +965,17 @@ async function searchFeeds(raw) {
   const controller = new AbortController();
   discoveryController = controller;
   const run = ++discoveryRun;
-  const timeout = setTimeout(() => controller.abort(), 12000);
+  const timeout = setTimeout(() => controller.abort(), 10000);
   status.textContent = "Searching feed directories…";
   root.innerHTML = "";
   try {
-    const settled = await Promise.allSettled(DISCOVERY_PROVIDERS.map(p => p.search(q, controller.signal)));
+    const settled = await Promise.allSettled(DISCOVERY_PROVIDERS.map(p => runDiscoveryProvider(p, q, controller.signal)));
     if (run !== discoveryRun) return;
     const groups = settled.map(r => r.status === "fulfilled" ? r.value : []);
     const items = mergeDiscoveryResults(groups);
     window.feedDiscoveryResults = items;
     const failed = settled.filter(r => r.status === "rejected").length;
-    status.textContent = items.length + " unique feed" + (items.length === 1 ? "" : "s") + " found" +
+    status.textContent = items.length + " unique feed" + (items.length === 1 ? "" : "s") + " found across " + (settled.length - failed) + " source" + (settled.length - failed === 1 ? "" : "s") +
       (failed ? " · " + failed + " source" + (failed === 1 ? "" : "s") + " unavailable" : "");
     renderDiscoveryResults(items);
   } finally { clearTimeout(timeout); }
@@ -957,7 +992,7 @@ function scheduleFeedSearch() {
   }
   $("#feedSearchStatus").textContent = "Searching feed directories…";
   $("#feedSearchResults").innerHTML = "";
-  discoveryTimer = setTimeout(() => searchFeeds(q), 450);
+  discoveryTimer = setTimeout(() => searchFeeds(q), 700);
 }
 async function addDiscoveredFeed(index) {
   const x = window.feedDiscoveryResults && window.feedDiscoveryResults[index];
