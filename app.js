@@ -87,6 +87,66 @@ const cleanSummary = s => {
   }
   return s;
 };
+/* Strip publisher navigation boilerplate from the top of an article
+   body, using the same NAV_MARKERS as the summary cleaner so the two
+   rules stay in sync. Only the leading boilerplate is removed: the
+   run of leading nodes whose text contains a marker. A marker that
+   appears later in the body is legitimate content and is left alone.
+   A container holding nav and article together is stripped from the
+   inside, and nav mixed with article text in one long node is cut
+   through the last marker instead of deleting the node. If the strip
+   would remove more than 40% of the body text, the input is returned
+   unchanged rather than risk gutting the article. */
+function stripLeadingNav(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const body = doc.body;
+  const total = (body.textContent || "").length;
+  let removed = 0;
+  const cutAfterLastMarker = n => {
+    const raw = n.textContent || "";
+    const norm = raw.replace(/[\u2018\u2019]/g, "'");
+    let end = -1;
+    for (const m of NAV_MARKERS) {
+      const i = norm.lastIndexOf(m);
+      if (i >= 0) end = Math.max(end, i + m.length);
+    }
+    if (end < 0) return true;
+    const rest = raw.slice(end).replace(/^[\s|·:–—-]+/, "");
+    if (!rest.trim()) { n.remove(); return false; }
+    n.textContent = rest;
+    return true;
+  };
+  const strip = el => {
+    while (el.firstChild) {
+      const n = el.firstChild;
+      const t = (n.textContent || "").replace(/\s+/g, " ").trim();
+      // Empty nodes are skipped, except media (an image paragraph is
+      // article content, not boilerplate) which stops the strip.
+      if (!t) {
+        const hasMedia = n.nodeType === Node.ELEMENT_NODE && n.querySelector("img,video,audio,iframe,canvas,svg,object,embed");
+        if (hasMedia) return true;
+        el.removeChild(n);
+        continue;
+      }
+      if (!NAV_MARKERS.some(m => t.includes(m))) return true;
+      if (n.nodeType === Node.ELEMENT_NODE && n.children.length && t.length > 400) {
+        if (!strip(n)) return false;
+        if (!n.textContent.trim()) { el.removeChild(n); continue; }
+        return true;
+      }
+      if (t.length > 400) {
+        if (cutAfterLastMarker(n)) return true;
+        continue;
+      }
+      el.removeChild(n);
+      removed += t.length;
+      if (removed > total * 0.4) return false;
+    }
+    return true;
+  };
+  if (!strip(body)) return html;
+  return body.innerHTML;
+}
 /* Feed label for a list card. The stored feedTitle can be empty for
    items saved by an older build, and the feed may have been re-added
    since (new id), so fall back to the feed's current title, then to
@@ -910,7 +970,9 @@ async function loadFullText(item) {
 function readerBodyHTML(x) {
   const showingFull = !!x.fullContent;
   const body = showingFull ? x.fullContent : (x.content || x.summary || "<p>No article text was included in this feed.</p>");
-  return { showingFull, body };
+  // Strip leading publisher navigation (e.g. APOD) at render time, so
+  // already-saved articles are fixed too.
+  return { showingFull, body: stripLeadingNav(body) };
 }
 /* Build the reader pane for an item without changing its read state.
    openItem() marks the item read first; toggles (m, list buttons) call
