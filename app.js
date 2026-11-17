@@ -885,6 +885,7 @@ async function saveItems(feed, items) {
       title: x.title, url: link, guid: x.guid || "",
       summary: cleanSummary(x.summary || ""), content: x.content || "",
       fullContent: old?.fullContent || "",
+      fullContentIncluded: !!x.fullContentIncluded,
       author: x.author || "",
       published: date(x.date) ? date(x.date).toISOString() : null,
       image: x.image || old?.image || "",
