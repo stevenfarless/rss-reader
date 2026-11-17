@@ -891,7 +891,7 @@ function discoveryNormalize(record, source) {
 function discoveryKey(url) {
   try {
     const u = new URL(url);
-    return (u.hostname.replace(/^www\./, "").toLowerCase() + (u.pathname.replace(/\/+$/, "") || "/").toLowerCase() + u.search).replace(/:443(?=\/|$)/, "");
+    return (u.hostname.replace(/^www\./, "").toLowerCase() + (u.pathname.replace(/\/+$/, "") || "/") + u.search).replace(/:443(?=\/|$)/, "");
   } catch { return String(url).toLowerCase(); }
 }
 function mergeDiscoveryResults(groups) {
