@@ -94,12 +94,15 @@ const cleanSummary = s => {
    appears later in the body is legitimate content and is left alone.
    A container holding nav and article together is stripped from the
    inside, and nav mixed with article text in one long node is cut
-   through the last marker instead of deleting the node. Returns false
-   when the strip would remove more than 40% of the body text, so the
-   caller can keep the un-stripped body rather than risk gutting the
-   article. Runs after cleanHTML has dropped the page chrome, so a nav
-   block that sat under the site header is leading by the time it runs. */
-function stripLeadingNavEl(body) {
+   through the last marker instead of deleting the node. A leading
+   breadcrumb — a short list whose text holds a run of the article
+   title — is also removed, so a nav block sitting under it becomes
+   leading and is stripped too. Returns false when the strip would
+   remove more than 40% of the body text, so the caller can keep the
+   un-stripped body rather than risk gutting the article. Runs after
+   cleanHTML has dropped the page chrome, so a nav block that sat under
+   the site header is leading by the time it runs. */
+function stripLeadingNavEl(body, title) {
   const total = (body.textContent || "").length;
   let removed = 0;
   const cutAfterLastMarker = n => {
@@ -128,7 +131,19 @@ function stripLeadingNavEl(body) {
         el.removeChild(n);
         continue;
       }
-      if (!NAV_MARKERS.some(m => t.includes(m))) return true;
+      if (!NAV_MARKERS.some(m => t.includes(m))) {
+        // A leading breadcrumb (a short list holding a run of the
+        // article title) is boilerplate too; removing it lets the nav
+        // block under it become leading and be stripped.
+        if (n.nodeType === Node.ELEMENT_NODE && (n.tagName === "OL" || n.tagName === "UL") &&
+            t.length < 300 && title && titleAnchorPos(t, title) >= 0) {
+          el.removeChild(n);
+          removed += t.length;
+          if (removed > total * 0.4) return false;
+          continue;
+        }
+        return true;
+      }
       if (n.nodeType === Node.ELEMENT_NODE && n.children.length && t.length > 400) {
         if (!strip(n)) return false;
         if (!n.textContent.trim()) { el.removeChild(n); continue; }
@@ -166,21 +181,29 @@ function titleAnchorPos(text, title) {
    — site menus, nav, footer — flattened into plain blocks with no
    structure to strip by tag or class. The title is the one reliable
    anchor: it sits at the head of the article itself. Only cuts when the
-   title is found near the start (within the first 8000 characters and the
-   first 60% of the text); a title that appears late is a mention, not the
-   article head, and is left alone. Returns true when it removed anything. */
+   title is within the first 8000 characters and no long prose paragraph
+   sits before it — a title mentioned late in a real article is a mention,
+   not the article head, and the prose before it is the article itself.
+   Returns true when it removed anything. */
 function cutBeforeTitleEl(body, title) {
   const text = body.textContent || "";
   const pos = titleAnchorPos(text, title);
-  if (pos < 0 || pos > 8000 || pos > text.length * 0.6) return false;
+  if (pos < 0 || pos > 8000) return false;
   let seen = 0;
+  let longProse = 0;
+  const toRemove = [];
   for (const child of [...body.children]) {
     const len = (child.textContent || "").length;
     if (seen + len > pos) break;
+    if ((child.tagName === "P" || child.tagName === "BLOCKQUOTE") && len > 300) longProse += len;
     seen += len;
-    body.removeChild(child);
+    toRemove.push(child);
   }
-  return seen > 0;
+  // If most of what would be removed is article prose, the title is a
+  // late mention, not the article head — leave it alone.
+  if (seen > 0 && longProse / seen > 0.5) return false;
+  toRemove.forEach(c => body.removeChild(c));
+  return toRemove.length > 0;
 }
 /* Feed label for a list card. The stored feedTitle can be empty for
    items saved by an older build, and the feed may have been re-added
@@ -1076,12 +1099,55 @@ function renderReader(x) {
   // runs on a clone, so if it would gut the article the un-stripped
   // body is used instead.
   const cleaned = cleanHTML(body, x.url);
+  // A content image (the article's picture) vs site chrome: logos,
+  // thumbnails, icons, SVGs and WordPress theme assets are chrome.
+  const isContentImg = im => {
+    const src = im.getAttribute("src") || "";
+    return src && !/logo|thumb|icon|\.svg$|\/themes\//i.test(src);
+  };
+  // Capture the article's main image before the title cut can remove
+  // it: the last content image in the body. The feed often stores no
+  // image and the feed content may not carry one either, so the full
+  // text itself is the only source of the picture. The article
+  // picture sits after the site's teaser images and before the
+  // footer logo, so the last content image is it.
+  let articleImgSrc = "";
+  for (const im of cleaned.querySelectorAll("img")) {
+    if (!isContentImg(im)) continue;
+    articleImgSrc = im.getAttribute("src") || "";
+  }
   // The title is the anchor for reader-service output that flattened the
   // whole page into plain blocks: drop everything before it, then strip
   // any leading nav block that remains.
   cutBeforeTitleEl(cleaned, x.title);
   const stripped = cleaned.cloneNode(true);
-  bodyEl.append(...(stripLeadingNavEl(stripped) ? stripped : cleaned).childNodes);
+  const bodyToUse = stripLeadingNavEl(stripped, x.title) ? stripped : cleaned;
+  // The title cut can remove a leading article picture (an image
+  // paragraph has no text, so it is swept up with the chrome). If the
+  // body has no picture near the top, restore the article's image
+  // there. The footer logo at the bottom does not count — only the
+  // first few children are checked. The feed's image is preferred;
+  // when the item has none stored, the first image in the feed
+  // content is the article's picture, and failing that the picture
+  // captured from the full text before the cut.
+  const firstImgSrc = html => {
+    const m = String(html || "").match(/<img[^>]+src=["']([^"']+)["']/i);
+    return m ? m[1] : "";
+  };
+  const heroSrc = x.image || firstImgSrc(x.content) || articleImgSrc;
+  const topImgChild = [...bodyToUse.children].slice(0, 10).find(c =>
+    [...c.querySelectorAll("img")].some(isContentImg));
+  if (heroSrc && !topImgChild) {
+    const hero = document.createElement("p");
+    hero.className = "reader-hero";
+    const img = document.createElement("img");
+    img.src = heroSrc;
+    img.alt = "";
+    img.loading = "lazy";
+    hero.appendChild(img);
+    bodyToUse.prepend(hero);
+  }
+  bodyEl.append(...bodyToUse.childNodes);
   $("#reader").classList.add("open");
   if (history.state?.reader !== x.id) {
     try {
