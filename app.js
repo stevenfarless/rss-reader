@@ -834,6 +834,31 @@ async function loadFeedFromUrl(rawUrl) {
 
 
 /* ---------- unified feed discovery ---------- */
+/* Verified publisher feeds that directory searches may miss. Keep entries
+   limited to feeds whose official site and feed URL have been checked. */
+const CURATED_PUBLISHER_FEEDS = [
+  {
+    names: ["rethinking hell", "rethinkinghell"],
+    title: "Rethinking Hell",
+    site: "https://rethinkinghell.com/",
+    url: "https://rethinkinghell.com/feed/",
+    description: "Articles and updates from the Rethinking Hell website."
+  }
+];
+function searchCuratedPublisherFeeds(query) {
+  const q = query.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!q) return [];
+  return CURATED_PUBLISHER_FEEDS
+    .filter(x => x.names.some(name => {
+      const n = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      return q === n || q.includes(n) || n.includes(q);
+    }))
+    .map(x => discoveryNormalize({
+      title: x.title, site: x.site, feedUrl: x.url, description: x.description
+    }, "Verified publisher feeds"))
+    .filter(Boolean);
+}
+
 const DISCOVERY_PROVIDERS = [
   {
     name: "Apple Podcasts",
