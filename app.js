@@ -27,7 +27,7 @@ const state = {
   feeds: [], items: [], view: "all", feed: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null,
   folders: [], tags: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", proxyFallback: false, sidebarCollapsed: false, sort: "newest", filter: "all" }
+  settings: { theme: "dark", width: "comfortable", size: "normal", proxyFallback: false, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all" }
 };
 let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null;
 
@@ -365,6 +365,7 @@ function applySettings() {
   document.documentElement.dataset.width = state.settings.width;
   document.documentElement.dataset.size = state.settings.size;
   applySidebarCollapsed();
+  applyPaneWidths();
 }
 /* Sidebar collapse: the sidebar becomes a 52px rail holding only the
    toggle (top left), so the list and reader get the full width. The
@@ -378,6 +379,95 @@ function applySidebarCollapsed() {
   btn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
   btn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
   // The chevron icon flips via CSS (body.sidebar-collapsed rotates it).
+  positionSplitters();
+}
+
+/* Draggable pane widths (#90): the sidebar and article-list widths are
+   CSS variables on the grid (--side-w, --list-w), persisted in settings.
+   The splitter handles are absolutely positioned in .layout and placed
+   from the panes' actual rects, so they stay on the boundary even when
+   the grid clamps a column on a narrow viewport. */
+const SIDE_W = { min: 180, max: 420, def: 230 };
+const LIST_W = { min: 320, max: 640, def: 430 };
+function clampW(v, r) { return Math.min(r.max, Math.max(r.min, Math.round(v) || r.def)); }
+function applyPaneWidths() {
+  const side = clampW(state.settings.sidebarWidth, SIDE_W);
+  const list = clampW(state.settings.listWidth, LIST_W);
+  state.settings.sidebarWidth = side;
+  state.settings.listWidth = list;
+  document.documentElement.style.setProperty("--side-w", side + "px");
+  document.documentElement.style.setProperty("--list-w", list + "px");
+  positionSplitters();
+}
+/* Place the splitter handles on the panes' right edges. Skipped on
+   mobile, where the sidebar is a drawer and the splitters are hidden. */
+function positionSplitters() {
+  if (!matchMedia("(min-width:761px)").matches) return;
+  const layout = $(".layout");
+  const side = $("#sidebar"), list = $(".list-pane");
+  if (!layout || !side || !list) return;
+  const l = layout.getBoundingClientRect();
+  const place = (el, edge) => { if (el) el.style.left = (edge - l.left - 4.5) + "px"; };
+  place($("#splitSide"), side.getBoundingClientRect().right);
+  place($("#splitList"), list.getBoundingClientRect().right);
+}
+/* Pointer drag on a splitter: move the pane edge, live. Double-click
+   resets that pane to its default width; arrow keys nudge it. */
+function bindSplitter(el, kind) {
+  if (!el) return;
+  const range = kind === "side" ? SIDE_W : LIST_W;
+  const key = kind === "side" ? "sidebarWidth" : "listWidth";
+  el.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("dragging");
+    const startX = e.clientX, start = state.settings[key];
+    const move = ev => {
+      state.settings[key] = clampW(start + (ev.clientX - startX), range);
+      document.documentElement.style.setProperty(kind === "side" ? "--side-w" : "--list-w", state.settings[key] + "px");
+      positionSplitters();
+    };
+    const up = () => {
+      el.classList.remove("dragging");
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      local(S, state.settings);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  });
+  el.addEventListener("dblclick", () => {
+    state.settings[key] = range.def;
+    applyPaneWidths();
+    local(S, state.settings);
+  });
+  el.addEventListener("keydown", e => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    state.settings[key] = clampW(state.settings[key] + (e.key === "ArrowRight" ? 10 : -10), range);
+    applyPaneWidths();
+    local(S, state.settings);
+  });
+}
+function bindSplitters() {
+  bindSplitter($("#splitSide"), "side");
+  bindSplitter($("#splitList"), "list");
+  window.addEventListener("resize", positionSplitters);
+}
+
+/* Reading progress (#92): thin bar at the bottom of the reader, filled
+   by how far the open article is scrolled. Hidden when the article is
+   too short to scroll. */
+function updateReadProgress() {
+  const reader = $("#reader"), bar = $("#readProgress");
+  if (!reader || !bar) return;
+  const max = reader.scrollHeight - reader.clientHeight;
+  if (max <= 0) { bar.style.display = "none"; return; }
+  bar.style.display = "";
+  bar.firstElementChild.style.width = (reader.scrollTop / max * 100) + "%";
 }
 
 /* Dates: null when missing/unparseable, so dateless items sort after dated
@@ -834,7 +924,8 @@ function renderNav() {
       const mark = fav
         ? `<img class="feed-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><span class="feed-dot" style="display:none"></span>`
         : `<span class="feed-dot"></span>`;
-      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${err}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span>${f.error ? '<span class="feed-err" aria-hidden="true">!</span>' : ""}<small>${unreadCount || ""}</small></button><button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">×</button></div>`;
+      const countBtn = unreadCount ? `<button type="button" class="feed-count" data-mark-read="${esc(f.id)}" title="Mark ${esc(f.title)} read" aria-label="Mark ${esc(f.title)} read">${unreadCount}</button>` : "";
+      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${err}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span>${f.error ? '<span class="feed-err" aria-hidden="true">!</span>' : ""}</button>${countBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">×</button></div>`;
     }).join("");
   }).join("") : '<p class="muted">Your feeds will appear here.</p>';
   const tagCounts = {};
@@ -1090,7 +1181,7 @@ function renderReader(x) {
      guess mislabelled as full and left with no way to fetch the rest. */
   const alreadyFull = !showingFull && f?.via === "wp" && stripTags(x.content || "").length > 200;
   const canFull = !showingFull && !x.fullContent && !alreadyFull;
-  $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>`;
+  $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div><div id="readProgress"><i></i></div>`;
   const bodyEl = $("#body");
   // Append the cleaned body's children, not the <body> element itself.
   // cleanHTML drops the page chrome (header/nav/footer); the leading-nav
@@ -1149,6 +1240,7 @@ function renderReader(x) {
   }
   bodyEl.append(...bodyToUse.childNodes);
   $("#reader").classList.add("open");
+  updateReadProgress();
   if (history.state?.reader !== x.id) {
     try {
       if (history.state?.reader) history.replaceState({ reader: x.id }, "");
@@ -1479,6 +1571,8 @@ async function importSettings(file) {
     const size = pick("#sizeSelect", d.settings.size); if (size) next.size = size;
     if (typeof d.settings.proxyFallback === "boolean") next.proxyFallback = d.settings.proxyFallback;
     if (typeof d.settings.sidebarCollapsed === "boolean") next.sidebarCollapsed = d.settings.sidebarCollapsed;
+    if (typeof d.settings.sidebarWidth === "number" && d.settings.sidebarWidth >= 180 && d.settings.sidebarWidth <= 420) next.sidebarWidth = d.settings.sidebarWidth;
+    if (typeof d.settings.listWidth === "number" && d.settings.listWidth >= 320 && d.settings.listWidth <= 640) next.listWidth = d.settings.listWidth;
     if (d.settings.sort === "newest" || d.settings.sort === "oldest") next.sort = d.settings.sort;
     if (["all", "today", "week"].includes(d.settings.filter)) next.filter = d.settings.filter;
     if (!Object.keys(next).length) throw Error("No valid settings found in this file.");
@@ -1543,6 +1637,22 @@ async function markVisibleRead() {
   } });
 }
 
+/* Mark one feed read (#93): the unread count next to a feed is a
+   button that clears that feed, with the same Undo as Mark visible read. */
+async function markFeedRead(feedId) {
+  const feed = state.feeds.find(f => f.id === feedId);
+  const targets = state.items.filter(x => x.feedId === feedId && !x.read);
+  if (!targets.length) { toast("That feed is already read."); return; }
+  for (const x of targets) x.read = true;
+  await putMany(targets);
+  render();
+  toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} in “${feed?.title || "feed"}” read.`, { label: "Undo", fn: async () => {
+    for (const x of targets) x.read = false;
+    await putMany(targets);
+    render();
+  } });
+}
+
 function bind() {
   document.addEventListener("click", async e => {
     const scrim = e.target.closest("#scrim");
@@ -1557,6 +1667,8 @@ function bind() {
     if (folderDelete) { pendingDelete = { kind: "folder", name: folderDelete.dataset.folderDelete }; showOrganize(); return; }
     const unsub = e.target.closest("[data-unsub]");
     if (unsub) { requestUnsubscribe(unsub.dataset.unsub); return; }
+    const markReadBtn = e.target.closest("[data-mark-read]");
+    if (markReadBtn) { markFeedRead(markReadBtn.dataset.markRead); return; }
     const feed = e.target.closest("[data-feed]");
     if (feed) {
       state.view = "feed"; state.feed = feed.dataset.feed; state.tag = null; state.selected = null;
@@ -1645,6 +1757,9 @@ function bind() {
     else if (e.target.id === "orgEditInput") { e.preventDefault(); doRename(e.target.value); }
   });
   $("#refresh").onclick = refresh;
+  bindSplitters();
+  $("#reader").addEventListener("scroll", updateReadProgress, { passive: true });
+  window.addEventListener("resize", updateReadProgress);
   $("#settings").onclick = showSettings;
   $("#theme").onclick = () => {
     state.settings.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
@@ -1694,7 +1809,8 @@ function bind() {
     state.settings = {
       theme: $("#themeSelect").value, width: $("#widthSelect").value, size: $("#sizeSelect").value,
       proxyFallback: $("#proxyToggle").checked,
-      sidebarCollapsed: state.settings.sidebarCollapsed || false
+      sidebarCollapsed: state.settings.sidebarCollapsed || false,
+      sidebarWidth: state.settings.sidebarWidth, listWidth: state.settings.listWidth
     };
     local(S, state.settings);
     applySettings();
