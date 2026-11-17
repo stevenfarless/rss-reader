@@ -1671,6 +1671,13 @@ function bind() {
   $("#importOpml").onclick = () => $("#opmlFile").click();
   $("#exportOpml").onclick = exportOPML;
   $("#opmlFile").onchange = e => { if (e.target.files[0]) importOPML(e.target.files[0]); e.target.value = ""; };
+  // The X and Cancel buttons are type="button" (not submit), so the
+  // Add feed button is the form's only submit button and therefore
+  // the one Enter submits with. They close the dialog explicitly
+  // instead of relying on method="dialog".
+  $("#feedDialog").addEventListener("click", e => {
+    if (e.target.closest('button[value="cancel"]')) $("#feedDialog").close();
+  });
   $("#feedForm").onsubmit = async e => {
     if (e.submitter?.value === "cancel") return;
     e.preventDefault();
