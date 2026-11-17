@@ -50,6 +50,15 @@ body.sidebar-collapsed #splitSide{display:none}
 /* Reading progress (#92): thin bar pinned to the bottom of the reader. */
 #readProgress{position:sticky;bottom:0;height:3px;margin-left:calc(-1 * clamp(25px,5vw,75px));margin-right:calc(-1 * clamp(25px,5vw,75px));z-index:2}
 #readProgress i{display:block;height:100%;width:0;background:var(--accent)}
+/* Reading progress (#99): the bar must sit at the very edge of the
+   reader, so the reader's own vertical padding moves onto the content.
+   The bar is placed before the content for top and after it for bottom. */
+.reader{padding-top:0;padding-bottom:0}
+.reader-content{padding:45px 0}
+#readProgress.top{top:0;bottom:auto}
+#readProgress.bottom{bottom:0;top:auto}
+@media(max-width:1050px){.reader-content{padding:35px 0}}
+@media(max-width:760px){.reader-content{padding:22px 0}}
 /* Disabled top-bar reader actions (e.g. the full-article icon when the
    full text is already showing or was included in the feed). */
 .reader-actions button:disabled{opacity:.4;cursor:default}
