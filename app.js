@@ -88,18 +88,18 @@ const cleanSummary = s => {
   return s;
 };
 /* Strip publisher navigation boilerplate from the top of an article
-   body, using the same NAV_MARKERS as the summary cleaner so the two
-   rules stay in sync. Only the leading boilerplate is removed: the
-   run of leading nodes whose text contains a marker. A marker that
+   body element, using the same NAV_MARKERS as the summary cleaner so
+   the two rules stay in sync. Only the leading boilerplate is removed:
+   the run of leading nodes whose text contains a marker. A marker that
    appears later in the body is legitimate content and is left alone.
    A container holding nav and article together is stripped from the
    inside, and nav mixed with article text in one long node is cut
-   through the last marker instead of deleting the node. If the strip
-   would remove more than 40% of the body text, the input is returned
-   unchanged rather than risk gutting the article. */
-function stripLeadingNav(html) {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const body = doc.body;
+   through the last marker instead of deleting the node. Returns false
+   when the strip would remove more than 40% of the body text, so the
+   caller can keep the un-stripped body rather than risk gutting the
+   article. Runs after cleanHTML has dropped the page chrome, so a nav
+   block that sat under the site header is leading by the time it runs. */
+function stripLeadingNavEl(body) {
   const total = (body.textContent || "").length;
   let removed = 0;
   const cutAfterLastMarker = n => {
@@ -144,8 +144,7 @@ function stripLeadingNav(html) {
     }
     return true;
   };
-  if (!strip(body)) return html;
-  return body.innerHTML;
+  return strip(body);
 }
 /* Feed label for a list card. The stored feedTitle can be empty for
    items saved by an older build, and the feed may have been re-added
@@ -800,9 +799,15 @@ function resolveSrcset(el, base) {
   }).filter(Boolean).join(", ");
   if (out) el.setAttribute("srcset", out); else el.removeAttribute("srcset");
 }
+/* Page chrome: site furniture, not article text. React/Next.js sites
+   (e.g. science.nasa.gov) build their header and footer from <div>s,
+   so semantic tags alone do not catch them — roles and the usual
+   site-chrome class names are needed too. Shared by cleanHTML and
+   extractArticle. */
+const CHROME_SELECTOR = "header,nav,footer,aside,[role='navigation'],[role='banner'],[role='contentinfo'],[role='complementary'],[role='search'],.site-header,.site-footer,.site-nav,.global-header,.global-footer,.navbar,.nav,.navigation,.nav-menu,.main-nav,.site-menu,.page-header,.page-footer,.share,.social,.related,.comments,#comments";
 function cleanHTML(html, base) {
   const doc = new DOMParser().parseFromString(html, "text/html");
-  doc.querySelectorAll("script,style,iframe,object,embed,form,link,meta,noscript").forEach(n => n.remove());
+  doc.querySelectorAll("script,style,iframe,object,embed,form,link,meta,noscript," + CHROME_SELECTOR).forEach(n => n.remove());
   doc.querySelectorAll("*").forEach(n => {
     ["href", "src", "poster"].forEach(name => resolveAttr(n, name, base));
     resolveSrcset(n, base);
@@ -829,7 +834,9 @@ function cleanHTML(html, base) {
    otherwise the block with the most paragraph text; drop nav/chrome. */
 function extractArticle(html, base) {
   const doc = new DOMParser().parseFromString(html, "text/html");
-  doc.querySelectorAll("script,style,nav,aside,header,footer,form,noscript,.share,.social,.related,.comments,#comments").forEach(n => n.remove());
+  // Drop page chrome before choosing the article root, or the
+  // largest-text scoring picks a page wrapper that contains it.
+  doc.querySelectorAll("script,style,form,noscript," + CHROME_SELECTOR).forEach(n => n.remove());
   let root = doc.querySelector("article") || doc.querySelector("main") || doc.querySelector('[role="main"]');
   if (!root) {
     let best = null, bestScore = 0;
@@ -970,9 +977,7 @@ async function loadFullText(item) {
 function readerBodyHTML(x) {
   const showingFull = !!x.fullContent;
   const body = showingFull ? x.fullContent : (x.content || x.summary || "<p>No article text was included in this feed.</p>");
-  // Strip leading publisher navigation (e.g. APOD) at render time, so
-  // already-saved articles are fixed too.
-  return { showingFull, body: stripLeadingNav(body) };
+  return { showingFull, body };
 }
 /* Build the reader pane for an item without changing its read state.
    openItem() marks the item read first; toggles (m, list buttons) call
@@ -993,7 +998,14 @@ function renderReader(x) {
   $("#reader").innerHTML = `<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><button class="quiet" data-reader="fulltext" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}</button><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Open original article ↗</a><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>`;
   const bodyEl = $("#body");
   // Append the cleaned body's children, not the <body> element itself.
-  bodyEl.append(...cleanHTML(body, x.url).childNodes);
+  // cleanHTML drops the page chrome (header/nav/footer); the leading-nav
+  // strip then removes any boilerplate nav block (e.g. APOD) that was
+  // a plain div/table, now that the chrome above it is gone. The strip
+  // runs on a clone, so if it would gut the article the un-stripped
+  // body is used instead.
+  const cleaned = cleanHTML(body, x.url);
+  const stripped = cleaned.cloneNode(true);
+  bodyEl.append(...(stripLeadingNavEl(stripped) ? stripped : cleaned).childNodes);
   $("#reader").classList.add("open");
   if (history.state?.reader !== x.id) {
     try {
