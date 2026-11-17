@@ -832,6 +832,148 @@ async function loadFeedFromUrl(rawUrl) {
   throw directError || Error("Could not load this feed.");
 }
 
+
+/* ---------- unified feed discovery ---------- */
+const DISCOVERY_PROVIDERS = [
+  { name: "RSSAmp", search: async (q, signal) => {
+    const d = await discoveryJSON("https://rssamp.com/api/search?q=" + encodeURIComponent(q), signal);
+    return discoveryRecords(d).map(x => discoveryNormalize(x, "RSSAmp")).filter(Boolean);
+  }},
+  { name: "RSS.mobi", search: async (q, signal) => {
+    const d = await discoveryJSON("https://rss.mobi/api/v1/feeds?q=" + encodeURIComponent(q) + "&limit=50", signal);
+    return discoveryRecords(d).map(x => discoveryNormalize(x, "RSS.mobi")).filter(Boolean);
+  }},
+  { name: "Feedsearch", search: async (q, signal) => {
+    if (!/^(https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?$/i.test(q.trim())) return [];
+    const d = await discoveryJSON("https://origin.feedsearch.dev/api/v1/search?url=" + encodeURIComponent(q.trim()), signal);
+    return discoveryRecords(d).map(x => discoveryNormalize(x, "Feedsearch")).filter(Boolean);
+  }}
+];
+let discoveryTimer = null, discoveryController = null, discoveryRun = 0;
+function discoveryText(x) { return String(x ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(); }
+async function discoveryJSON(url, signal) {
+  const r = await fetch(url, { signal, headers: { Accept: "application/json" }, cache: "no-store" });
+  if (!r.ok) throw Error("HTTP " + r.status);
+  return r.json();
+}
+function discoveryRecords(d) {
+  if (Array.isArray(d)) return d;
+  if (!d || typeof d !== "object") return [];
+  for (const k of ["feeds", "results", "blogs", "items", "data"]) if (Array.isArray(d[k])) return d[k];
+  const out = [];
+  for (const k of ["feed", "blog", "result"]) if (d[k] && typeof d[k] === "object" && !Array.isArray(d[k])) out.push(d[k]);
+  return out;
+}
+function discoveryNormalize(record, source) {
+  if (!record || typeof record !== "object") return null;
+  const x = Object.assign({}, record, record.feed && typeof record.feed === "object" ? record.feed : {});
+  const raw = x.feedUrl || x.feed_url || x.feedURL || x.xmlUrl || x.xml_url || x.rssUrl || x.rss_url || x.feed || x.url;
+  if (typeof raw !== "string" || !/^https?:\/\//i.test(raw)) return null;
+  let url;
+  try {
+    const u = new URL(raw);
+    if (!["http:", "https:"].includes(u.protocol)) return null;
+    u.hash = "";
+    u.searchParams.sort();
+    [...u.searchParams.keys()].forEach(k => { if (/^(utm_|fbclid|gclid)/i.test(k)) u.searchParams.delete(k); });
+    url = u.href;
+  } catch { return null; }
+  const siteRaw = x.site || x.siteUrl || x.site_url || x.homepage || x.website || x.link || "";
+  let site = "";
+  try { if (typeof siteRaw === "string" && /^https?:\/\//i.test(siteRaw)) site = new URL(siteRaw).href; } catch {}
+  return {
+    url, site: site || url,
+    title: discoveryText(x.title || x.name || x.feedTitle || x.feed_title || x.blogTitle || x.blog_title || x.label) || host(site || url),
+    description: discoveryText(x.description || x.summary || x.subtitle || x.about || ""),
+    source
+  };
+}
+function discoveryKey(url) {
+  try {
+    const u = new URL(url);
+    return (u.hostname.replace(/^www\./, "").toLowerCase() + (u.pathname.replace(/\/+$/, "") || "/") + u.search).replace(/:443(?=\/|$)/, "");
+  } catch { return String(url).toLowerCase(); }
+}
+function mergeDiscoveryResults(groups) {
+  const map = new Map();
+  groups.flat().forEach(x => {
+    const key = discoveryKey(x.url), old = map.get(key);
+    if (!old) map.set(key, Object.assign({}, x, { sources: [x.source] }));
+    else {
+      if (!old.description && x.description) old.description = x.description;
+      if (old.title === host(old.site || old.url) && x.title.length > old.title.length) old.title = x.title;
+      if (!old.sources.includes(x.source)) old.sources.push(x.source);
+    }
+  });
+  return [...map.values()].sort((a, b) => a.title.localeCompare(b.title));
+}
+function renderDiscoveryResults(items) {
+  const root = $("#feedSearchResults");
+  if (!items.length) {
+    root.innerHTML = '<p class="muted discovery-empty">No matching feeds found. Try a different name, topic, or website address.</p>';
+    return;
+  }
+  root.innerHTML = items.map((x, i) => {
+    const added = state.feeds.some(f => sameFeedUrl(f.url, x.url));
+    return '<article class="discovery-result"><div class="discovery-result-main"><strong>' + esc(x.title) +
+      '</strong><span>' + esc(host(x.site || x.url)) + '</span>' +
+      (x.description ? '<p>' + esc(x.description) + '</p>' : '') +
+      '<small>' + esc(x.sources.join(" · ")) + '</small></div>' +
+      '<button type="button" class="primary discovery-add" data-discovery-add="' + i + '"' +
+      (added ? ' disabled' : '') + '>' + (added ? 'Added' : 'Add') + '</button></article>';
+  }).join("");
+}
+async function searchFeeds(raw) {
+  const q = String(raw || "").trim(), status = $("#feedSearchStatus"), root = $("#feedSearchResults");
+  if (q.length < 2) { status.textContent = "Enter at least two characters."; root.innerHTML = ""; return; }
+  if (discoveryController) discoveryController.abort();
+  const controller = new AbortController();
+  discoveryController = controller;
+  const run = ++discoveryRun;
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  status.textContent = "Searching feed directories…";
+  root.innerHTML = "";
+  try {
+    const settled = await Promise.allSettled(DISCOVERY_PROVIDERS.map(p => p.search(q, controller.signal)));
+    if (run !== discoveryRun) return;
+    const groups = settled.map(r => r.status === "fulfilled" ? r.value : []);
+    const items = mergeDiscoveryResults(groups);
+    window.feedDiscoveryResults = items;
+    const failed = settled.filter(r => r.status === "rejected").length;
+    status.textContent = items.length + " unique feed" + (items.length === 1 ? "" : "s") + " found" +
+      (failed ? " · " + failed + " source" + (failed === 1 ? "" : "s") + " unavailable" : "");
+    renderDiscoveryResults(items);
+  } finally { clearTimeout(timeout); }
+}
+function scheduleFeedSearch() {
+  discoveryRun++;
+  clearTimeout(discoveryTimer);
+  const q = $("#feedSearchInput").value;
+  if (q.trim().length < 2) {
+    if (discoveryController) discoveryController.abort();
+    $("#feedSearchStatus").textContent = "Search by publication, podcast, topic, or website.";
+    $("#feedSearchResults").innerHTML = "";
+    return;
+  }
+  $("#feedSearchStatus").textContent = "Searching feed directories…";
+  $("#feedSearchResults").innerHTML = "";
+  discoveryTimer = setTimeout(() => searchFeeds(q), 450);
+}
+async function addDiscoveredFeed(index) {
+  const x = window.feedDiscoveryResults && window.feedDiscoveryResults[index];
+  if (!x) return;
+  const b = $('[data-discovery-add="' + index + '"]');
+  if (b) { b.disabled = true; b.textContent = "Adding…"; }
+  try {
+    await addFeed(x.url);
+    if (b) b.textContent = "Added";
+    $("#feedSearchStatus").textContent = "Added " + x.title + ".";
+  } catch (e) {
+    if (b) { b.disabled = false; b.textContent = "Add"; }
+    $("#feedError").textContent = classifyError(e);
+  }
+}
+
 async function addFeed(raw) {
   const url = normalizeFeedUrl(raw);
   if (state.feeds.some(f => sameFeedUrl(f.url, url))) throw Error("You already subscribe to this feed.");
@@ -1598,9 +1740,13 @@ function showOrganize() {
 }
 function showFeed() {
   $("#feedError").textContent = "";
+  $("#feedSearchInput").value = "";
+  $("#feedSearchStatus").textContent = "Search by publication, podcast, topic, or website.";
+  $("#feedSearchResults").innerHTML = "";
+  window.feedDiscoveryResults = [];
   $("#feedUrl").value = "";
   $("#feedDialog").showModal();
-  $("#feedUrl").focus();
+  $("#feedSearchInput").focus();
 }
 function download(data, name, type) {
   const u = URL.createObjectURL(new Blob([data], { type }));
@@ -1842,6 +1988,14 @@ function bind() {
   });
   $("#home").onclick = () => { goView("all"); };
   $("#add").onclick = $("#mobileAdd").onclick = $("#firstAdd").onclick = showFeed;
+  $("#feedSearchInput").addEventListener("input", scheduleFeedSearch);
+  $("#feedSearchInput").addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); clearTimeout(discoveryTimer); searchFeeds(e.target.value); }
+  });
+  $("#feedSearchResults").addEventListener("click", e => {
+    const b = e.target.closest("[data-discovery-add]");
+    if (b) addDiscoveredFeed(Number(b.dataset.discoveryAdd));
+  });
   // Folders & tags lives in Settings now: close Settings, then open the
   // manage dialog on its own.
   $("#organize").onclick = () => { $("#settingsDialog").close(); showOrganize(); };

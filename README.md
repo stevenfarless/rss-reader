@@ -5,7 +5,8 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 ## Features
 
 - RSS 2.0, RSS 1.0/RDF, Atom, and JSON Feed parsing
-- Add feed URLs or discover feed links from publisher pages
+- Search public feed directories (RSSAmp and RSS.mobi, plus Feedsearch for website addresses) in one deduplicated result list; add feeds directly or enter a URL manually
+- Discover feed links from publisher pages
 - Feed refresh, unread and saved article views, and per-feed navigation
 - Feed folders: create, rename, delete, and move feeds between folders (OPML folders are kept on import)
 - Unsubscribe from a feed with the × beside it in the sidebar, or from the Folders &amp; tags dialog; the feed's articles are removed, except ones you saved
@@ -42,6 +43,10 @@ Browsers enforce cross-origin resource sharing (CORS). This reader loads feeds e
 Feeds that block cross-origin requests and offer none of the above still cannot load from a browser page; that is a browser security rule, not a bug in this reader.
 
 "Load full article" fetches the article the same way: directly, then the site's own WordPress API looked up by the article's slug (no third party involved), then — with the proxy fallback on — public reader services (a Markdown reader, then a generic proxy). Those services are free and rate-limited, and some publishers block them, so full text is not guaranteed for every site.
+
+## Feed discovery
+
+The Add Feed search queries the public RSSAmp and RSS.mobi directories. Website-address searches also query Feedsearch. Search terms are sent to those services; subscriptions and preferences remain in this browser. Results from the providers are combined and deduplicated by feed URL. Each provider is independent, so a temporary outage does not block the others.
 
 ## Local data
 
