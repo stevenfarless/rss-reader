@@ -67,3 +67,17 @@ body.sidebar-collapsed #splitSide{display:none}
 
 /* Markdown article typography */
 .reader-body h1,.reader-body h2,.reader-body h3,.reader-body h4,.reader-body h5,.reader-body h6{font-family:var(--serif);line-height:1.25;margin:1.5em 0 .55em}.reader-body h1{font-size:1.8em}.reader-body h2{font-size:1.5em}.reader-body h3{font-size:1.25em}.reader-body ul,.reader-body ol{padding-left:1.5em;margin:0 0 1.2em}.reader-body li{padding-left:.2em;margin:.25em 0}.reader-body pre{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:14px;font:.82em/1.55 ui-monospace,monospace}.reader-body :not(pre)>code{background:var(--panel2);border-radius:3px;padding:.1em .3em;font-size:.88em}.reader-body th,.reader-body td{border:1px solid var(--line);padding:7px 10px;text-align:left}.reader-body th{background:var(--panel2);font-weight:650}.reader-body hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+
+/* Unified feed discovery in the Add Feed dialog. */
+#feedSearchInput,#feedUrl{width:100%;padding:10px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:5px}
+.discovery-status{min-height:20px;margin:9px 0;color:var(--soft);font-size:12px}
+.discovery-results{max-height:min(42vh,360px);overflow:auto;border-top:1px solid var(--line)}
+.discovery-result{display:flex;align-items:center;gap:12px;padding:12px 2px;border-bottom:1px solid var(--line)}
+.discovery-result-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.discovery-result-main strong{font-size:13px;overflow-wrap:anywhere}
+.discovery-result-main>span,.discovery-result-main small{font-size:11px;color:var(--soft);overflow-wrap:anywhere}
+.discovery-result-main p{font-size:12px;margin:3px 0 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.discovery-add{flex:none;padding:7px 11px;font-size:12px}
+.discovery-empty{padding:12px 0}
+.discovery-manual{border-top:1px solid var(--line);margin-top:15px;padding-top:3px}
+.discovery-manual>p{font-size:12px;color:var(--soft)}
