@@ -465,9 +465,12 @@ function updateReadProgress() {
   const reader = $("#reader"), bar = $("#readProgress");
   if (!reader || !bar) return;
   const max = reader.scrollHeight - reader.clientHeight;
-  if (max <= 0) { bar.style.display = "none"; return; }
+  // A few pixels of scrollable distance is rounding and the bar's own
+  // height, not a real scroll: hide the bar for a short article.
+  if (max < 10) { bar.style.display = "none"; return; }
   bar.style.display = "";
-  bar.firstElementChild.style.width = (reader.scrollTop / max * 100) + "%";
+  const pct = Math.min(100, Math.max(0, reader.scrollTop / max * 100));
+  bar.firstElementChild.style.width = pct + "%";
 }
 
 /* Dates: null when missing/unparseable, so dateless items sort after dated
@@ -1240,6 +1243,9 @@ function renderReader(x) {
   }
   bodyEl.append(...bodyToUse.childNodes);
   $("#reader").classList.add("open");
+  // A fresh article starts at the top: the old scroll position must not
+  // carry over into the progress bar's first reading.
+  $("#reader").scrollTop = 0;
   updateReadProgress();
   if (history.state?.reader !== x.id) {
     try {
