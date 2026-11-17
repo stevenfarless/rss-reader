@@ -874,6 +874,7 @@ function discoveryNormalize(record, source) {
     const u = new URL(raw);
     if (!["http:", "https:"].includes(u.protocol)) return null;
     u.hash = "";
+    u.searchParams.sort();
     [...u.searchParams.keys()].forEach(k => { if (/^(utm_|fbclid|gclid)/i.test(k)) u.searchParams.delete(k); });
     url = u.href;
   } catch { return null; }
@@ -945,6 +946,7 @@ async function searchFeeds(raw) {
   } finally { clearTimeout(timeout); }
 }
 function scheduleFeedSearch() {
+  discoveryRun++;
   clearTimeout(discoveryTimer);
   const q = $("#feedSearchInput").value;
   if (q.trim().length < 2) {
@@ -953,6 +955,8 @@ function scheduleFeedSearch() {
     $("#feedSearchResults").innerHTML = "";
     return;
   }
+  $("#feedSearchStatus").textContent = "Searching feed directories…";
+  $("#feedSearchResults").innerHTML = "";
   discoveryTimer = setTimeout(() => searchFeeds(q), 450);
 }
 async function addDiscoveredFeed(index) {
