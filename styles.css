@@ -92,3 +92,10 @@ body.sidebar-collapsed #splitSide{display:none}
 .audio-controls a{color:var(--accent)}
 /* Feed discovery result sections (Podcasts / Articles). */
 .discovery-section{font:700 12px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--soft);margin:16px 0 2px}
+/* Manual feed discovery results in the Add feed dialog. */
+.feed-pick{margin:14px 0 0}
+.feed-pick h3{font:700 12px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--soft);margin:16px 0 6px}
+.feed-pick label.pick{display:flex;align-items:flex-start;gap:9px;padding:9px 4px;border-bottom:1px solid var(--line);font-size:13px;cursor:pointer}
+.feed-pick label.pick input{flex:none;width:17px;height:17px;margin-top:1px;accent-color:var(--accent)}
+.feed-pick label.pick .pick-title{display:block;font-weight:600}
+.feed-pick label.pick .pick-url{display:block;color:var(--soft);font-size:11px;overflow-wrap:anywhere}

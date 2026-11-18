@@ -791,6 +791,48 @@ async function discover(url) {
   const found = await fetchText(feedUrl);
   return { url: found.finalUrl, text: found.text };
 }
+/* Find every feed a page advertises, not just the first, so the user
+   can pick which to subscribe to (articles, podcasts, or both).
+   Returns [{url, title}]. Excludes oEmbed links and comment feeds. */
+async function discoverFeeds(rawUrl) {
+  const { text, finalUrl } = await fetchText(rawUrl);
+  if (looksLikeFeed(text)) return [{ url: finalUrl, title: "" }];
+  const doc = new DOMParser().parseFromString(text, "text/html");
+  const links = [...doc.querySelectorAll('link[rel="alternate"]')]
+    .filter(l => /rss|atom|json/i.test(l.getAttribute("type") || ""))
+    .map(l => ({
+      url: new URL(l.getAttribute("href"), rawUrl).href,
+      title: (l.getAttribute("title") || "").replace(/\s*»\s*Feed\s*$/i, "").trim()
+    }))
+    .filter(f => f.url && !/comments\/feed/i.test(f.url) && !/oembed/i.test(f.url));
+  const seen = new Set();
+  return links.filter(f => { if (seen.has(f.url)) return false; seen.add(f.url); return true; });
+}
+/* A feed is a podcast when its items carry audio enclosures, when it
+   lives on a podcast host, or when its title says so. The fetch can
+   fail (the site's own feed often blocks cross-origin requests), so
+   the host and title checks are the fallback. */
+async function classifyFeed(f) {
+  let parsed = null;
+  try {
+    const { text } = await fetchText(f.url);
+    parsed = parseFeed(text, f.url);
+  } catch {}
+  const hostName = host(f.url);
+  const isPodcast = !!parsed?.items?.some(x => x.enclosure?.type?.startsWith("audio/"))
+    || PODCAST_HOSTS.some(h => hostName === h || hostName.endsWith("." + h))
+    || /podcast/i.test(f.title || "") || /podcast/i.test(parsed?.title || "");
+  return { url: f.url, title: parsed?.title || f.title || hostName, site: parsed?.site || "", isPodcast };
+}
+function renderFeedResults(cands) {
+  const articles = cands.filter(c => !c.isPodcast);
+  const podcasts = cands.filter(c => c.isPodcast);
+  const row = c => `<label class="pick"><input type="checkbox" data-feed-url="${esc(c.url)}" checked><span><span class="pick-title">${esc(c.title)}</span><span class="pick-url">${esc(c.url)}</span></span></label>`;
+  const sec = (label, list) => list.length ? `<h3>${label}</h3>${list.map(row).join("")}` : "";
+  $("#feedResults").innerHTML = sec("Articles", articles) + sec("Podcasts", podcasts);
+  $("#feedResults").hidden = false;
+  $("#saveFeed").textContent = "Add selected feeds";
+}
 
 /* Try every in-page source for a feed URL, in order. Returns
    { parsed, via, url, wpRoot }. Throws the direct-fetch error when all fail. */
@@ -1825,6 +1867,9 @@ function showFeed() {
   $("#feedSearchResults").innerHTML = "";
   window.feedDiscoveryResults = [];
   $("#feedUrl").value = "";
+  $("#feedResults").innerHTML = "";
+  $("#feedResults").hidden = true;
+  $("#saveFeed").textContent = "Add feed";
   $("#feedDialog").showModal();
   $("#feedSearchInput").focus();
 }
@@ -2152,12 +2197,53 @@ function bind() {
     if (e.submitter?.value === "cancel") return;
     e.preventDefault();
     const b = $("#saveFeed");
+    const url = $("#feedUrl").value.trim();
+    if (!url) return;
+    const results = $("#feedResults");
+    // Second step: the discovery results are showing, so add each
+    // feed the user checked.
+    if (!results.hidden) {
+      const checked = [...results.querySelectorAll("input[type=checkbox]:checked")];
+      if (!checked.length) { $("#feedError").textContent = "Select at least one feed."; return; }
+      b.disabled = true;
+      let added = 0, failed = 0;
+      for (const cb of checked) {
+        try { await addFeed(cb.dataset.feedUrl); added++; } catch { failed++; }
+      }
+      b.disabled = false;
+      if (added) {
+        $("#feedDialog").close();
+        toast(added === 1 ? "Feed added." : `${added} feeds added.` + (failed ? ` ${failed} could not be added.` : ""));
+      } else {
+        $("#feedError").textContent = "Those feeds could not be added.";
+      }
+      return;
+    }
+    // First step: find every feed the address advertises. One feed is
+    // added straight away; several are shown in Articles and Podcasts
+    // sections for the user to pick from.
+    $("#feedError").textContent = "";
     b.disabled = true;
     try {
-      await addFeed($("#feedUrl").value.trim());
-      $("#feedDialog").close();
+      const cands = await discoverFeeds(url);
+      if (cands.length <= 1) {
+        await addFeed(cands.length ? cands[0].url : url);
+        $("#feedDialog").close();
+      } else {
+        const classified = [];
+        for (const c of cands) classified.push(await classifyFeed(c));
+        renderFeedResults(classified);
+      }
     } catch (err) {
-      $("#feedError").textContent = classifyError(err, /^http:/i.test($("#feedUrl").value.trim()));
+      // Discovery failed (site unreachable, nothing advertised): fall
+      // back to the single-feed path, which probes feed paths and the
+      // WordPress API.
+      try {
+        await addFeed(url);
+        $("#feedDialog").close();
+      } catch (e2) {
+        $("#feedError").textContent = classifyError(e2, /^http:/i.test(url));
+      }
     } finally { b.disabled = false; }
   };
   $("#saveSettings").onclick = () => {
