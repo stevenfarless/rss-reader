@@ -800,14 +800,32 @@ async function discoverFeeds(rawUrl) {
     ({ text, finalUrl } = await fetchText(rawUrl));
   } catch {
     // Many sites (WordPress included) do not send CORS headers on the
-    // homepage, so the direct fetch is blocked. The public AllOrigins
-    // proxy returns the raw page HTML, which is all discovery needs.
-    // This is a one-off, user-initiated fetch of the address they
-    // entered, not a background feed load.
-    const r = await fetchWithTimeout(ALLORIGINS + encodeURIComponent(rawUrl), { cache: "no-store" }, PROXY_TIMEOUT_MS);
-    if (!r.ok) throw Error("HTTP " + r.status);
-    text = await r.text();
-    finalUrl = rawUrl;
+    // homepage, so the direct fetch is blocked. Feedsearch is a public
+    // feed-discovery service that crawls the site and returns its feeds
+    // as JSON; AllOrigins is the last resort for the raw page HTML.
+    // Both are one-off, user-initiated fetches of the address entered.
+    try {
+      const r = await fetchWithTimeout("https://origin.feedsearch.dev/api/v1/search?url=" + encodeURIComponent(rawUrl), { headers: { Accept: "application/json" }, cache: "no-store" }, PROXY_TIMEOUT_MS);
+      if (!r.ok) throw Error("HTTP " + r.status);
+      const data = await r.json();
+      const seen = new Set();
+      const out = [];
+      for (const rec of discoveryRecords(data)) {
+        const x = discoveryNormalize(rec, "Feedsearch");
+        if (!x || !x.url || /comments\/feed/i.test(x.url)) continue;
+        const key = x.url.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ url: x.url, title: x.title || "" });
+      }
+      if (out.length) return out;
+      throw Error("No feeds found.");
+    } catch (e) {
+      const r = await fetchWithTimeout(ALLORIGINS + encodeURIComponent(rawUrl), { cache: "no-store" }, PROXY_TIMEOUT_MS);
+      if (!r.ok) throw Error("HTTP " + r.status);
+      text = await r.text();
+      finalUrl = rawUrl;
+    }
   }
   if (looksLikeFeed(text)) return [{ url: finalUrl, title: "" }];
   const doc = new DOMParser().parseFromString(text, "text/html");
