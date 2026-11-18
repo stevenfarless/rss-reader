@@ -937,6 +937,9 @@ function isPodcastResult(x) {
   const h = host(x.url);
   return PODCAST_HOSTS.some(p => h === p || h.endsWith("." + p));
 }
+/* Which kind of search result to show: "all", "podcasts", or "articles".
+   Reset to "all" on each new search. */
+let discoveryFilter = "all";
 function renderDiscoveryResults(items) {
   const root = $("#feedSearchResults");
   if (!items.length) {
@@ -957,8 +960,13 @@ function renderDiscoveryResults(items) {
   // looks the result up by its place in feedDiscoveryResults.
   const podcasts = [], articles = [];
   items.forEach((x, i) => (isPodcastResult(x) ? podcasts : articles).push([x, i]));
+  const btn = (key, label, n) => '<button type="button" class="discovery-filter-btn' + (discoveryFilter === key ? ' active' : '') + '" data-discovery-filter="' + key + '"' + (n ? '' : ' disabled') + '>' + label + ' (' + n + ')</button>';
+  const bar = '<div class="discovery-filter" role="group" aria-label="Show podcasts, articles, or both">' + btn("all", "All", items.length) + btn("podcasts", "Podcasts", podcasts.length) + btn("articles", "Articles", articles.length) + '</div>';
   const sec = (label, list) => list.length ? '<h3 class="discovery-section">' + label + '</h3>' + list.map(([x, i]) => row(x, i)).join("") : "";
-  root.innerHTML = sec("Podcasts", podcasts) + sec("Articles", articles);
+  root.innerHTML = bar +
+    (discoveryFilter === "articles" ? sec("Articles", articles) :
+     discoveryFilter === "podcasts" ? sec("Podcasts", podcasts) :
+     sec("Podcasts", podcasts) + sec("Articles", articles));
 }
 async function runDiscoveryProvider(provider, query, parentSignal) {
   const controller = new AbortController();
@@ -989,6 +997,7 @@ async function searchFeeds(raw) {
     const groups = settled.map(r => r.status === "fulfilled" ? r.value : []);
     const items = mergeDiscoveryResults(groups);
     window.feedDiscoveryResults = items;
+    discoveryFilter = "all";
     const failed = settled.filter(r => r.status === "rejected").length;
     const podCount = items.filter(isPodcastResult).length;
     const artCount = items.length - podCount;
@@ -2072,6 +2081,12 @@ function bind() {
     if (e.key === "Enter") { e.preventDefault(); clearTimeout(discoveryTimer); searchFeeds(e.target.value); }
   });
   $("#feedSearchResults").addEventListener("click", e => {
+    const f = e.target.closest("[data-discovery-filter]");
+    if (f && !f.disabled) {
+      discoveryFilter = f.dataset.discoveryFilter;
+      renderDiscoveryResults(window.feedDiscoveryResults || []);
+      return;
+    }
     const b = e.target.closest("[data-discovery-add]");
     if (b) addDiscoveredFeed(Number(b.dataset.discoveryAdd));
   });
