@@ -795,7 +795,20 @@ async function discover(url) {
    can pick which to subscribe to (articles, podcasts, or both).
    Returns [{url, title}]. Excludes oEmbed links and comment feeds. */
 async function discoverFeeds(rawUrl) {
-  const { text, finalUrl } = await fetchText(rawUrl);
+  let text, finalUrl;
+  try {
+    ({ text, finalUrl } = await fetchText(rawUrl));
+  } catch {
+    // Many sites (WordPress included) do not send CORS headers on the
+    // homepage, so the direct fetch is blocked. The public AllOrigins
+    // proxy returns the raw page HTML, which is all discovery needs.
+    // This is a one-off, user-initiated fetch of the address they
+    // entered, not a background feed load.
+    const r = await fetchWithTimeout(ALLORIGINS + encodeURIComponent(rawUrl), { cache: "no-store" }, PROXY_TIMEOUT_MS);
+    if (!r.ok) throw Error("HTTP " + r.status);
+    text = await r.text();
+    finalUrl = rawUrl;
+  }
   if (looksLikeFeed(text)) return [{ url: finalUrl, title: "" }];
   const doc = new DOMParser().parseFromString(text, "text/html");
   const links = [...doc.querySelectorAll('link[rel="alternate"]')]
