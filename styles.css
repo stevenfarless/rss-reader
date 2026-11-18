@@ -92,3 +92,9 @@ body.sidebar-collapsed #splitSide{display:none}
 .audio-controls a{color:var(--accent)}
 /* Feed discovery result sections (Podcasts / Articles). */
 .discovery-section{font:700 12px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--soft);margin:16px 0 2px}
+/* Feed discovery filter bar: sticky at the top of the results so the
+   user can switch between podcasts and articles without scrolling. */
+.discovery-filter{position:sticky;top:0;z-index:1;display:flex;gap:6px;padding:8px 0;background:var(--bg);border-bottom:1px solid var(--line)}
+.discovery-filter-btn{flex:1;padding:7px 6px;font:600 12px var(--sans);color:var(--soft);background:var(--bg);border:1px solid var(--line);border-radius:6px;cursor:pointer}
+.discovery-filter-btn.active{color:#171916;background:var(--accent);border-color:var(--accent)}
+.discovery-filter-btn:disabled{opacity:.45;cursor:default}
