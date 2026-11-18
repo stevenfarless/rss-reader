@@ -791,7 +791,6 @@ async function discover(url) {
   const found = await fetchText(feedUrl);
   return { url: found.finalUrl, text: found.text };
 }
-
 /* Try every in-page source for a feed URL, in order. Returns
    { parsed, via, url, wpRoot }. Throws the direct-fetch error when all fail. */
 /* Conventional feed locations, tried in order when only a bare website
@@ -929,13 +928,22 @@ function mergeDiscoveryResults(groups) {
   });
   return [...map.values()].sort((a, b) => a.title.localeCompare(b.title));
 }
+/* Podcast hosts, used to tell a podcast result from an article result
+   when the result came from a general RSS catalog rather than the
+   Apple Podcasts directory. */
+const PODCAST_HOSTS = ["libsyn.com", "blubrry.com", "podbean.com", "anchor.fm", "spreaker.com", "transistor.fm", "buzzsprout.com", "simplecast.com", "megaphone.fm", "rss.com", "podomatic.com", "audioboom.com"];
+function isPodcastResult(x) {
+  if ((x.sources || []).includes("Apple Podcasts")) return true;
+  const h = host(x.url);
+  return PODCAST_HOSTS.some(p => h === p || h.endsWith("." + p));
+}
 function renderDiscoveryResults(items) {
   const root = $("#feedSearchResults");
   if (!items.length) {
     root.innerHTML = '<p class="muted discovery-empty">No matching feeds found. Try a different name, topic, or website address.</p>';
     return;
   }
-  root.innerHTML = items.map((x, i) => {
+  const row = (x, i) => {
     const added = state.feeds.some(f => sameFeedUrl(f.url, x.url));
     return '<article class="discovery-result"><div class="discovery-result-main"><strong>' + esc(x.title) +
       '</strong><span>' + esc(host(x.site || x.url)) + '</span>' +
@@ -943,7 +951,14 @@ function renderDiscoveryResults(items) {
       '<small>' + esc(x.sources.join(" · ")) + '</small></div>' +
       '<button type="button" class="primary discovery-add" data-discovery-add="' + i + '"' +
       (added ? ' disabled' : '') + '>' + (added ? 'Added' : 'Add') + '</button></article>';
-  }).join("");
+  };
+  // Split the results into Podcasts and Articles so the user can pick
+  // one or both. The original index is kept, because the Add button
+  // looks the result up by its place in feedDiscoveryResults.
+  const podcasts = [], articles = [];
+  items.forEach((x, i) => (isPodcastResult(x) ? podcasts : articles).push([x, i]));
+  const sec = (label, list) => list.length ? '<h3 class="discovery-section">' + label + '</h3>' + list.map(([x, i]) => row(x, i)).join("") : "";
+  root.innerHTML = sec("Podcasts", podcasts) + sec("Articles", articles);
 }
 async function runDiscoveryProvider(provider, query, parentSignal) {
   const controller = new AbortController();
@@ -975,7 +990,11 @@ async function searchFeeds(raw) {
     const items = mergeDiscoveryResults(groups);
     window.feedDiscoveryResults = items;
     const failed = settled.filter(r => r.status === "rejected").length;
-    status.textContent = items.length + " unique feed" + (items.length === 1 ? "" : "s") + " found across " + (settled.length - failed) + " source" + (settled.length - failed === 1 ? "" : "s") +
+    const podCount = items.filter(isPodcastResult).length;
+    const artCount = items.length - podCount;
+    status.textContent = items.length + " unique feed" + (items.length === 1 ? "" : "s") + " found" +
+      (items.length ? " (" + podCount + " podcast" + (podCount === 1 ? "" : "s") + ", " + artCount + " article" + (artCount === 1 ? "" : "s") + ")" : "") +
+      " across " + (settled.length - failed) + " source" + (settled.length - failed === 1 ? "" : "s") +
       (failed ? " · " + failed + " source" + (failed === 1 ? "" : "s") + " unavailable" : "");
     renderDiscoveryResults(items);
   } finally { clearTimeout(timeout); }
@@ -1462,7 +1481,9 @@ function renderReader(x) {
   // after it for bottom.
   const progTop = state.settings.progressPosition === "top";
   const barHTML = `<div id="readProgress" class="${progTop ? "top" : "bottom"}"><i></i></div>`;
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${icon("doc")}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}${x.enclosure?.type?.startsWith("audio/") ? ` <a href="${esc(x.enclosure.url)}">Listen to audio</a>` : ""}</p></div></div>${progTop ? "" : barHTML}`;
+  const isAudio = !!x.enclosure?.type?.startsWith("audio/");
+  const audioHTML = isAudio ? `<div class="audio-player"><audio id="audioPlayer" controls preload="metadata" src="${esc(x.enclosure.url)}"></audio><div class="audio-controls"><label>Speed <select id="audioSpeed" aria-label="Playback speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><a href="${esc(x.enclosure.url)}" target="_blank" rel="noopener">Open audio ↗</a></div></div>` : "";
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${icon("doc")}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${audioHTML}${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div></div>${progTop ? "" : barHTML}`;
   const bodyEl = $("#body");
   // Append the cleaned body's children, not the <body> element itself.
   // cleanHTML drops the page chrome (header/nav/footer); the leading-nav
@@ -1525,10 +1546,33 @@ function renderReader(x) {
   // carry over into the progress bar's first reading.
   $("#reader").scrollTop = 0;
   updateReadProgress();
+  bindAudioPlayer(x);
   if (history.state?.reader !== x.id) {
     try {
       if (history.state?.reader) history.replaceState({ reader: x.id }, "");
       else history.pushState({ reader: x.id }, "");
+    } catch {}
+  }
+}
+/* Wire the inline audio player for a podcast episode: the speed
+   selector, and the Media Session API so the phone's lock screen and
+   notification show the episode with play/pause and seek. Audio
+   streams over the network and is not kept offline. */
+function bindAudioPlayer(x) {
+  const audio = $("#audioPlayer");
+  if (!audio) return;
+  const speed = $("#audioSpeed");
+  if (speed) speed.onchange = () => { audio.playbackRate = Number(speed.value) || 1; };
+  if ("mediaSession" in navigator) {
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: x.title,
+        artist: x.author || x.feedTitle,
+        album: x.feedTitle
+      });
+      navigator.mediaSession.setActionHandler("play", () => audio.play());
+      navigator.mediaSession.setActionHandler("pause", () => audio.pause());
+      navigator.mediaSession.setActionHandler("seekto", d => { if (d.seekTime != null) audio.currentTime = d.seekTime; });
     } catch {}
   }
 }

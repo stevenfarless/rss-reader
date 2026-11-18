@@ -83,3 +83,12 @@ body.sidebar-collapsed #splitSide{display:none}
 .discovery-manual>p{font-size:12px;color:var(--soft)}
 
 .discovery-privacy{font-size:11px!important;color:var(--soft)!important;margin:0 0 10px!important}
+/* Inline podcast player in the reader. */
+.audio-player{margin:0 0 20px}
+.audio-player audio{width:100%;display:block}
+.audio-controls{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:8px;font-size:12px;color:var(--soft)}
+.audio-controls label{display:flex;align-items:center;gap:6px}
+.audio-controls select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px}
+.audio-controls a{color:var(--accent)}
+/* Feed discovery result sections (Podcasts / Articles). */
+.discovery-section{font:700 12px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--soft);margin:16px 0 2px}
