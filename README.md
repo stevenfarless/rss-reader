@@ -8,9 +8,13 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Search Apple Podcasts and public RSS directories (RSS.mobi and RSSAmp, plus Feedsearch for website addresses) in one deduplicated result list; add feeds directly or enter a URL manually
 - Discover feed links from publisher pages
 - Feed refresh, unread and saved article views, and per-feed navigation
-- Feed folders: create, rename, delete, and move feeds between folders (OPML folders are kept on import)
+- Feed folders: create, rename, delete, and move feeds between folders (OPML folders are kept on import). Click a folder name in the sidebar to read all of its feeds as one merged newest-first list
 - Unsubscribe from a feed with the × beside it in the sidebar, or from the Folders &amp; tags dialog; the feed's articles are removed, except ones you saved
 - Article tags: create, rename, and delete tags; apply them from the reader (t); filter by tag from the sidebar; search covers tags
+- Full-text search: the search box matches article bodies (loaded full text, then feed content) as well as titles, summaries, authors, and tags
+- Saved searches: save the current search and view as a named filter in the sidebar (keywords, feed/folder scope, tag, unread-only), with rename/delete in the organize dialog
+- Rules: automatically tag, save, or mark read new articles that match (feed/folder scope, title keyword, author). Rules run on new arrivals at refresh and never delete anything; manage them in Settings with an on/off toggle per rule
+- Highlights and notes: select text in the reader to save a highlight with an optional note; passages are marked back into the article when it opens, listed under the article and in a Highlights view, with edit-note, show-in-article, and delete
 - Markdown article rendering for plain-text RSS, Atom, and JSON Feed content, including headings, links, lists, tables, and code blocks
 - Full-article view: "Load full article" extracts the article text from the original page
 - Listen to an article in the reader (text-to-speech, with pause/resume, stop, and speed)

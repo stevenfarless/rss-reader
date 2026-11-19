@@ -64,12 +64,6 @@ const relDate = d => {
 };
 /* Shorten text for list cards: cut at a word boundary and add an
    ellipsis, instead of slicing mid-word. */
-const snippet = (s, n) => {
-  s = (s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-  if (s.length <= n) return s;
-  const cut = s.slice(0, n).replace(/\s+\S*$/, "");
-  return (cut || s.slice(0, n)) + "…";
-};
 /* Estimated reading time (#110): words in the text the reader would
    show (full text when loaded, otherwise the feed content or summary)
    at about 200 words per minute. Under 40 words there is nothing
@@ -83,27 +77,6 @@ const readingTimeText = x => {
    same story at the same address is one article, even when feeds carry
    it with different tracking parameters, a fragment, or a www prefix.
    A different address is a different article, even with the same title. */
-const TRACKING_PARAMS = /^(utm_|fbclid|gclid|mc_cid|mc_eid)/i;
-const canonicalUrl = u => {
-  try {
-    const p = new URL(u);
-    p.hash = "";
-    p.hostname = p.hostname.replace(/^www\./, "").toLowerCase();
-    [...p.searchParams.keys()].forEach(k => { if (TRACKING_PARAMS.test(k)) p.searchParams.delete(k); });
-    p.searchParams.sort();
-    p.pathname = p.pathname.replace(/\/+$/, "") || "/";
-    return p.href;
-  } catch { return String(u || ""); }
-};
-function dedupeItems(a) {
-  const seen = new Set();
-  return a.filter(x => {
-    const k = canonicalUrl(x.url);
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-}
 /* Byline timestamp without seconds ("11/16/2026 · 11:00 AM"). */
 const fmtDateTime = d => d.toLocaleDateString() + " · " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 /* Strip publisher boilerplate out of summaries before they reach the
@@ -111,20 +84,6 @@ const fmtDateTime = d => d.toLocaleDateString() + " · " + d.toLocaleTimeString(
    Points: N # Comments: M"; some feeds (e.g. NASA APOD via WordPress)
    ship site navigation in the summary, which is cut at the first nav
    marker with the leading header tokens dropped. */
-const NAV_MARKERS = ["Today's APOD", "Archive Submissions", "Previous APOD"];
-const cleanSummary = s => {
-  // Curly apostrophes/quotes (e.g. "Today’s APOD" from a decoded
-  // excerpt) must be normalized before the marker match below.
-  s = (s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').trim();
-  const hn = s.match(/Article URL:.*?Points:\s*(\d+)\s*# Comments:\s*(\d+)/i);
-  if (hn) return `${hn[1]} points · ${hn[2]} comments`;
-  const cutAt = NAV_MARKERS.map(m => s.indexOf(m)).filter(i => i > 0);
-  if (cutAt.length) {
-    s = s.slice(0, Math.min(...cutAt)).trim();
-    s = s.replace(/^(?:(?:APOD|Science)\b[\s·:–-]*)+/i, "").replace(/^APOD:\s*/i, "").trim();
-  }
-  return s;
-};
 /* Strip publisher navigation boilerplate from the top of an article
    body element, using the same NAV_MARKERS as the summary cleaner so
    the two rules stay in sync. Only the leading boilerplate is removed:
@@ -284,6 +243,34 @@ function local(k, v) {
   try { localStorage.setItem(k, JSON.stringify(v)); }
   catch (e) { toast("Browser storage is full."); }
 }
+/* Whitelist + validate stored settings: unknown keys and out-of-range
+   values are dropped instead of silently corrupting the settings.
+   Shared by loadLocal (a corrupt localStorage entry) and
+   importSettings (an imported file). */
+function validateSettings(d) {
+  if (!d || typeof d !== "object") return {};
+  const pick = (sel, val) => { const opts = [...$(sel).options].map(o => o.value); return opts.includes(val) ? val : null; };
+  const next = {};
+  const theme = pick("#themeSelect", d.theme); if (theme) next.theme = theme;
+  const width = pick("#widthSelect", d.width); if (width) next.width = width;
+  const size = pick("#sizeSelect", d.size); if (size) next.size = size;
+  const font = pick("#fontSelect", d.readerFont); if (font) next.readerFont = font;
+  const lh = pick("#lineHeightSelect", d.lineHeight); if (lh) next.lineHeight = lh;
+  if (typeof d.ttsRate === "number" && d.ttsRate >= 0.5 && d.ttsRate <= 2) next.ttsRate = d.ttsRate;
+  const prog = pick("#progressSelect", d.progressPosition); if (prog) next.progressPosition = prog;
+  const exc = pick("#cardExcerptSelect", d.cardExcerpt); if (exc) next.cardExcerpt = exc;
+  if (typeof d.cardImage === "boolean") next.cardImage = d.cardImage;
+  if (typeof d.hideDuplicates === "boolean") next.hideDuplicates = d.hideDuplicates;
+  if (typeof d.backgroundSync === "boolean") next.backgroundSync = d.backgroundSync;
+  if (typeof d.notifyNew === "boolean") next.notifyNew = d.notifyNew;
+  if (typeof d.proxyFallback === "boolean") next.proxyFallback = d.proxyFallback;
+  if (typeof d.sidebarCollapsed === "boolean") next.sidebarCollapsed = d.sidebarCollapsed;
+  if (typeof d.sidebarWidth === "number" && d.sidebarWidth >= 180 && d.sidebarWidth <= 420) next.sidebarWidth = d.sidebarWidth;
+  if (typeof d.listWidth === "number" && d.listWidth >= 320 && d.listWidth <= 640) next.listWidth = d.listWidth;
+  if (d.sort === "newest" || d.sort === "oldest") next.sort = d.sort;
+  if (["all", "today", "week"].includes(d.filter)) next.filter = d.filter;
+  return next;
+}
 function loadLocal() {
   try {
     state.feeds = JSON.parse(localStorage.getItem(K) || "[]");
@@ -295,7 +282,7 @@ function loadLocal() {
       state.feedsRestored = true;
     } catch { state.feeds = []; }
   }
-  try { state.settings = { ...state.settings, ...JSON.parse(localStorage.getItem(S) || "{}") }; } catch {}
+  try { state.settings = { ...state.settings, ...validateSettings(JSON.parse(localStorage.getItem(S) || "{}")) }; } catch {}
   state.sort = state.settings.sort === "oldest" ? "oldest" : "newest";
   state.filter = ["all", "today", "week"].includes(state.settings.filter) ? state.settings.filter : "all";
   try { state.folders = JSON.parse(localStorage.getItem(KF) || "[]"); } catch {}
@@ -519,6 +506,10 @@ function applyPaneWidths() {
   state.settings.listWidth = list;
   document.documentElement.style.setProperty("--side-w", side + "px");
   document.documentElement.style.setProperty("--list-w", list + "px");
+  // The splitters report their size to assistive tech, like a slider.
+  const ss = $("#splitSide"), sl = $("#splitList");
+  if (ss) ss.setAttribute("aria-valuenow", String(side));
+  if (sl) sl.setAttribute("aria-valuenow", String(list));
   positionSplitters();
 }
 /* Place the splitter handles on the panes' right edges. Skipped on
@@ -548,6 +539,7 @@ function bindSplitter(el, kind) {
     const move = ev => {
       state.settings[key] = clampW(start + (ev.clientX - startX), range);
       document.documentElement.style.setProperty(kind === "side" ? "--side-w" : "--list-w", state.settings[key] + "px");
+      el.setAttribute("aria-valuenow", String(state.settings[key]));
       positionSplitters();
     };
     const up = () => {
@@ -640,21 +632,6 @@ const looksLikeFeed = t => {
   const s = t.trim();
   return s.startsWith("<?xml") || /<(rss|feed|rdf:RDF)\b/i.test(s) || s.startsWith("{");
 };
-function normalizeFeedUrl(raw) {
-  let s = String(raw || "").trim();
-  // Accept a bare address ("example.com/feed", "example.com") — assume https.
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(s)) s = "https://" + s;
-  const u = new URL(s);
-  if (u.protocol === "http:") u.protocol = "https:";
-  return u.href;
-}
-function sameFeedUrl(a, b) {
-  try {
-    const na = new URL(a), nb = new URL(b);
-    const norm = u => (u.protocol + "//" + u.hostname.replace(/^www\./, "") + u.pathname.replace(/\/$/, "") + u.search).toLowerCase();
-    return norm(na) === norm(nb);
-  } catch { return a === b; }
-}
 
 /* ---------- feed parsing ---------- */
 /* localName-based lookups: getElementsByTagName("creator") does NOT match
@@ -768,7 +745,7 @@ function parseFeed(text, url) {
 
 /* WordPress REST API adapter. WordPress sends permissive CORS headers on
    /wp-json/ even when /feed sends none, and its posts carry full content. */
-async function loadWordPressFeed(origin) {
+async function loadWordPressFeed(origin, knownTitle) {
   const base = origin.replace(/\/$/, "") + "/wp-json/wp/v2/posts";
   // 30 posts, not 100: with _embed the 100-post payload is ~4.5 MB and
   // Some publisher sites can take longer than the 15 s fetch timeout.
@@ -779,18 +756,22 @@ async function loadWordPressFeed(origin) {
   if (!r.ok) throw Error("HTTP " + r.status);
   const posts = await r.json();
   if (!Array.isArray(posts)) throw Error("Unexpected WordPress API response.");
-  let siteTitle = host(origin), siteUrl = origin;
-  try {
-    const ir = await fetchWithTimeout(origin.replace(/\/$/, "") + "/wp-json/", {
-      headers: { Accept: "application/json" }, cache: "no-store"
-    });
-    if (ir.ok) {
-      const info = await ir.json();
-      siteTitle = info.name || siteTitle;
-      siteUrl = info.url || siteUrl;
-    }
-  } catch {}
-  return {
+  // The site title comes from the /wp-json/ root, but only on add: on
+  // refresh the feed already has its title, and a second fetch per
+  // feed per refresh is wasted.
+  let siteTitle = knownTitle || host(origin), siteUrl = origin;
+  if (!knownTitle) {
+    try {
+      const ir = await fetchWithTimeout(origin.replace(/\/$/, "") + "/wp-json/", {
+        headers: { Accept: "application/json" }, cache: "no-store"
+      });
+      if (ir.ok) {
+        const info = await ir.json();
+        siteTitle = info.name || siteTitle;
+        siteUrl = info.url || siteUrl;
+      }
+    } catch {}
+  }  return {
     title: siteTitle, site: siteUrl,
     items: posts.map(p => ({
       title: plainText(p.title?.rendered) || "(untitled)",
@@ -864,11 +845,15 @@ async function loadFeedFromUrl(rawUrl) {
   const bare = new URL(url).pathname.replace(/\/$/, "") === "";
   const noLink = /No feed link found/.test(directError?.message || "");
   if (bare || noLink) {
-    for (const p of FEED_PATHS) {
-      try {
-        const found = await discover(origin + p);
-        return { parsed: parseFeed(found.text, found.url), via: "feed", url: found.url, wpRoot: "" };
-      } catch {}
+    // Probe the conventional locations in parallel: the first one in
+    // list order that returns a feed wins, so a slow 404 on /feed does
+    // not hold up the rest.
+    const attempts = await Promise.allSettled(FEED_PATHS.map(async p => {
+      const found = await discover(origin + p);
+      return { parsed: parseFeed(found.text, found.url), via: "feed", url: found.url, wpRoot: "" };
+    }));
+    for (const a of attempts) {
+      if (a.status === "fulfilled") return a.value;
     }
   }
   try {
@@ -1121,6 +1106,9 @@ async function addFeed(raw) {
     toast("Feed added, but its articles failed to save. Refresh to retry.");
     return;
   }
+  // Rules can tag a newly added feed's articles; sync the tag list so
+  // those tags appear in the sidebar immediately, not at the next refresh.
+  syncTags(); saveTags();
   render();
   toast("Feed added" + (loaded.via === "feed" ? "." : loaded.via === "wp" ? " (via the site's WordPress API)." : " (via the proxy fallback)."));
 }
@@ -1133,14 +1121,6 @@ async function addFeed(raw) {
    the user already has (so a rule cannot re-tag something the user
    untagged, and a rule that marks read cannot hide an article the user
    already read and then unread). */
-function ruleMatches(rule, feed, item) {
-  if (!rule.enabled) return false;
-  if (rule.scope?.startsWith("feed:")) { if (feed.id !== rule.scope.slice(5)) return false; }
-  else if (rule.scope?.startsWith("folder:")) { if ((feed.group || "") !== rule.scope.slice(7)) return false; }
-  if (rule.keyword && !(item.title || "").toLowerCase().includes(rule.keyword.toLowerCase())) return false;
-  if (rule.author && !(item.author || "").toLowerCase().includes(rule.author.toLowerCase())) return false;
-  return true;
-}
 function applyRules(feed, item) {
   for (const rule of state.rules) {
     if (!ruleMatches(rule, feed, item)) continue;
@@ -1155,24 +1135,38 @@ function applyRules(feed, item) {
 async function saveItems(feed, items) {
   const seen = new Set();
   // Map lookups instead of a linear scan per item, and one batched
-  // write instead of a transaction per item.
-  const byId = new Map(state.items.map(i => [i.id, i]));
+  // write instead of a transaction per item. The maps are scoped to
+  // this feed's items: the key carries the feed id, so no other feed's
+  // items can match.
+  const mine = state.items.filter(i => i.feedId === feed.id);
+  const byId = new Map(mine.map(i => [i.id, i]));
   const byUrl = new Map();
-  for (const i of state.items) if (!byUrl.has(i.feedId + "|" + i.url)) byUrl.set(i.feedId + "|" + i.url, i);
+  for (const i of mine) if (!byUrl.has(i.feedId + "|" + i.url)) byUrl.set(i.feedId + "|" + i.url, i);
   const fresh = [];
   for (const x of items) {
     const link = x.url || feed.url;
     const key = feed.id + "|" + (x.guid || link);
     seen.add(key);
     const old = byId.get(key) || byUrl.get(feed.id + "|" + link);
+    const d = date(x.date);
+    const content = x.content || "";
+    let summary = cleanSummary(x.summary || "");
+    // When the feed carries no separate description, the summary IS
+    // the full content; storing both duplicates the whole article in
+    // IndexedDB. Keep a short plaintext snippet for the card preview
+    // instead.
+    if (summary && summary === cleanSummary(content)) summary = snippet(plainText(summary), 210);
     const freshItem = {
       id: key, feedId: feed.id, feedTitle: feed.title,
       title: x.title, url: link, guid: x.guid || "",
-      summary: cleanSummary(x.summary || ""), content: x.content || "",
+      // The canonical URL is computed once here, at save time, so the
+      // duplicate check on every render does not re-parse every URL.
+      canonical: old?.canonical || canonicalUrl(link),
+      summary, content,
       fullContent: old?.fullContent || "",
       fullContentIncluded: !!x.fullContentIncluded,
       author: x.author || "",
-      published: date(x.date) ? date(x.date).toISOString() : null,
+      published: d ? d.toISOString() : null,
       image: x.image || old?.image || "",
       enclosure: x.enclosure || old?.enclosure || null,
       read: old?.read || false, saved: old?.saved || false,
@@ -1184,25 +1178,38 @@ async function saveItems(feed, items) {
     fresh.push(freshItem);
   }
   await putMany(fresh);
+  // Mirror the writes in memory instead of re-reading the whole table
+  // from IndexedDB (the old code did two full getAlls per feed), and
+  // drop the cached search text: the articles' bodies may have changed.
+  const byIdAll = new Map(state.items.map(i => [i.id, i]));
+  for (const x of fresh) byIdAll.set(x.id, x);
+  state.items = [...byIdAll.values()];
+  searchTextCache.clear();
   // Prune items no longer in the feed, unless the user saved them, read them,
   // or snoozed them (a snoozed article must survive until it comes back).
   // Cap each feed at MAX_ITEMS_PER_FEED newest items.
-  const mine = state.items.filter(i => i.feedId === feed.id);
-  const pruneIds = mine.filter(old => !seen.has(old.id) && !old.saved && !old.read && !(old.snoozedUntil && old.snoozedUntil > Date.now())).map(o => o.id);
-  if (pruneIds.length) await deleteMany(pruneIds);
-  state.items = await dbAll();
+  const mineNow = state.items.filter(i => i.feedId === feed.id);
+  const pruneIds = mineNow.filter(old => !seen.has(old.id) && !old.saved && !old.read && !(old.snoozedUntil && old.snoozedUntil > Date.now())).map(o => o.id);
+  if (pruneIds.length) {
+    await deleteMany(pruneIds);
+    const ps = new Set(pruneIds);
+    state.items = state.items.filter(i => !ps.has(i.id));
+  }
   const freshMine = state.items.filter(i => i.feedId === feed.id)
     .sort((a, b) => (dateSortKey(b) ?? -1) - (dateSortKey(a) ?? -1));
   const extraIds = freshMine.slice(MAX_ITEMS_PER_FEED).filter(x => !x.saved).map(x => x.id);
-  if (extraIds.length) await deleteMany(extraIds);
-  state.items = await dbAll();
+  if (extraIds.length) {
+    await deleteMany(extraIds);
+    const es = new Set(extraIds);
+    state.items = state.items.filter(i => !es.has(i.id));
+  }
 }
 
 async function refreshFeed(f) {
   try {
     let loaded;
     if (f.via === "wp" && f.wpRoot) {
-      loaded = { parsed: await loadWordPressFeed(f.wpRoot), via: "wp", url: f.url, wpRoot: f.wpRoot };
+      loaded = { parsed: await loadWordPressFeed(f.wpRoot, f.title), via: "wp", url: f.url, wpRoot: f.wpRoot };
     } else if (f.via === "proxy") {
       loaded = { parsed: await loadViaProxy(f.url), via: "proxy", url: f.url, wpRoot: "" };
     } else {
@@ -1259,13 +1266,24 @@ const isSnoozed = x => x.snoozedUntil && x.snoozedUntil > Date.now();
 const isMutedFeed = feedId => state.feeds.find(f => f.id === feedId)?.muted;
 /* Full-text article match (#107, reused by saved searches #108): the
    short fields first, then the body the reader would show (loaded
-   full text, then the feed content), stripped of markup. */
+   full text, then the feed content), stripped of markup. The combined
+   lowercase text is cached per item and reused across keystrokes,
+   instead of re-stripping and re-lowercasing the whole body per item
+   per keystroke. Cleared when the library is reloaded. */
+const searchTextCache = new Map();
+function searchText(x) {
+  let t = searchTextCache.get(x.id);
+  if (t === undefined) {
+    t = [x.title, x.summary, x.author, x.feedTitle, (x.tags || []).join(" ")].join(" ").toLowerCase()
+      + "\n" + plainText(x.fullContent || x.content || "").toLowerCase();
+    searchTextCache.set(x.id, t);
+  }
+  return t;
+}
 function matchesQuery(x, q) {
   q = String(q || "").toLowerCase();
   if (!q) return true;
-  const hay = [x.title, x.summary, x.author, x.feedTitle, (x.tags || []).join(" ")].join(" ").toLowerCase();
-  if (hay.includes(q)) return true;
-  return plainText(x.fullContent || x.content || "").toLowerCase().includes(q);
+  return searchText(x).includes(q);
 }
 /* Does an article match a saved search (#108)? The feed group comes
    from a lookup map when the caller has one (visible builds it once),
@@ -1285,6 +1303,11 @@ function visible() {
   // A folder view (#118) and a saved search (#108) need each article's
   // feed group; build the lookup once instead of scanning per article.
   const feedById = (state.view === "folder" || state.view === "savedSearch") ? new Map(state.feeds.map(f => [f.id, f])) : null;
+  // The muted feeds, as a set: checking each article against it is
+  // O(1), where the old per-item feed lookup was O(feeds). The saved
+  // search is looked up once, not once per article.
+  const mutedIds = new Set(state.feeds.filter(f => f.muted).map(f => f.id));
+  const savedSearch = state.view === "savedSearch" ? state.savedSearches.find(v => v.id === state.savedSearch) : null;
   let a = state.items.filter(x => {
     if (state.view === "snoozed") return isSnoozed(x);
     if (isSnoozed(x)) return false;
@@ -1295,7 +1318,7 @@ function visible() {
     // the highlighted articles for the counts and keyboard navigation.
     if (state.view === "highlights") return state.highlights.some(h => h.itemId === x.id);
     if (state.view === "feed") return x.feedId === state.feed;
-    if (isMutedFeed(x.feedId)) return false;
+    if (mutedIds.has(x.feedId)) return false;
     // A folder view (#118) is a cross-feed list, like All and Unread:
     // muted feeds and snoozed articles stay out, duplicates collapse.
     if (state.view === "folder") return (feedById.get(x.feedId)?.group || "") === state.folder;
@@ -1303,12 +1326,13 @@ function visible() {
     // A saved search (#108) is a stored filter: keywords, a feed or
     // folder scope, a tag, and unread-only, run over the library.
     if (state.view === "savedSearch") {
-      return savedSearchMatches(state.savedSearches.find(v => v.id === state.savedSearch), x, feedById);
+      return savedSearchMatches(savedSearch, x, feedById);
     }
     return true;
   });
   if (state.filter === "today") {
-    a = a.filter(x => { const d = date(x.published); return d && d.toDateString() === new Date().toDateString(); });
+    const today = new Date().toDateString();
+    a = a.filter(x => { const d = date(x.published); return d && d.toDateString() === today; });
   }
   if (state.filter === "week") {
     a = a.filter(x => { const d = date(x.published); return d && (Date.now() - d.getTime() < 7 * 864e5); });
@@ -1317,13 +1341,17 @@ function visible() {
     a = a.filter(x => matchesQuery(x, state.query));
   }
   const newest = state.sort === "newest";
-  a.sort((x, y) => {
-    const dx = dateSortKey(x), dy = dateSortKey(y);
+  // Precompute the date keys once: the old comparator re-parsed each
+  // article's date O(log N) times during the sort.
+  const keyed = a.map(x => [dateSortKey(x), x]);
+  keyed.sort((p, q) => {
+    const dx = p[0], dy = q[0];
     if (dx === null && dy === null) return 0;
     if (dx === null) return 1; // dateless items always last
     if (dy === null) return -1;
     return (dy - dx) * (newest ? 1 : -1);
   });
+  a = keyed.map(p => p[1]);
   // Duplicates are collapsed in the cross-feed lists only (#115): a
   // feed's own view shows its articles as they are, saved articles
   // are keepers, and snoozed articles are already one-per-time.
@@ -1333,7 +1361,8 @@ function visible() {
 /* What the All/Unread lists actually show, for the sidebar counts:
    no muted feeds, no snoozed articles, duplicates collapsed. */
 function countableItems() {
-  let a = state.items.filter(x => !isSnoozed(x) && !isMutedFeed(x.feedId));
+  const mutedIds = new Set(state.feeds.filter(f => f.muted).map(f => f.id));
+  let a = state.items.filter(x => !isSnoozed(x) && !mutedIds.has(x.feedId));
   if (state.settings.hideDuplicates !== false) a = dedupeItems(a);
   return a;
 }
@@ -1352,16 +1381,21 @@ function renderNav() {
   const groups = {};
   for (const f of state.feeds) (groups[f.group || ""] ||= []).push(f);
   const groupNames = Object.keys(groups).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
+  // Unread counts, aggregated in one pass over the articles instead of
+  // a full scan per feed (and per folder) on every render.
+  const unreadByFeed = new Map();
+  for (const x of state.items) {
+    if (!x.read && !isSnoozed(x)) unreadByFeed.set(x.feedId, (unreadByFeed.get(x.feedId) || 0) + 1);
+  }
   $("#feeds").innerHTML = state.feeds.length ? groupNames.map(g => {
     // Ungrouped feeds render last, after the folders; label them so they
     // are not misread as belonging to the folder above them.
     // A folder name is a button (#118): it opens the folder's feeds as
     // one merged list, with its unread count beside it.
-    const folderIds = g ? new Set(groups[g].map(f => f.id)) : null;
-    const folderUnread = g ? state.items.filter(x => folderIds.has(x.feedId) && !x.read && !isSnoozed(x)).length : 0;
+    const folderUnread = g ? groups[g].reduce((n, f) => n + (unreadByFeed.get(f.id) || 0), 0) : 0;
     const label = g ? `<div class="folder-head"><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${folderUnread}</span>` : ""}</button><span class="folder-actions"><button type="button" data-folder-rename="${esc(g)}" title="Rename folder" aria-label="Rename folder ${esc(g)}">✎</button><button type="button" data-folder-delete="${esc(g)}" title="Delete folder" aria-label="Delete folder ${esc(g)}">×</button></span></div>` : (groupNames.length > 1 ? `<div class="feed-group">Ungrouped</div>` : "");
     return label + groups[g].map(f => {
-      const unreadCount = state.items.filter(x => x.feedId === f.id && !x.read).length;
+      const unreadCount = unreadByFeed.get(f.id) || 0;
       const err = f.error ? ` feed-error" title="${esc(f.error)}` : "";
       const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id;
       // The site's own favicon marks the row; if it fails to load the
@@ -1384,8 +1418,9 @@ function renderNav() {
   // Saved searches (#108): a stored filter as a sidebar view, with its
   // matching count. The feed map is built once for all searches.
   const ssFeedById = new Map(state.feeds.map(f => [f.id, f]));
+  const ssMuted = new Set(state.feeds.filter(f => f.muted).map(f => f.id));
   $("#savedSearches").innerHTML = state.savedSearches.length ? state.savedSearches.map(s => {
-    const n = state.items.filter(x => !isSnoozed(x) && !isMutedFeed(x.feedId) && savedSearchMatches(s, x, ssFeedById)).length;
+    const n = state.items.filter(x => !isSnoozed(x) && !ssMuted.has(x.feedId) && savedSearchMatches(s, x, ssFeedById)).length;
     const active = state.view === "savedSearch" && state.savedSearch === s.id;
     return `<button class="nav tag-row${active ? " active" : ""}" data-saved-search="${esc(s.id)}" ${active ? 'aria-current="true"' : ""}>${icon("search")} ${esc(s.name)}<span>${n}</span></button>`;
   }).join("") : '<p class="muted">Save a search to keep it here.</p>';
@@ -1442,7 +1477,7 @@ function renderList() {
     const thumb = state.settings.cardImage !== false && x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : "";
     const rt = readingTimeText(x);
     const snoozeNote = state.view === "snoozed" && x.snoozedUntil ? `<span>·</span><span>Snoozed until ${esc(fmtDateTime(new Date(x.snoozedUntil)))}</span>` : "";
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0"><div class="article-main"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? `<span>·</span><span>${rt}</span>` : ""}${snoozeNote}</div><h2>${esc(x.title)}</h2>${excerpt}<div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button>${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div>${thumb}</article>`;
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}"><div class="article-main"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? `<span>·</span><span>${rt}</span>` : ""}${snoozeNote}</div><h2>${esc(x.title)}</h2>${excerpt}<div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button>${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div>${thumb}</article>`;
   }).join("") : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>';
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
@@ -1488,6 +1523,9 @@ function cleanHTML(html, base) {
     [...n.attributes].forEach(a => {
       if (/^on/i.test(a.name)) { n.removeAttribute(a.name); return; }
       if ((a.name === "href" || a.name === "src") && !/^(https?:|mailto:|#|data:image\/)/i.test(a.value)) n.removeAttribute(a.name);
+      // SVG's xlink:href is a second href the check above never sees:
+      // <a xlink:href="javascript:..."> would run on click.
+      if (a.name === "xlink:href") n.removeAttribute(a.name);
       if (a.name === "style") n.removeAttribute(a.name);
     });
     if (n.tagName === "A" && n.getAttribute("href")) { n.target = "_blank"; n.rel = "noopener noreferrer"; }
@@ -1648,7 +1686,14 @@ async function loadFullText(item) {
       item.fullContent = body.innerHTML;
     }
     await put(item);
-    openItem(item.id);
+    // The article's body changed, so its cached search text is stale.
+    searchTextCache.delete(item.id);
+    // The load can take tens of seconds; the user may have opened
+    // another article or closed the reader meanwhile. Only re-open the
+    // article if it is still the one on screen, or the completed load
+    // would yank the reader back to a stale article.
+    if (state.selected === item.id) openItem(item.id);
+    else if (btn) { btn.disabled = false; btn.title = "Load full article"; }
     toast("Full article loaded.");
   } catch (e) {
     if (btn) { btn.disabled = false; btn.title = "Load full article"; }
@@ -1719,9 +1764,18 @@ async function unsnoozeItem(x) {
   toast("Back in your lists.");
 }
 function renderReader(x) {
-  // Re-rendering the reader rebuilds its buttons, so any playback
-  // stops first rather than playing on with no controls.
-  stopTTS();
+  // Re-rendering the same article (a save/read toggle, a tag change)
+  // must not stop playback: only stop TTS when the article changes.
+  if (tts?.itemId !== x.id) stopTTS();
+  // Preserve podcast playback across re-renders of the same episode:
+  // the audio element is rebuilt below, so its position, speed, and
+  // playing state are captured first and restored after. The scroll
+  // position is captured the same way, so a toggle does not jump the
+  // reader back to the top.
+  const oldAudio = $("#audioPlayer");
+  const audioState = oldAudio ? { time: oldAudio.currentTime, playing: !oldAudio.paused, rate: oldAudio.playbackRate } : null;
+  const prevScroll = $("#reader").scrollTop;
+  const wasOpen = $("#reader").dataset.openId === x.id;
   const f = state.feeds.find(f => f.id === x.feedId);
   const d = date(x.published);
   const rt = readingTimeText(x);
@@ -1786,10 +1840,6 @@ function renderReader(x) {
   // when the item has none stored, the first image in the feed
   // content is the article's picture, and failing that the picture
   // captured from the full text before the cut.
-  const firstImgSrc = html => {
-    const m = String(html || "").match(/<img[^>]+src=["']([^"']+)["']/i);
-    return m ? m[1] : "";
-  };
   const heroSrc = x.image || firstImgSrc(x.content) || articleImgSrc;
   const topImgChild = [...bodyToUse.children].slice(0, 10).find(c =>
     [...c.querySelectorAll("img")].some(isContentImg));
@@ -1807,11 +1857,25 @@ function renderReader(x) {
   // Highlights (#116): mark the saved passages back into the text.
   applyHighlights(bodyEl, highlightsFor(x.id));
   $("#reader").classList.add("open");
-  // A fresh article starts at the top: the old scroll position must not
-  // carry over into the progress bar's first reading.
-  $("#reader").scrollTop = 0;
+  // A fresh article starts at the top; a re-render of the same article
+  // (a save/read toggle, a tag change) keeps its scroll position.
+  $("#reader").dataset.openId = x.id;
+  $("#reader").scrollTop = wasOpen ? prevScroll : 0;
   updateReadProgress();
   bindAudioPlayer(x);
+  // Restore a playing episode across the re-render (see above): the
+  // position can only be set once the audio metadata has loaded.
+  if (audioState) {
+    const a2 = $("#audioPlayer");
+    if (a2) {
+      a2.playbackRate = audioState.rate;
+      const speed = $("#audioSpeed");
+      if (speed) speed.value = String(audioState.rate);
+      const restore = () => { try { a2.currentTime = audioState.time; } catch {} if (audioState.playing) a2.play().catch(() => {}); };
+      if (a2.readyState >= 1) restore();
+      else a2.addEventListener("loadedmetadata", restore, { once: true });
+    }
+  }
   if (history.state?.reader !== x.id) {
     try {
       if (history.state?.reader) history.replaceState({ reader: x.id }, "");
@@ -2126,18 +2190,44 @@ function openHighlight(hlId) {
 function openItem(itemId) {
   const x = state.items.find(i => i.id === itemId);
   if (!x) return;
+  const prevId = state.selected;
   state.selected = itemId;
-  if (!x.read) { x.read = true; put(x); }
+  const wasUnread = !x.read;
+  if (wasUnread) { x.read = true; put(x); }
   renderNav();
-  renderList();
+  // Opening an article in the Unread view removes it from that list,
+  // so the whole list has to be rebuilt there. Everywhere else the
+  // read state does not change membership, so only the two affected
+  // rows are updated instead of rebuilding the whole list.
+  if (state.view === "unread") {
+    renderList();
+  } else {
+    const prevRow = prevId ? document.querySelector(`[data-item="${CSS.escape(prevId)}"]`) : null;
+    if (prevRow) prevRow.classList.remove("selected");
+    const row = document.querySelector(`[data-item="${CSS.escape(itemId)}"]`);
+    if (row) {
+      row.classList.add("selected");
+      if (wasUnread) {
+        row.classList.remove("unread");
+        const readBtn = row.querySelector('[data-action="read"]');
+        if (readBtn) { readBtn.textContent = "○"; readBtn.setAttribute("aria-pressed", "true"); readBtn.setAttribute("aria-label", "Mark unread: " + x.title); }
+      }
+    }
+  }
   const row = document.querySelector(`[data-item="${CSS.escape(itemId)}"]`);
   if (row) { row.scrollIntoView({ block: "nearest" }); row.focus({ preventScroll: true }); }
+  // Mark above/below act on the selected article in this list: with a
+  // selection in the list, they are enabled.
+  const ma = $("#markAbove"), mb = $("#markBelow");
+  if (ma) ma.disabled = !row;
+  if (mb) mb.disabled = !row;
   renderReader(x);
 }
 function closeReader() {
   stopTTS();
   const wasOpen = $("#reader").classList.contains("open") || !!state.selected;
   $("#reader").classList.remove("open");
+  delete $("#reader").dataset.openId;
   state.selected = null;
   render(); // resets the reader pane to "Select an article to read"
   if (wasOpen && history.state?.reader) {
@@ -2241,12 +2331,15 @@ async function renameTag(oldName, rawName) {
   if (!name || name === oldName) return;
   if (state.tags.some(t => t.toLowerCase() === name.toLowerCase())) return toast("That tag already exists.");
   state.tags = state.tags.map(t => t === oldName ? name : t);
+  const changed = [];
   for (const x of state.items) {
     if ((x.tags || []).includes(oldName)) {
       x.tags = x.tags.map(t => t === oldName ? name : t);
-      await put(x);
+      changed.push(x);
     }
   }
+  // One batched write instead of a transaction per tagged article.
+  if (changed.length) await putMany(changed);
   if (state.view === "tag" && state.tag === oldName) state.tag = name;
   saveTags();
   toast("Tag renamed.");
@@ -2259,12 +2352,14 @@ async function deleteTag(name) {
     return;
   }
   pendingDelete = null;
+  const changed = [];
   for (const x of state.items) {
     if ((x.tags || []).includes(name)) {
       x.tags = x.tags.filter(t => t !== name);
-      await put(x);
+      changed.push(x);
     }
   }
+  if (changed.length) await putMany(changed);
   state.tags = state.tags.filter(t => t !== name);
   if (state.view === "tag" && state.tag === name) goView("all");
   saveTags();
@@ -2325,7 +2420,15 @@ async function unsubscribeFeed(id) {
   toast(`Unsubscribed from “${f.title}”. Saved articles were kept.`, { label: "Undo", fn: async () => {
     state.feeds.splice(idx, 0, f);
     saveFeeds();
-    if (removed.length) { await putMany(removed); state.items = [...state.items, ...removed]; }
+    if (removed.length) {
+      await putMany(removed);
+      // Merge by id: a refresh between the unsubscribe and the Undo
+      // may have re-added these articles, and concatenating would
+      // duplicate them in memory.
+      const byId = new Map(state.items.map(x => [x.id, x]));
+      for (const x of removed) byId.set(x.id, x);
+      state.items = [...byId.values()];
+    }
     render();
   } });
 }
@@ -2569,7 +2672,9 @@ async function importOPML(file) {
         await saveItems(feed, loaded.parsed.items);
         added++;
       } catch (e) { failed++; }
-      finally { done++; toast(`Importing feeds… ${done} of ${jobs.length}`); }
+      // Update the progress toast only every 5 feeds: rewriting it on
+      // every completion makes it flicker through a large import.
+      finally { done++; if (done % 5 === 0 || done === jobs.length) toast(`Importing feeds… ${done} of ${jobs.length}`); }
     });
   }
   // Cap concurrency so a large import does not fire all fetches at once.
@@ -2593,28 +2698,7 @@ async function importSettings(file) {
   try {
     const d = JSON.parse(await file.text());
     if (d.format !== "rss-reader-settings" || d.version !== 1 || !d.settings || typeof d.settings !== "object") throw Error("Unsupported settings file.");
-    // Whitelist + validate: unknown keys and out-of-range values are
-    // dropped instead of silently corrupting the settings.
-    const pick = (sel, val) => { const opts = [...$(sel).options].map(o => o.value); return opts.includes(val) ? val : null; };
-    const next = {};
-    const theme = pick("#themeSelect", d.settings.theme); if (theme) next.theme = theme;
-    const width = pick("#widthSelect", d.settings.width); if (width) next.width = width;
-    const size = pick("#sizeSelect", d.settings.size); if (size) next.size = size;
-    const font = pick("#fontSelect", d.settings.readerFont); if (font) next.readerFont = font;
-    const lh = pick("#lineHeightSelect", d.settings.lineHeight); if (lh) next.lineHeight = lh;
-    if (typeof d.settings.ttsRate === "number" && d.settings.ttsRate >= 0.5 && d.settings.ttsRate <= 2) next.ttsRate = d.settings.ttsRate;
-    const prog = pick("#progressSelect", d.settings.progressPosition); if (prog) next.progressPosition = prog;
-    const exc = pick("#cardExcerptSelect", d.settings.cardExcerpt); if (exc) next.cardExcerpt = exc;
-    if (typeof d.settings.cardImage === "boolean") next.cardImage = d.settings.cardImage;
-    if (typeof d.settings.hideDuplicates === "boolean") next.hideDuplicates = d.settings.hideDuplicates;
-    if (typeof d.settings.backgroundSync === "boolean") next.backgroundSync = d.settings.backgroundSync;
-    if (typeof d.settings.notifyNew === "boolean") next.notifyNew = d.settings.notifyNew;
-    if (typeof d.settings.proxyFallback === "boolean") next.proxyFallback = d.settings.proxyFallback;
-    if (typeof d.settings.sidebarCollapsed === "boolean") next.sidebarCollapsed = d.settings.sidebarCollapsed;
-    if (typeof d.settings.sidebarWidth === "number" && d.settings.sidebarWidth >= 180 && d.settings.sidebarWidth <= 420) next.sidebarWidth = d.settings.sidebarWidth;
-    if (typeof d.settings.listWidth === "number" && d.settings.listWidth >= 320 && d.settings.listWidth <= 640) next.listWidth = d.settings.listWidth;
-    if (d.settings.sort === "newest" || d.settings.sort === "oldest") next.sort = d.settings.sort;
-    if (["all", "today", "week"].includes(d.settings.filter)) next.filter = d.settings.filter;
+    const next = validateSettings(d.settings);
     if (!Object.keys(next).length) throw Error("No valid settings found in this file.");
     state.settings = { ...state.settings, ...next };
     state.sort = state.settings.sort || "newest";
@@ -3041,7 +3125,12 @@ function bind() {
       cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
       backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
       sidebarCollapsed: state.settings.sidebarCollapsed || false,
-      sidebarWidth: state.settings.sidebarWidth, listWidth: state.settings.listWidth
+      sidebarWidth: state.settings.sidebarWidth, listWidth: state.settings.listWidth,
+      // Sort and filter are set elsewhere (the sort button, the filter
+      // pills) and must survive a settings save, or a trip through
+      // Settings silently resets them.
+      sort: state.settings.sort || "newest",
+      filter: state.settings.filter || "all"
     };
     local(S, state.settings);
     applySettings();
@@ -3109,6 +3198,10 @@ function bind() {
     // shortcuts below must not hijack it (or double-activate it).
     if (tag === "BUTTON") return;
     if (pendingG) {
+      // Clear the old timeout first: without this, pressing "gg" leaves
+      // the first timeout armed, and it clears the new pending state
+      // early.
+      clearTimeout(pendingG);
       pendingG = null;
       if (e.key === "a") goView("all");
       else if (e.key === "u") goView("unread");
