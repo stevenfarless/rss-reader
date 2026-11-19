@@ -22,4 +22,5 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           node --check app.js
+          node --check sw.js
           node --check markdown.js

@@ -1,9 +1,18 @@
-const CACHE = "rss-reader-shell-v31";
+const CACHE = "rss-reader-shell-v32";
 const RUNTIME_CACHE = "rss-reader-runtime-v7";
 const RUNTIME_MAX = 50;
-const FILES = ["./", "./index.html", "./styles.css", "./markdown.js", "./purify.min.js", "./app.js", "./manifest.webmanifest", "./assets/icon.svg", "./assets/icon-192.png", "./assets/icon-512.png", "./assets/icon-maskable-512.png", "./assets/apple-touch-icon.png", "./fonts/GentiumBookPlus-Regular.woff2", "./fonts/GentiumBookPlus-Bold.woff2", "./fonts/GentiumBookPlus-Italic.woff2", "./fonts/GentiumBookPlus-BoldItalic.woff2"];
+const FILES = ["./", "./index.html", "./styles.css", "./markdown.js", "./purify.min.js", "./utils.js", "./app.js", "./manifest.webmanifest", "./assets/icon.svg", "./assets/icon-192.png", "./assets/icon-512.png", "./assets/icon-maskable-512.png", "./assets/apple-touch-icon.png", "./fonts/GentiumBookPlus-Regular.woff2", "./fonts/GentiumBookPlus-Bold.woff2", "./fonts/GentiumBookPlus-Italic.woff2", "./fonts/GentiumBookPlus-BoldItalic.woff2"];
+/* Install is per-file, not all-or-nothing: one missing file (a font,
+   an icon) must not reject the whole install and leave the worker
+   unregistered, with no offline and no background sync. A failed file
+   is skipped; the shell is network-first, so it is fetched on demand. */
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(async c => {
+    await Promise.all(FILES.map(async f => {
+      try { await c.add(f); } catch {}
+    }));
+    await self.skipWaiting();
+  }));
 });
 self.addEventListener("activate", e => {
   e.waitUntil(
@@ -22,7 +31,7 @@ async function trimRuntime(cache) {
    a cache fallback, so a new build reaches returning users without
    waiting on a hand-bumped version string. Fonts and icons stay
    cache-first: they change rarely and are needed offline. */
-const SHELL_RE = /(^|\/)(index\.html|styles\.css|markdown\.js|purify\.min\.js|app\.js)$|\/$/;
+const SHELL_RE = /(^|\/)(index\.html|styles\.css|markdown\.js|purify\.min\.js|utils\.js|app\.js)$|\/$/;
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
   const u = new URL(e.request.url);
@@ -33,7 +42,9 @@ self.addEventListener("fetch", e => {
         const r = await fetch(e.request);
         if (r.ok) {
           const cache = await caches.open(CACHE);
-          cache.put(e.request, r.clone());
+          // Fire-and-forget, with a catch: a quota error must not
+          // become an unhandled rejection in the worker.
+          cache.put(e.request, r.clone()).catch(() => {});
         }
         return r;
       } catch {
@@ -294,8 +305,10 @@ async function swSaveItems(db, feed, rawItems) {
     });
   }
   if (fresh.length) await swPutAll(db, "items", fresh);
-  const after = await swGetAll(db, "items");
-  const mineAfter = after.filter(i => i.feedId === feed.id)
+  // Cap the feed in memory instead of re-reading the whole table: the
+  // fresh items replace their old versions, the rest carry over.
+  const freshIds = new Set(fresh.map(x => x.id));
+  const mineAfter = [...fresh, ...mine.filter(m => !freshIds.has(m.id))]
     .sort((a, b) => (b.published ? Date.parse(b.published) : 0) - (a.published ? Date.parse(a.published) : 0));
   const extra = mineAfter.slice(SW_MAX_ITEMS_PER_FEED).filter(x => !x.saved).map(x => x.id);
   if (extra.length) await swDeleteAll(db, "items", extra);
@@ -311,7 +324,19 @@ async function swRefreshFeeds() {
     if (!feeds.length) return;
     let newCount = 0;
     const newByFeed = [];
-    for (const feed of feeds) {
+    // Refresh up to 3 feeds at a time instead of one after another:
+    // a slow publisher no longer holds up every feed behind it.
+    const pool = async (items, n, fn) => {
+      const queue = [...items];
+      const workers = Array.from({ length: Math.min(n, queue.length) }, async () => {
+        while (queue.length) {
+          const item = queue.shift();
+          await fn(item);
+        }
+      });
+      await Promise.all(workers);
+    };
+    await pool(feeds, 3, async feed => {
       try {
         const items = await swLoadFeed(feed, settings);
         const added = await swSaveItems(db, feed, items);
@@ -319,7 +344,7 @@ async function swRefreshFeeds() {
       } catch (e) {
         // One feed failing must not stop the others.
       }
-    }
+    });
     if (newCount > 0 && settings.notifyNew) {
       await self.registration.showNotification("RSS Reader", {
         body: newByFeed.length === 1
