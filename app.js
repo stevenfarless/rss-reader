@@ -16,6 +16,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const K = "rss-reader.feeds.v1", S = "rss-reader.settings.v1", DB = "rss-reader-cache";
 const KF = "rss-reader.folders.v1", KT = "rss-reader.tags.v1", LR = "rss-reader.lastRefresh.v1";
+const KS = "rss-reader.savedSearches.v1", KR = "rss-reader.rules.v1";
 const PROXY_API = "https://api.rss2json.com/v1/api.json?rss_url=";
 const ALLORIGINS = "https://api.allorigins.win/raw?url=";
 const JINA = "https://r.jina.ai/";
@@ -24,12 +25,12 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 
 const state = {
-  feeds: [], items: [], view: "all", feed: null, filter: "all",
-  sort: "newest", query: "", selected: null, tag: null,
-  folders: [], tags: [],
+  feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
+  sort: "newest", query: "", selected: null, tag: null, savedSearch: null,
+  folders: [], tags: [], savedSearches: [], rules: [],
   settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, proxyFallback: false, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false }
 };
-let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null;
+let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null;
 /* Text-to-speech state (#105): the article being read, its sentence
    chunks, and where playback has reached. Null when nothing is playing. */
 let tts = null;
@@ -299,6 +300,8 @@ function loadLocal() {
   state.filter = ["all", "today", "week"].includes(state.settings.filter) ? state.settings.filter : "all";
   try { state.folders = JSON.parse(localStorage.getItem(KF) || "[]"); } catch {}
   try { state.tags = JSON.parse(localStorage.getItem(KT) || "[]"); } catch {}
+  try { state.savedSearches = JSON.parse(localStorage.getItem(KS) || "[]"); if (!Array.isArray(state.savedSearches)) state.savedSearches = []; } catch { state.savedSearches = []; }
+  try { state.rules = JSON.parse(localStorage.getItem(KR) || "[]"); if (!Array.isArray(state.rules)) state.rules = []; } catch { state.rules = []; }
   try { state.lastRefresh = Number(localStorage.getItem(LR) || 0) || 0; } catch { state.lastRefresh = 0; }
   syncFolders();
 }
@@ -311,6 +314,8 @@ function saveFeeds() {
 }
 function saveFolders() { local(KF, state.folders); }
 function saveTags() { local(KT, state.tags); }
+function saveSavedSearches() { local(KS, state.savedSearches); }
+function saveRules() { local(KR, state.rules); }
 /* Folders come from the stored list plus any group a feed already has
    (e.g. from an OPML import), so imported folders never vanish. */
 function syncFolders() {
@@ -332,7 +337,7 @@ function syncTags() {
    operation retries once after reopening. */
 function openDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open(DB, 2);
+    const r = indexedDB.open(DB, 3);
     r.onupgradeneeded = () => {
       const d = r.result;
       if (!d.objectStoreNames.contains("items")) d.createObjectStore("items", { keyPath: "id" });
@@ -340,6 +345,9 @@ function openDB() {
       // it cannot see localStorage, so the feed list and the
       // sync-relevant settings are mirrored here.
       if (!d.objectStoreNames.contains("sync")) d.createObjectStore("sync", { keyPath: "key" });
+      // Highlights (#116): the article id, the selected text, and an
+      // optional note, rendered back into the article when it opens.
+      if (!d.objectStoreNames.contains("highlights")) d.createObjectStore("highlights", { keyPath: "id" });
     };
     r.onsuccess = () => {
       r.result.onclose = () => { db = null; };
@@ -376,6 +384,10 @@ function runTx(mode, op, store = "items") {
 function dbAll() { return runTx("readonly", s => s.getAll()); }
 function put(item) { return runTx("readwrite", s => s.put(item)); }
 function dbDelete(itemId) { return runTx("readwrite", s => s.delete(itemId)); }
+/* Highlights (#116) live in their own store, keyed by highlight id. */
+function hlAll() { return runTx("readonly", s => s.getAll(), "highlights"); }
+function hlPut(h) { return runTx("readwrite", s => s.put(h), "highlights"); }
+function hlDelete(hlId) { return runTx("readwrite", s => s.delete(hlId), "highlights"); }
 /* Batch IndexedDB writes: one transaction for many items, with the
    same reopen-and-retry as runTx. */
 function runBatch(mode, fn, store = "items") {
@@ -1113,6 +1125,33 @@ async function addFeed(raw) {
   toast("Feed added" + (loaded.via === "feed" ? "." : loaded.via === "wp" ? " (via the site's WordPress API)." : " (via the proxy fallback)."));
 }
 
+/* Rules (#109): run on newly fetched articles at refresh time. A rule
+   matches when its scope (all feeds, one folder, or one feed) matches
+   and every condition it sets (title keyword, author) matches. The
+   actions add a tag, save the article, or mark it read. Rules never
+   delete anything, and they only run on new arrivals, never on articles
+   the user already has (so a rule cannot re-tag something the user
+   untagged, and a rule that marks read cannot hide an article the user
+   already read and then unread). */
+function ruleMatches(rule, feed, item) {
+  if (!rule.enabled) return false;
+  if (rule.scope?.startsWith("feed:")) { if (feed.id !== rule.scope.slice(5)) return false; }
+  else if (rule.scope?.startsWith("folder:")) { if ((feed.group || "") !== rule.scope.slice(7)) return false; }
+  if (rule.keyword && !(item.title || "").toLowerCase().includes(rule.keyword.toLowerCase())) return false;
+  if (rule.author && !(item.author || "").toLowerCase().includes(rule.author.toLowerCase())) return false;
+  return true;
+}
+function applyRules(feed, item) {
+  for (const rule of state.rules) {
+    if (!ruleMatches(rule, feed, item)) continue;
+    if (rule.tag) {
+      const t = rule.tag.trim();
+      if (t && !(item.tags || []).includes(t)) (item.tags ||= []).push(t);
+    }
+    if (rule.save) item.saved = true;
+    if (rule.markRead) item.read = true;
+  }
+}
 async function saveItems(feed, items) {
   const seen = new Set();
   // Map lookups instead of a linear scan per item, and one batched
@@ -1126,7 +1165,7 @@ async function saveItems(feed, items) {
     const key = feed.id + "|" + (x.guid || link);
     seen.add(key);
     const old = byId.get(key) || byUrl.get(feed.id + "|" + link);
-    fresh.push({
+    const freshItem = {
       id: key, feedId: feed.id, feedTitle: feed.title,
       title: x.title, url: link, guid: x.guid || "",
       summary: cleanSummary(x.summary || ""), content: x.content || "",
@@ -1139,7 +1178,10 @@ async function saveItems(feed, items) {
       read: old?.read || false, saved: old?.saved || false,
       snoozedUntil: old?.snoozedUntil || null,
       tags: old?.tags || []
-    });
+    };
+    // Rules (#109) run on new arrivals only.
+    if (!old) applyRules(feed, freshItem);
+    fresh.push(freshItem);
   }
   await putMany(fresh);
   // Prune items no longer in the feed, unless the user saved them, read them,
@@ -1191,6 +1233,10 @@ async function refresh() {
     const ok = results.filter(Boolean).length;
     const failed = state.feeds.filter((f, i) => !results[i]).map(f => f.title);
     saveFeeds();
+    // Rules (#109) can add tags to new articles; keep the tag list
+    // current after a refresh.
+    syncTags();
+    saveTags();
     state.lastRefresh = Date.now();
     try { localStorage.setItem(LR, String(state.lastRefresh)); } catch {}
     render();
@@ -1211,15 +1257,54 @@ const isSnoozed = x => x.snoozedUntil && x.snoozedUntil > Date.now();
 /* A muted feed (#117) still exists in the sidebar, but its articles
    stay out of the cross-feed lists until it is unmuted. */
 const isMutedFeed = feedId => state.feeds.find(f => f.id === feedId)?.muted;
+/* Full-text article match (#107, reused by saved searches #108): the
+   short fields first, then the body the reader would show (loaded
+   full text, then the feed content), stripped of markup. */
+function matchesQuery(x, q) {
+  q = String(q || "").toLowerCase();
+  if (!q) return true;
+  const hay = [x.title, x.summary, x.author, x.feedTitle, (x.tags || []).join(" ")].join(" ").toLowerCase();
+  if (hay.includes(q)) return true;
+  return plainText(x.fullContent || x.content || "").toLowerCase().includes(q);
+}
+/* Does an article match a saved search (#108)? The feed group comes
+   from a lookup map when the caller has one (visible builds it once),
+   otherwise from the feed list. */
+function savedSearchMatches(s, x, feedById) {
+  if (!s) return false;
+  if (s.scope?.startsWith("feed:")) { if (x.feedId !== s.scope.slice(5)) return false; }
+  else if (s.scope?.startsWith("folder:")) {
+    const g = feedById ? (feedById.get(x.feedId)?.group || "") : (state.feeds.find(f => f.id === x.feedId)?.group || "");
+    if (g !== s.scope.slice(7)) return false;
+  }
+  if (s.tag && !(x.tags || []).includes(s.tag)) return false;
+  if (s.unreadOnly && x.read) return false;
+  return matchesQuery(x, s.query);
+}
 function visible() {
+  // A folder view (#118) and a saved search (#108) need each article's
+  // feed group; build the lookup once instead of scanning per article.
+  const feedById = (state.view === "folder" || state.view === "savedSearch") ? new Map(state.feeds.map(f => [f.id, f])) : null;
   let a = state.items.filter(x => {
     if (state.view === "snoozed") return isSnoozed(x);
     if (isSnoozed(x)) return false;
     if (state.view === "unread") return !x.read;
     if (state.view === "saved") return x.saved;
+    // The Highlights view (#116) lists the highlights themselves, not
+    // articles, so renderList renders it separately; visible returns
+    // the highlighted articles for the counts and keyboard navigation.
+    if (state.view === "highlights") return state.highlights.some(h => h.itemId === x.id);
     if (state.view === "feed") return x.feedId === state.feed;
     if (isMutedFeed(x.feedId)) return false;
+    // A folder view (#118) is a cross-feed list, like All and Unread:
+    // muted feeds and snoozed articles stay out, duplicates collapse.
+    if (state.view === "folder") return (feedById.get(x.feedId)?.group || "") === state.folder;
     if (state.view === "tag") return (x.tags || []).includes(state.tag);
+    // A saved search (#108) is a stored filter: keywords, a feed or
+    // folder scope, a tag, and unread-only, run over the library.
+    if (state.view === "savedSearch") {
+      return savedSearchMatches(state.savedSearches.find(v => v.id === state.savedSearch), x, feedById);
+    }
     return true;
   });
   if (state.filter === "today") {
@@ -1229,8 +1314,7 @@ function visible() {
     a = a.filter(x => { const d = date(x.published); return d && (Date.now() - d.getTime() < 7 * 864e5); });
   }
   if (state.query) {
-    const q = state.query.toLowerCase();
-    a = a.filter(x => [x.title, x.summary, x.author, x.feedTitle, (x.tags || []).join(" ")].join(" ").toLowerCase().includes(q));
+    a = a.filter(x => matchesQuery(x, state.query));
   }
   const newest = state.sort === "newest";
   a.sort((x, y) => {
@@ -1259,6 +1343,7 @@ function renderNav() {
   $("#unreadCount").textContent = shown.filter(x => !x.read).length;
   $("#savedCount").textContent = state.items.filter(x => x.saved && !isSnoozed(x)).length;
   $("#snoozedCount").textContent = state.items.filter(isSnoozed).length;
+  $("#highlightsCount").textContent = state.highlights.length;
   $$(".nav").forEach(b => {
     b.classList.toggle("active", b.dataset.view === state.view && state.view !== "feed");
     if (b.dataset.view === state.view && state.view !== "feed") b.setAttribute("aria-current", "true");
@@ -1270,7 +1355,11 @@ function renderNav() {
   $("#feeds").innerHTML = state.feeds.length ? groupNames.map(g => {
     // Ungrouped feeds render last, after the folders; label them so they
     // are not misread as belonging to the folder above them.
-    const label = g ? `<div class="folder-head"><span class="feed-group">${esc(g)}</span><span class="folder-actions"><button type="button" data-folder-rename="${esc(g)}" title="Rename folder" aria-label="Rename folder ${esc(g)}">✎</button><button type="button" data-folder-delete="${esc(g)}" title="Delete folder" aria-label="Delete folder ${esc(g)}">×</button></span></div>` : (groupNames.length > 1 ? `<div class="feed-group">Ungrouped</div>` : "");
+    // A folder name is a button (#118): it opens the folder's feeds as
+    // one merged list, with its unread count beside it.
+    const folderIds = g ? new Set(groups[g].map(f => f.id)) : null;
+    const folderUnread = g ? state.items.filter(x => folderIds.has(x.feedId) && !x.read && !isSnoozed(x)).length : 0;
+    const label = g ? `<div class="folder-head"><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${folderUnread}</span>` : ""}</button><span class="folder-actions"><button type="button" data-folder-rename="${esc(g)}" title="Rename folder" aria-label="Rename folder ${esc(g)}">✎</button><button type="button" data-folder-delete="${esc(g)}" title="Delete folder" aria-label="Delete folder ${esc(g)}">×</button></span></div>` : (groupNames.length > 1 ? `<div class="feed-group">Ungrouped</div>` : "");
     return label + groups[g].map(f => {
       const unreadCount = state.items.filter(x => x.feedId === f.id && !x.read).length;
       const err = f.error ? ` feed-error" title="${esc(f.error)}` : "";
@@ -1292,11 +1381,42 @@ function renderNav() {
   $("#tags").innerHTML = state.tags.length ? state.tags.map(t =>
     `<button class="nav tag-row${state.view === "tag" && state.tag === t ? " active" : ""}" data-tag="${esc(t)}" ${state.view === "tag" && state.tag === t ? 'aria-current="true"' : ""}>${icon("tag")} ${esc(t)}<span>${tagCounts[t] || 0}</span></button>`
   ).join("") : '<p class="muted">Tag articles from the reader to find them here.</p>';
+  // Saved searches (#108): a stored filter as a sidebar view, with its
+  // matching count. The feed map is built once for all searches.
+  const ssFeedById = new Map(state.feeds.map(f => [f.id, f]));
+  $("#savedSearches").innerHTML = state.savedSearches.length ? state.savedSearches.map(s => {
+    const n = state.items.filter(x => !isSnoozed(x) && !isMutedFeed(x.feedId) && savedSearchMatches(s, x, ssFeedById)).length;
+    const active = state.view === "savedSearch" && state.savedSearch === s.id;
+    return `<button class="nav tag-row${active ? " active" : ""}" data-saved-search="${esc(s.id)}" ${active ? 'aria-current="true"' : ""}>${icon("search")} ${esc(s.name)}<span>${n}</span></button>`;
+  }).join("") : '<p class="muted">Save a search to keep it here.</p>';
+}
+/* The Highlights view (#116): every highlight, newest first, with the
+   article it came from. Clicking one opens the article at the passage. */
+function renderHighlightsList() {
+  const list = [...state.highlights].sort((a, b) => (b.created || 0) - (a.created || 0));
+  $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
+  const dup = $("#dupToggle");
+  if (dup) dup.textContent = state.settings.hideDuplicates !== false ? "Duplicates hidden" : "Duplicates shown";
+  $$(".filter").forEach(x => x.classList.toggle("active", x.dataset.filter === state.filter));
+  const upd = state.lastRefresh ? " · Updated " + new Date(state.lastRefresh).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  $("#subtitle").textContent = "Passages you highlighted, with your notes." + upd;
+  $("#articleList").innerHTML = list.length ? list.map(h => {
+    const x = state.items.find(i => i.id === h.itemId);
+    const d = x ? date(x.published) : null;
+    return `<article class="article hl-row" data-hl-open="${esc(h.id)}" tabindex="0"><div class="article-main"><div class="article-meta"><span>${esc(x ? feedTitleFor(x) : "Article")}</span><span>·</span><time>${esc(h.created ? relDate(new Date(h.created)) : "")}</time></div><blockquote class="hl-quote">${esc(h.text)}</blockquote>${h.note ? `<p class="hl-note">${esc(h.note)}</p>` : ""}<div class="article-bottom"><span>${esc(x ? x.title : "Article no longer in the library")}</span><span class="article-actions"><button data-action="hl-delete" data-id="${esc(h.id)}" title="Delete highlight" aria-label="Delete highlight">×</button></span></div></div></article>`;
+  }).join("") : '<div class="empty"><div class="empty-mark">R</div><h2>No highlights yet.</h2><p>Select text in an article to highlight it, with an optional note.</p></div>';
+  const ma = $("#markAbove"), mb = $("#markBelow");
+  if (ma) ma.disabled = true;
+  if (mb) mb.disabled = true;
 }
 function renderList() {
   const a = visible();
-  const titles = { all: "All articles", unread: "Unread", saved: "Saved", snoozed: "Snoozed", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", tag: state.tag ? "Tag: " + state.tag : "Tag" };
+  const titles = { all: "All articles", unread: "Unread", saved: "Saved", snoozed: "Snoozed", highlights: "Highlights", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", folder: state.folder || "Folder", savedSearch: state.savedSearches.find(s => s.id === state.savedSearch)?.name || "Saved search", tag: state.tag ? "Tag: " + state.tag : "Tag" };
   $("#heading").textContent = titles[state.view];
+  $("#mobileTitle").textContent = titles[state.view];
+  // The Highlights view (#116) lists the highlights themselves, newest
+  // first, with the article each came from; clicking one opens it.
+  if (state.view === "highlights") { renderHighlightsList(); return; }
   $("#mobileTitle").textContent = titles[state.view];
   // Keep the sort button, the duplicates toggle, and the filter pills
   // in step with the persisted sort/filter, so a reload restores them.
@@ -1307,6 +1427,9 @@ function renderList() {
   const base = state.view === "saved" ? "Articles you have kept for later."
     : state.view === "snoozed" ? "Articles waiting to come back."
     : state.view === "unread" ? "Stories you have not read yet."
+    : state.view === "highlights" ? "Passages you highlighted, with your notes."
+    : state.view === "folder" ? `Every feed in “${state.folder}”, newest first.`
+    : state.view === "savedSearch" ? "A saved filter, run over your library."
     : state.view === "tag" ? `Articles tagged “${state.tag}”.`
     : "Your subscriptions, gathered in one place.";
   const upd = state.lastRefresh ? " · Updated " + new Date(state.lastRefresh).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
@@ -1623,7 +1746,7 @@ function renderReader(x) {
   const isAudio = !!x.enclosure?.type?.startsWith("audio/");
   const canListen = "speechSynthesis" in window;
   const audioHTML = isAudio ? `<div class="audio-player"><audio id="audioPlayer" controls preload="metadata" src="${esc(x.enclosure.url)}"></audio><div class="audio-controls"><label>Speed <select id="audioSpeed" aria-label="Playback speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><a href="${esc(x.enclosure.url)}" target="_blank" rel="noopener">Open audio ↗</a></div></div>` : "";
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="false" ${canListen ? "" : "disabled"}>${icon("speak")}</button><button data-reader="share" title="Share article" aria-label="Share article">${icon("share")}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">${icon("clock")}</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${icon("doc")}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}${rt ? " · " + rt : ""}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${audioHTML}${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div></div>${progTop ? "" : barHTML}`;
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="false" ${canListen ? "" : "disabled"}>${icon("speak")}</button><button data-reader="share" title="Share article" aria-label="Share article">${icon("share")}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">${icon("clock")}</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${icon("doc")}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}${rt ? " · " + rt : ""}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${audioHTML}${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
   const bodyEl = $("#body");
   // Append the cleaned body's children, not the <body> element itself.
   // cleanHTML drops the page chrome (header/nav/footer); the leading-nav
@@ -1681,6 +1804,8 @@ function renderReader(x) {
     bodyToUse.prepend(hero);
   }
   bodyEl.append(...bodyToUse.childNodes);
+  // Highlights (#116): mark the saved passages back into the text.
+  applyHighlights(bodyEl, highlightsFor(x.id));
   $("#reader").classList.add("open");
   // A fresh article starts at the top: the old scroll position must not
   // carry over into the progress bar's first reading.
@@ -1829,6 +1954,175 @@ async function shareArticle(x) {
     toast(copyFallback() ? "Link copied to clipboard." : "Sharing is not available in this browser. Open the original article to copy its address.");
   }
 }
+/* ---------- highlights and notes (#116) ---------- */
+/* The article's highlights, newest first. */
+const highlightsFor = itemId => state.highlights.filter(h => h.itemId === itemId).sort((a, b) => (b.created || 0) - (a.created || 0));
+/* Wrap a highlight's text in the rendered article body. The body is
+   rebuilt from HTML on every open, so highlights are found again by
+   their text: walk the text nodes in order, track the character offset,
+   and wrap the matching range by splitting nodes. Whitespace is
+   collapsed on both sides first, so a selection that crossed a line
+   break still matches. A highlight whose text is no longer in the
+   article (the text changed after a re-fetch) is skipped, not forced. */
+function markHighlightText(bodyEl, h) {
+  const text = h?.text || "";
+  const needle = String(text || "").replace(/\s+/g, " ").trim();
+  if (!needle) return false;
+  const walker = document.createTreeWalker(bodyEl, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  let raw = "";
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) { nodes.push(n); raw += n.nodeValue; }
+  // Collapse runs of whitespace to one space, remembering for each
+  // collapsed character the raw index it came from.
+  const map = [];
+  let collapsed = "";
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (/\s/.test(c)) {
+      if (collapsed && !collapsed.endsWith(" ")) { collapsed += " "; map.push(i); }
+    } else { collapsed += c; map.push(i); }
+  }
+  const start = collapsed.indexOf(needle);
+  if (start < 0) return false;
+  const rawStart = map[start];
+  const rawEnd = map[start + needle.length - 1] + 1;
+  // Collect the (node, local start, local end) pieces, then wrap them
+  // last-to-first so splitting one node never moves another's offsets.
+  const pieces = [];
+  let offset = 0;
+  for (const n of nodes) {
+    const nodeEnd = offset + n.nodeValue.length;
+    const s = Math.max(rawStart, offset), e = Math.min(rawEnd, nodeEnd);
+    if (s < e) pieces.push([n, s - offset, e - offset]);
+    offset = nodeEnd;
+  }
+  for (let i = pieces.length - 1; i >= 0; i--) {
+    const [n, s, e] = pieces[i];
+    const mid = n.splitText(s);
+    mid.splitText(e - s);
+    const mark = document.createElement("mark");
+    mark.className = "hl";
+    if (h?.id) mark.dataset.hlId = h.id;
+    mid.parentNode.replaceChild(mark, mid);
+    mark.appendChild(mid);
+  }
+  return pieces.length > 0;
+}
+function applyHighlights(bodyEl, highlights) {
+  for (const h of highlights) markHighlightText(bodyEl, h);
+}
+async function saveHighlight(itemId, text, note) {
+  const h = { id: id(), itemId, text: String(text || "").replace(/\s+/g, " ").trim(), note: (note || "").trim(), created: Date.now() };
+  if (!h.text) return null;
+  state.highlights.push(h);
+  try { await hlPut(h); } catch (e) { state.highlights = state.highlights.filter(v => v.id !== h.id); toast("Could not save the highlight."); return null; }
+  return h;
+}
+async function deleteHighlight(hlId) {
+  state.highlights = state.highlights.filter(v => v.id !== hlId);
+  try { await hlDelete(hlId); } catch {}
+  render();
+  if (state.selected) { const x = selectedItem(); if (x) renderReader(x); }
+  toast("Highlight deleted.");
+}
+async function updateHighlightNote(hlId, note) {
+  const h = state.highlights.find(v => v.id === hlId);
+  if (!h) return;
+  h.note = (note || "").trim();
+  try { await hlPut(h); } catch {}
+  if (state.selected) { const x = selectedItem(); if (x) renderReader(x); }
+  renderNav();
+}
+/* The text the user has selected in the open article, waiting to be
+   saved as a highlight, and the highlight being edited (its note). */
+let pendingHighlight = null, editingHlId = null;
+/* Show the floating Highlight button while there is a selection inside
+   the article body (#116). It sits just above the selection so it does
+   not cover the text, and hides on scroll or when the selection clears. */
+function updateHlBtn() {
+  const btn = $("#hlBtn");
+  if (!btn || !state.selected) { if (btn) btn.hidden = true; return; }
+  // Typing in a field is not a selection to highlight.
+  const tag = document.activeElement?.tagName;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(tag)) { btn.hidden = true; return; }
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) { btn.hidden = true; return; }
+  const body = $("#body");
+  if (!body || !body.contains(sel.anchorNode) || !body.contains(sel.focusNode)) { btn.hidden = true; return; }
+  const text = sel.toString().replace(/\s+/g, " ").trim();
+  if (!text) { btn.hidden = true; return; }
+  pendingHighlight = { itemId: state.selected, text };
+  const r = sel.getRangeAt(0).getBoundingClientRect();
+  btn.style.left = Math.max(8, Math.min(window.innerWidth - 110, r.left + r.width / 2 - 45)) + "px";
+  btn.style.top = Math.max(8, r.top - 42) + "px";
+  btn.hidden = false;
+}
+function showHlDialog() {
+  if (!pendingHighlight) return;
+  editingHlId = null;
+  $("#hlQuote").textContent = pendingHighlight.text;
+  $("#hlNote").value = "";
+  $("#hlDialog").showModal();
+  $("#hlNote").focus();
+}
+/* Edit the note on an existing highlight, reusing the same dialog. */
+function showHlNoteDialog(hlId) {
+  const h = state.highlights.find(v => v.id === hlId);
+  if (!h) return;
+  editingHlId = hlId;
+  pendingHighlight = null;
+  $("#hlQuote").textContent = h.text;
+  $("#hlNote").value = h.note || "";
+  $("#hlDialog").showModal();
+  $("#hlNote").focus();
+}
+async function saveHlFromDialog() {
+  if (editingHlId) {
+    await updateHighlightNote(editingHlId, $("#hlNote").value);
+    $("#hlDialog").close();
+    editingHlId = null;
+    toast("Note saved.");
+    return;
+  }
+  if (!pendingHighlight) return;
+  const h = await saveHighlight(pendingHighlight.itemId, pendingHighlight.text, $("#hlNote").value);
+  $("#hlDialog").close();
+  $("#hlBtn").hidden = true;
+  window.getSelection()?.removeAllRanges();
+  pendingHighlight = null;
+  if (h) {
+    const x = selectedItem();
+    if (x) renderReader(x);
+    renderNav();
+    toast("Highlight saved.");
+  }
+}
+/* The article's highlights, listed under it: the quoted text, the note,
+   and a way to jump to the passage or delete it. */
+function highlightsSectionHTML(x) {
+  const list = highlightsFor(x.id);
+  if (!list.length) return `<div class="hl-section"><h3>Highlights</h3><p class="muted">Select text in the article to highlight it, with an optional note.</p></div>`;
+  return `<div class="hl-section"><h3>Highlights (${list.length})</h3>` + list.map(h =>
+    `<div class="hl-item" data-hl-id="${esc(h.id)}"><blockquote>${esc(h.text)}</blockquote>` +
+    (h.note ? `<p class="hl-note">${esc(h.note)}</p>` : "") +
+    `<div class="hl-actions"><button type="button" class="quiet" data-hl-note="${esc(h.id)}">${h.note ? "Edit note" : "Add note"}</button><button type="button" class="quiet" data-hl-goto="${esc(h.id)}">Show in article</button><button type="button" class="quiet" data-hl-delete="${esc(h.id)}">Delete</button></div></div>`
+  ).join("") + `</div>`;
+}
+/* Open a highlight's article and scroll to the passage (#116). */
+function scrollToHighlight(hlId) {
+  const mark = document.querySelector(`mark.hl[data-hl-id="${CSS.escape(hlId)}"]`);
+  if (!mark) { toast("That passage is not in the article text anymore."); return; }
+  mark.scrollIntoView({ behavior: "smooth", block: "center" });
+  mark.classList.add("hl-flash");
+  setTimeout(() => mark.classList.remove("hl-flash"), 1200);
+}
+function openHighlight(hlId) {
+  const h = state.highlights.find(v => v.id === hlId);
+  if (!h) return;
+  openItem(h.itemId);
+  // The reader renders synchronously, so the mark is there to scroll to.
+  requestAnimationFrame(() => scrollToHighlight(hlId));
+}
 function openItem(itemId) {
   const x = state.items.find(i => i.id === itemId);
   if (!x) return;
@@ -1859,7 +2153,7 @@ function render() {
 /* ---------- folders & tags ---------- */
 function goTag(tag) {
   stopTTS();
-  state.view = "tag"; state.tag = tag; state.feed = null; state.selected = null;
+  state.view = "tag"; state.tag = tag; state.feed = null; state.folder = null; state.savedSearch = null; state.selected = null;
   $("#reader").classList.remove("open");
   render();
 }
@@ -2040,10 +2334,36 @@ async function doRename(rawName) {
   const { kind, old } = orgEdit;
   orgEdit = null;
   if (kind === "folder") renameFolder(old, rawName);
+  else if (kind === "savedSearch") renameSavedSearch(old, rawName);
   else await renameTag(old, rawName);
   renderOrganize();
   render();
   if (state.selected) { const x = selectedItem(); if (x) renderReader(x); }
+}
+/* Rename a saved search (#108): only the name changes, the filter
+   stays as it is. */
+function renameSavedSearch(id, rawName) {
+  const name = (rawName || "").trim();
+  const s = state.savedSearches.find(v => v.id === id);
+  if (!s || !name) return;
+  s.name = name;
+  saveSavedSearches();
+  toast(`Renamed to “${name}”.`);
+}
+function deleteSavedSearch(id) {
+  if (!pendingDelete || pendingDelete.kind !== "savedSearch" || pendingDelete.id !== id) {
+    pendingDelete = { kind: "savedSearch", id };
+    renderOrganize();
+    toast("Click Delete again to remove the saved search.");
+    return;
+  }
+  pendingDelete = null;
+  state.savedSearches = state.savedSearches.filter(v => v.id !== id);
+  saveSavedSearches();
+  if (state.view === "savedSearch" && state.savedSearch === id) goView("all");
+  renderOrganize();
+  render();
+  toast("Saved search deleted.");
 }
 function renderOrganize() {
   const folderRow = name => {
@@ -2062,10 +2382,19 @@ function renderOrganize() {
     }
     return `<div class="org-row"><span class="org-name">${icon("tag")} ${esc(name)}</span><small>${count} article${count === 1 ? "" : "s"}</small><button type="button" class="quiet" data-org-rename-tag="${esc(name)}">Rename</button><button type="button" class="quiet" data-org-delete-tag="${esc(name)}">${armed ? "Confirm delete" : "Delete"}</button></div>`;
   };
+  const savedSearchRow = s => {
+    const armed = pendingDelete?.kind === "savedSearch" && pendingDelete.id === s.id;
+    if (orgEdit?.kind === "savedSearch" && orgEdit.old === s.id) {
+      return `<div class="org-row"><input id="orgEditInput" value="${esc(s.name)}" aria-label="Saved search name"><button type="button" class="quiet" data-org-save-rename>Save</button><button type="button" class="quiet" data-org-cancel-rename>Cancel</button></div>`;
+    }
+    const desc = [s.query, s.tag ? "tag: " + s.tag : "", s.unreadOnly ? "unread only" : ""].filter(Boolean).join(" · ") || "All articles";
+    return `<div class="org-row"><span class="org-name">${esc(s.name)}</span><small>${esc(desc)}</small><button type="button" class="quiet" data-org-rename-saved-search="${esc(s.id)}">Rename</button><button type="button" class="quiet" data-org-delete-saved-search="${esc(s.id)}">${armed ? "Confirm delete" : "Delete"}</button></div>`;
+  };
   $("#organizeBody").innerHTML = `
     <div class="org-section"><h3>Folders</h3><p class="muted">Group your feeds. Deleting a folder keeps its feeds, ungrouped.</p>${state.folders.map(folderRow).join("") || '<p class="muted">No folders yet.</p>'}<div class="org-new"><input id="newFolder" placeholder="New folder name" aria-label="New folder name"><button type="button" class="primary" data-org-add-folder>Add</button></div></div>
     <div class="org-section"><h3>Feeds</h3><p class="muted">Move each feed into a folder, mute it, or unsubscribe from it.</p>${state.feeds.map(f => { const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id; return `<div class="org-row"><span class="org-name">${esc(f.title)}</span><select data-org-move="${esc(f.id)}" aria-label="Folder for ${esc(f.title)}"><option value="">No folder</option>${state.folders.map(g => `<option value="${esc(g)}" ${f.group === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select><button type="button" class="quiet" data-org-mute="${esc(f.id)}">${f.muted ? "Unmute" : "Mute"}</button><button type="button" class="quiet" data-org-unsub="${esc(f.id)}">${armed ? "Confirm unsubscribe" : "Unsubscribe"}</button></div>`; }).join("") || '<p class="muted">No feeds yet.</p>'}</div>
-    <div class="org-section"><h3>Tags</h3><p class="muted">Tags are applied to articles from the reader (press t). Renaming a tag updates every article that has it.</p>${state.tags.map(tagRow).join("") || '<p class="muted">No tags yet.</p>'}<div class="org-new"><input id="newTag" placeholder="New tag name" aria-label="New tag name"><button type="button" class="primary" data-org-add-tag>Add</button></div></div>`;
+    <div class="org-section"><h3>Tags</h3><p class="muted">Tags are applied to articles from the reader (press t). Renaming a tag updates every article that has it.</p>${state.tags.map(tagRow).join("") || '<p class="muted">No tags yet.</p>'}<div class="org-new"><input id="newTag" placeholder="New tag name" aria-label="New tag name"><button type="button" class="primary" data-org-add-tag>Add</button></div></div>
+    <div class="org-section"><h3>Saved searches</h3><p class="muted">Named filters kept in the sidebar. Deleting one only removes the filter, not any articles.</p>${state.savedSearches.map(savedSearchRow).join("") || '<p class="muted">No saved searches yet.</p>'}</div>`;
 }
 function showOrganize() {
   orgEdit = null;
@@ -2081,6 +2410,121 @@ function showFeed() {
   $("#feedUrl").value = "";
   $("#feedDialog").showModal();
   $("#feedSearchInput").focus();
+}
+/* Save a search (#108): the dialog is prefilled from the current state
+   — the search box, the view (feed, folder, tag, or unread), and the
+   tag — so the common case is just naming it. */
+function showSaveSearch() {
+  const scope = $("#saveSearchScope");
+  const groups = [...new Set(state.feeds.map(f => f.group).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  scope.innerHTML = `<option value="all">All feeds</option>` +
+    groups.map(g => `<option value="folder:${esc(g)}">Folder: ${esc(g)}</option>`).join("") +
+    state.feeds.map(f => `<option value="feed:${esc(f.id)}">Feed: ${esc(f.title)}</option>`).join("");
+  const tagSel = $("#saveSearchTag");
+  tagSel.innerHTML = `<option value="">Any tag</option>` + state.tags.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+  // The current view becomes the scope: a feed view scopes to that
+  // feed, a folder view to that folder, a tag view to that tag, and
+  // the Unread view turns on unread-only.
+  let curScope = "all", curTag = "", curUnread = false;
+  if (state.view === "feed" && state.feed) curScope = "feed:" + state.feed;
+  else if (state.view === "folder" && state.folder) curScope = "folder:" + state.folder;
+  else if (state.view === "tag" && state.tag) curTag = state.tag;
+  else if (state.view === "unread") curUnread = true;
+  else if (state.view === "savedSearch") {
+    const s = state.savedSearches.find(v => v.id === state.savedSearch);
+    if (s) { curScope = s.scope || "all"; curTag = s.tag || ""; curUnread = !!s.unreadOnly; }
+  }
+  scope.value = curScope;
+  tagSel.value = curTag;
+  $("#saveSearchUnread").checked = curUnread;
+  $("#saveSearchQuery").value = state.query;
+  $("#saveSearchName").value = "";
+  $("#saveSearchDialog").showModal();
+  $("#saveSearchName").focus();
+}
+function saveSearchFromDialog() {
+  const name = $("#saveSearchName").value.trim();
+  if (!name) { toast("Give the saved search a name."); return; }
+  const s = {
+    id: id(), name,
+    query: $("#saveSearchQuery").value.trim(),
+    scope: $("#saveSearchScope").value || "all",
+    tag: $("#saveSearchTag").value || "",
+    unreadOnly: $("#saveSearchUnread").checked
+  };
+  state.savedSearches.push(s);
+  saveSavedSearches();
+  $("#saveSearchDialog").close();
+  render();
+  goSavedSearch(s.id);
+  toast(`Saved search “${name}”.`);
+}
+/* ---------- rules (#109) ---------- */
+/* A rule in plain words, for the list: what it matches and what it does. */
+function ruleDesc(r) {
+  const scope = r.scope?.startsWith("feed:") ? "Feed: " + (state.feeds.find(f => f.id === r.scope.slice(5))?.title || "a feed")
+    : r.scope?.startsWith("folder:") ? "Folder: " + r.scope.slice(7) : "All feeds";
+  const cond = [r.keyword ? `title contains “${r.keyword}”` : "", r.author ? `author contains “${r.author}”` : ""].filter(Boolean).join(", ") || "any article";
+  const act = [r.tag ? `tag “${r.tag}”` : "", r.save ? "save" : "", r.markRead ? "mark read" : ""].filter(Boolean).join(", ") || "nothing";
+  return `${scope} · ${cond} → ${act}`;
+}
+function renderRules() {
+  const editorHTML = cur => {
+    const groups = [...new Set(state.feeds.map(f => f.group).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    return `<div class="org-section"><label>Name<input id="ruleName" type="text" value="${esc(cur.name)}" placeholder="e.g. Save every Rethinking Hell post"></label><label>Look in<select id="ruleScope"><option value="all">All feeds</option>${groups.map(g => `<option value="folder:${esc(g)}" ${cur.scope === "folder:" + g ? "selected" : ""}>Folder: ${esc(g)}</option>`).join("")}${state.feeds.map(f => `<option value="feed:${esc(f.id)}" ${cur.scope === "feed:" + f.id ? "selected" : ""}>Feed: ${esc(f.title)}</option>`).join("")}</select></label><label>Title contains<input id="ruleKeyword" type="text" value="${esc(cur.keyword || "")}" placeholder="Optional"></label><label>Author contains<input id="ruleAuthor" type="text" value="${esc(cur.author || "")}" placeholder="Optional"></label><label>Add tag<input id="ruleTag" type="text" list="tagList" value="${esc(cur.tag || "")}" placeholder="Optional"></label><label class="setting">Save the article<input id="ruleSave" type="checkbox" ${cur.save ? "checked" : ""}></label><label class="setting">Mark the article read<input id="ruleMarkRead" type="checkbox" ${cur.markRead ? "checked" : ""}></label><div class="dialog-actions"><button type="button" class="quiet" data-rule-cancel>Cancel</button><button type="button" class="primary" data-rule-save>${ruleEdit === "new" ? "Add rule" : "Save rule"}</button></div></div>`;
+  };
+  const row = r => {
+    const armed = pendingDelete?.kind === "rule" && pendingDelete.id === r.id;
+    if (ruleEdit === r.id) return editorHTML(r);
+    return `<div class="org-row"><span class="org-name">${esc(r.name)}</span><small>${esc(ruleDesc(r))}</small><button type="button" class="quiet" data-rule-toggle="${esc(r.id)}" aria-pressed="${r.enabled !== false}">${r.enabled !== false ? "On" : "Off"}</button><button type="button" class="quiet" data-rule-edit="${esc(r.id)}">Edit</button><button type="button" class="quiet" data-rule-delete="${esc(r.id)}">${armed ? "Confirm delete" : "Delete"}</button></div>`;
+  };
+  // The editor replaces the row being edited, or sits above the list
+  // when adding a new rule; otherwise the list ends with an Add button.
+  const body = state.rules.length ? state.rules.map(row).join("") : '<p class="muted">No rules yet. Rules tag, save, or mark read new articles as they arrive.</p>';
+  $("#rulesBody").innerHTML = (ruleEdit === "new" ? editorHTML({ name: "", scope: "all", keyword: "", author: "", tag: "", save: false, markRead: false }) : "") + body + (ruleEdit ? "" : `<div class="org-new"><button type="button" class="primary" data-rule-add>Add a rule</button></div>`);
+}
+function showRules() {
+  ruleEdit = null;
+  pendingDelete = null;
+  renderRules();
+  $("#rulesDialog").showModal();
+}
+function saveRuleFromDialog() {
+  const name = $("#ruleName")?.value.trim();
+  if (!name) { toast("Give the rule a name."); return; }
+  const data = {
+    name,
+    scope: $("#ruleScope")?.value || "all",
+    keyword: $("#ruleKeyword")?.value.trim() || "",
+    author: $("#ruleAuthor")?.value.trim() || "",
+    tag: $("#ruleTag")?.value.trim() || "",
+    save: $("#ruleSave")?.checked || false,
+    markRead: $("#ruleMarkRead")?.checked || false
+  };
+  if (ruleEdit === "new") {
+    state.rules.push({ id: id(), enabled: true, ...data });
+    toast(`Rule “${name}” added. It runs on new articles at refresh.`);
+  } else {
+    const r = state.rules.find(v => v.id === ruleEdit);
+    if (r) Object.assign(r, data);
+    toast(`Rule “${name}” saved.`);
+  }
+  ruleEdit = null;
+  saveRules();
+  renderRules();
+}
+function deleteRule(id) {
+  if (!pendingDelete || pendingDelete.kind !== "rule" || pendingDelete.id !== id) {
+    pendingDelete = { kind: "rule", id };
+    renderRules();
+    toast("Click Delete again to remove the rule.");
+    return;
+  }
+  pendingDelete = null;
+  state.rules = state.rules.filter(v => v.id !== id);
+  saveRules();
+  renderRules();
+  toast("Rule deleted.");
 }
 function download(data, name, type) {
   const u = URL.createObjectURL(new Blob([data], { type }));
@@ -2227,7 +2671,22 @@ function moveUnread(dir) {
 }
 function goView(view) {
   stopTTS();
-  state.view = view; state.feed = null; state.tag = null; state.selected = null;
+  state.view = view; state.feed = null; state.folder = null; state.tag = null; state.savedSearch = null; state.selected = null;
+  $("#reader").classList.remove("open");
+  render();
+}
+/* Open a folder as one merged list (#118): every feed in the folder,
+   newest first, with the same mark-read controls as the other views. */
+function goFolder(name) {
+  stopTTS();
+  state.view = "folder"; state.folder = name; state.feed = null; state.tag = null; state.savedSearch = null; state.selected = null;
+  $("#reader").classList.remove("open");
+  render();
+}
+/* Open a saved search (#108): the stored filter, run over the library. */
+function goSavedSearch(id) {
+  stopTTS();
+  state.view = "savedSearch"; state.savedSearch = id; state.feed = null; state.folder = null; state.tag = null; state.selected = null;
   $("#reader").classList.remove("open");
   render();
 }
@@ -2308,6 +2767,8 @@ function bind() {
     if (nav) { goView(nav.dataset.view); $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show"); return; }
     const tagBtn = e.target.closest("[data-tag]");
     if (tagBtn) { goTag(tagBtn.dataset.tag); $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show"); return; }
+    const ssBtn = e.target.closest("[data-saved-search]");
+    if (ssBtn) { goSavedSearch(ssBtn.dataset.savedSearch); $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show"); return; }
     const folderRename = e.target.closest("[data-folder-rename]");
     if (folderRename) { orgEdit = { kind: "folder", old: folderRename.dataset.folderRename }; showOrganize(); return; }
     const folderDelete = e.target.closest("[data-folder-delete]");
@@ -2318,9 +2779,11 @@ function bind() {
     if (markReadBtn) { markFeedRead(markReadBtn.dataset.markRead); return; }
     const muteBtn = e.target.closest("[data-mute]");
     if (muteBtn) { toggleMute(muteBtn.dataset.mute); return; }
+    const folderBtn = e.target.closest("[data-folder]");
+    if (folderBtn) { goFolder(folderBtn.dataset.folder); $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show"); return; }
     const feed = e.target.closest("[data-feed]");
     if (feed) {
-      state.view = "feed"; state.feed = feed.dataset.feed; state.tag = null; state.selected = null;
+      state.view = "feed"; state.feed = feed.dataset.feed; state.folder = null; state.tag = null; state.savedSearch = null; state.selected = null;
       render();
       $("#sidebar").classList.remove("open");
       $("#scrim").classList.remove("show");
@@ -2328,6 +2791,7 @@ function bind() {
     }
     const act = e.target.closest("[data-action]");
     if (act) {
+      if (act.dataset.action === "hl-delete") { await deleteHighlight(act.dataset.id); return; }
       const x = state.items.find(i => i.id === act.dataset.id);
       if (x) {
         if (act.dataset.action === "share") { shareArticle(x); return; }
@@ -2342,6 +2806,16 @@ function bind() {
       }
       return;
     }
+    // A highlight row in the Highlights view (#116): open its article
+    // and scroll to the passage.
+    const hlRow = e.target.closest("[data-hl-open]");
+    if (hlRow) { openHighlight(hlRow.dataset.hlOpen); return; }
+    const hlNote = e.target.closest("[data-hl-note]");
+    if (hlNote) { showHlNoteDialog(hlNote.dataset.hlNote); return; }
+    const hlGoto = e.target.closest("[data-hl-goto]");
+    if (hlGoto) { scrollToHighlight(hlGoto.dataset.hlGoto); return; }
+    const hlDel = e.target.closest("[data-hl-delete]");
+    if (hlDel) { await deleteHighlight(hlDel.dataset.hlDelete); return; }
     const tagRemove = e.target.closest("[data-tag-remove]");
     if (tagRemove && state.selected) {
       const x = selectedItem();
@@ -2410,6 +2884,27 @@ function bind() {
   // Folders & tags lives in Settings now: close Settings, then open the
   // manage dialog on its own.
   $("#organize").onclick = () => { $("#settingsDialog").close(); showOrganize(); };
+  // Rules likewise: close Settings, then open the rules dialog.
+  $("#manageRules").onclick = () => { $("#settingsDialog").close(); showRules(); };
+  $("#rulesDialog").addEventListener("click", e => {
+    const add = e.target.closest("[data-rule-add]");
+    if (add) { ruleEdit = "new"; renderRules(); $("#ruleName")?.focus(); return; }
+    const edit = e.target.closest("[data-rule-edit]");
+    if (edit) { ruleEdit = edit.dataset.ruleEdit; renderRules(); $("#ruleName")?.focus(); return; }
+    const save = e.target.closest("[data-rule-save]");
+    if (save) { saveRuleFromDialog(); return; }
+    const cancel = e.target.closest("[data-rule-cancel]");
+    if (cancel) { ruleEdit = null; renderRules(); return; }
+    const toggle = e.target.closest("[data-rule-toggle]");
+    if (toggle) {
+      const r = state.rules.find(v => v.id === toggle.dataset.ruleToggle);
+      if (r) { r.enabled = r.enabled === false; saveRules(); renderRules(); toast(r.enabled !== false ? `Rule “${r.name}” on.` : `Rule “${r.name}” off.`); }
+      return;
+    }
+    const del = e.target.closest("[data-rule-delete]");
+    if (del) { deleteRule(del.dataset.ruleDelete); return; }
+    if (e.target.closest("#rulesDone") || e.target.closest("#rulesClose")) $("#rulesDialog").close();
+  });
   $("#organizeDialog").addEventListener("close", () => { pendingDelete = null; orgEdit = null; });
   $("#organizeDialog").addEventListener("click", async e => {
     const addFolder = e.target.closest("[data-org-add-folder]");
@@ -2420,6 +2915,8 @@ function bind() {
     if (renameFolderBtn) { orgEdit = { kind: "folder", old: renameFolderBtn.dataset.orgRenameFolder }; renderOrganize(); $("#orgEditInput")?.focus(); return; }
     const renameTagBtn = e.target.closest("[data-org-rename-tag]");
     if (renameTagBtn) { orgEdit = { kind: "tag", old: renameTagBtn.dataset.orgRenameTag }; renderOrganize(); $("#orgEditInput")?.focus(); return; }
+    const renameSsBtn = e.target.closest("[data-org-rename-saved-search]");
+    if (renameSsBtn) { orgEdit = { kind: "savedSearch", old: renameSsBtn.dataset.orgRenameSavedSearch }; renderOrganize(); $("#orgEditInput")?.focus(); return; }
     const saveRename = e.target.closest("[data-org-save-rename]");
     if (saveRename) { await doRename($("#orgEditInput")?.value); return; }
     const cancelRename = e.target.closest("[data-org-cancel-rename]");
@@ -2428,6 +2925,8 @@ function bind() {
     if (delFolder) { deleteFolder(delFolder.dataset.orgDeleteFolder); return; }
     const delTag = e.target.closest("[data-org-delete-tag]");
     if (delTag) { await deleteTag(delTag.dataset.orgDeleteTag); return; }
+    const delSs = e.target.closest("[data-org-delete-saved-search]");
+    if (delSs) { deleteSavedSearch(delSs.dataset.orgDeleteSavedSearch); return; }
     const orgUnsub = e.target.closest("[data-org-unsub]");
     if (orgUnsub) { await requestUnsubscribe(orgUnsub.dataset.orgUnsub); return; }
     const orgMute = e.target.closest("[data-org-mute]");
@@ -2447,6 +2946,17 @@ function bind() {
   $("#refresh").onclick = refresh;
   bindSplitters();
   $("#reader").addEventListener("scroll", updateReadProgress, { passive: true });
+  // Highlights (#116): the button follows the selection in the article
+  // body, and hides when the reader scrolls (its position is by
+  // viewport, so a scroll would leave it in the wrong place).
+  $("#reader").addEventListener("mouseup", () => setTimeout(updateHlBtn, 0));
+  $("#reader").addEventListener("scroll", () => { const b = $("#hlBtn"); if (b) b.hidden = true; }, { passive: true });
+  document.addEventListener("selectionchange", () => { if (state.selected) updateHlBtn(); });
+  $("#hlBtn").onclick = showHlDialog;
+  $("#hlForm").onsubmit = e => { e.preventDefault(); saveHlFromDialog(); };
+  $("#hlDialog").addEventListener("click", e => {
+    if (e.target.closest('button[value="cancel"]')) $("#hlDialog").close();
+  });
   // The listening speed applies from the next spoken chunk and is
   // remembered with the other settings.
   document.addEventListener("change", e => {
@@ -2462,7 +2972,9 @@ function bind() {
     local(S, state.settings);
     applySettings();
   };
-  $("#search").oninput = e => { state.query = e.target.value.toLowerCase(); $("#searchClear").hidden = !e.target.value; renderList(); };
+  // Full-text search (#107) scans stored article bodies, so the list
+  // re-render is debounced while typing instead of running per keystroke.
+  $("#search").oninput = e => { state.query = e.target.value.toLowerCase(); $("#searchClear").hidden = !e.target.value; clearTimeout(searchTimer); searchTimer = setTimeout(renderList, 150); };
   $("#searchClear").onclick = () => { $("#search").value = ""; state.query = ""; $("#searchClear").hidden = true; renderList(); $("#search").focus(); };
   $("#sort").onclick = () => {
     state.sort = state.sort === "newest" ? "oldest" : "newest";
@@ -2487,6 +2999,16 @@ function bind() {
   $("#markRead").onclick = markVisibleRead;
   $("#markAbove").onclick = () => markAboveBelow("above");
   $("#markBelow").onclick = () => markAboveBelow("below");
+  $("#saveSearchBtn").onclick = showSaveSearch;
+  $("#saveSearchDialog").addEventListener("click", e => {
+    if (e.target.closest('button[value="cancel"]')) $("#saveSearchDialog").close();
+  });
+  // The form's submit covers both the Save button and Enter in a field,
+  // so a missing name keeps the dialog open instead of closing it.
+  $("#saveSearchForm").onsubmit = e => {
+    e.preventDefault();
+    saveSearchFromDialog();
+  };
   $("#importOpml").onclick = () => $("#opmlFile").click();
   $("#exportOpml").onclick = exportOPML;
   $("#opmlFile").onchange = e => { if (e.target.files[0]) importOPML(e.target.files[0]); e.target.value = ""; };
@@ -2650,6 +3172,7 @@ async function init() {
   if (opened) {
     try {
       state.items = await dbAll();
+      state.highlights = await hlAll();
       syncTags();
       saveTags();
       mirrorSync();
