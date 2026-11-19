@@ -13,6 +13,14 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Article tags: create, rename, and delete tags; apply them from the reader (t); filter by tag from the sidebar; search covers tags
 - Markdown article rendering for plain-text RSS, Atom, and JSON Feed content, including headings, links, lists, tables, and code blocks
 - Full-article view: "Load full article" extracts the article text from the original page
+- Listen to an article in the reader (text-to-speech, with pause/resume, stop, and speed)
+- Estimated reading time on cards and in the reader
+- Reader font (serif/sans-serif) and line height (compact/comfortable/roomy) in Settings
+- Share an article: the system share sheet, or a copy-link fallback where the sheet is unavailable
+- Mark articles above or below the selected one read (buttons in the list heading, Ctrl+M / Shift+M)
+- Snooze an article (later today, tomorrow, next week) with a Snoozed view and unsnooze
+- Duplicate articles (the same address in more than one feed) shown once, with a toggle in the list filters and Settings
+- Mute a feed: hide its articles from All and Unread without unsubscribing
 - Search, date filters, and newest/oldest sorting
 - OPML subscription import and export
 - JSON settings import and export
@@ -25,7 +33,7 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Article thumbnails, per-feed favicons, and relative dates ("5m ago")
 - Dark mode by default, with light and system options
 - Adjustable reading width and text size
-- Keyboard shortcuts: / search, j/k navigate, n/p next/previous unread, o or Enter open, v open original, m toggle read, s save, t add a tag, a mark visible read, u back to list, g then a/u/s go to All/Unread/Saved, r refresh, Space scroll, ? help, Esc close
+- Keyboard shortcuts: / search, j/k navigate, n/p next/previous unread, o or Enter open, v open original, m toggle read, s save, t add a tag, a mark visible read, Ctrl+M / Shift+M mark above/below read, u back to list, g then a/u/s go to All/Unread/Saved, r refresh, Space scroll, ? help, Esc close
 - Gentium Book Plus typography
 
 ## Hosting
