@@ -27,7 +27,7 @@ const state = {
   feeds: [], items: [], view: "all", feed: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null,
   folders: [], tags: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, proxyFallback: false, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false }
+  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, proxyFallback: false, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false }
 };
 let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null;
 /* Text-to-speech state (#105): the article being read, its sentence
@@ -78,6 +78,31 @@ const readingTimeText = x => {
   if (words < 40) return "";
   return Math.max(1, Math.round(words / 200)) + " min read";
 };
+/* Canonical article URL (#115): the strict duplicate definition. The
+   same story at the same address is one article, even when feeds carry
+   it with different tracking parameters, a fragment, or a www prefix.
+   A different address is a different article, even with the same title. */
+const TRACKING_PARAMS = /^(utm_|fbclid|gclid|mc_cid|mc_eid)/i;
+const canonicalUrl = u => {
+  try {
+    const p = new URL(u);
+    p.hash = "";
+    p.hostname = p.hostname.replace(/^www\./, "").toLowerCase();
+    [...p.searchParams.keys()].forEach(k => { if (TRACKING_PARAMS.test(k)) p.searchParams.delete(k); });
+    p.searchParams.sort();
+    p.pathname = p.pathname.replace(/\/+$/, "") || "/";
+    return p.href;
+  } catch { return String(u || ""); }
+};
+function dedupeItems(a) {
+  const seen = new Set();
+  return a.filter(x => {
+    const k = canonicalUrl(x.url);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
 /* Byline timestamp without seconds ("11/16/2026 · 11:00 AM"). */
 const fmtDateTime = d => d.toLocaleDateString() + " · " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 /* Strip publisher boilerplate out of summaries before they reach the
@@ -1183,6 +1208,9 @@ async function refresh() {
    only the Snoozed view shows it. Expired snoozes reappear on their own,
    because this is a time comparison, not a flag that needs clearing. */
 const isSnoozed = x => x.snoozedUntil && x.snoozedUntil > Date.now();
+/* A muted feed (#117) still exists in the sidebar, but its articles
+   stay out of the cross-feed lists until it is unmuted. */
+const isMutedFeed = feedId => state.feeds.find(f => f.id === feedId)?.muted;
 function visible() {
   let a = state.items.filter(x => {
     if (state.view === "snoozed") return isSnoozed(x);
@@ -1190,6 +1218,7 @@ function visible() {
     if (state.view === "unread") return !x.read;
     if (state.view === "saved") return x.saved;
     if (state.view === "feed") return x.feedId === state.feed;
+    if (isMutedFeed(x.feedId)) return false;
     if (state.view === "tag") return (x.tags || []).includes(state.tag);
     return true;
   });
@@ -1204,19 +1233,31 @@ function visible() {
     a = a.filter(x => [x.title, x.summary, x.author, x.feedTitle, (x.tags || []).join(" ")].join(" ").toLowerCase().includes(q));
   }
   const newest = state.sort === "newest";
-  return a.sort((x, y) => {
+  a.sort((x, y) => {
     const dx = dateSortKey(x), dy = dateSortKey(y);
     if (dx === null && dy === null) return 0;
     if (dx === null) return 1; // dateless items always last
     if (dy === null) return -1;
     return (dy - dx) * (newest ? 1 : -1);
   });
+  // Duplicates are collapsed in the cross-feed lists only (#115): a
+  // feed's own view shows its articles as they are, saved articles
+  // are keepers, and snoozed articles are already one-per-time.
+  if (state.settings.hideDuplicates !== false && !["feed", "saved", "snoozed"].includes(state.view)) a = dedupeItems(a);
+  return a;
+}
+/* What the All/Unread lists actually show, for the sidebar counts:
+   no muted feeds, no snoozed articles, duplicates collapsed. */
+function countableItems() {
+  let a = state.items.filter(x => !isSnoozed(x) && !isMutedFeed(x.feedId));
+  if (state.settings.hideDuplicates !== false) a = dedupeItems(a);
+  return a;
 }
 function renderNav() {
-  const unread = state.items.filter(x => !x.read).length;
-  $("#allCount").textContent = state.items.length;
-  $("#unreadCount").textContent = unread;
-  $("#savedCount").textContent = state.items.filter(x => x.saved).length;
+  const shown = countableItems();
+  $("#allCount").textContent = shown.length;
+  $("#unreadCount").textContent = shown.filter(x => !x.read).length;
+  $("#savedCount").textContent = state.items.filter(x => x.saved && !isSnoozed(x)).length;
   $("#snoozedCount").textContent = state.items.filter(isSnoozed).length;
   $$(".nav").forEach(b => {
     b.classList.toggle("active", b.dataset.view === state.view && state.view !== "feed");
@@ -1242,7 +1283,8 @@ function renderNav() {
         ? `<img class="feed-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><span class="feed-dot" style="display:none"></span>`
         : `<span class="feed-dot"></span>`;
       const countBtn = unreadCount ? `<button type="button" class="feed-count" data-mark-read="${esc(f.id)}" title="Mark ${esc(f.title)} read" aria-label="Mark ${esc(f.title)} read">${unreadCount}</button>` : "";
-      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${err}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span>${f.error ? '<span class="feed-err" aria-hidden="true">!</span>' : ""}</button>${countBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">×</button></div>`;
+      const muteBtn = `<button type="button" class="feed-mute${f.muted ? " on" : ""}" data-mute="${esc(f.id)}" title="${f.muted ? "Unmute" : "Mute"} ${esc(f.title)}" aria-label="${f.muted ? "Unmute" : "Mute"} ${esc(f.title)}" aria-pressed="${!!f.muted}">${f.muted ? "Muted" : "Mute"}</button>`;
+      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span>${f.error ? '<span class="feed-err" aria-hidden="true">!</span>' : ""}</button>${countBtn}${muteBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">×</button></div>`;
     }).join("");
   }).join("") : '<p class="muted">Your feeds will appear here.</p>';
   const tagCounts = {};
@@ -1256,9 +1298,11 @@ function renderList() {
   const titles = { all: "All articles", unread: "Unread", saved: "Saved", snoozed: "Snoozed", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", tag: state.tag ? "Tag: " + state.tag : "Tag" };
   $("#heading").textContent = titles[state.view];
   $("#mobileTitle").textContent = titles[state.view];
-  // Keep the sort button and filter pills in step with the persisted
-  // sort/filter, so a reload restores them.
+  // Keep the sort button, the duplicates toggle, and the filter pills
+  // in step with the persisted sort/filter, so a reload restores them.
   $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
+  const dup = $("#dupToggle");
+  if (dup) dup.textContent = state.settings.hideDuplicates !== false ? "Duplicates hidden" : "Duplicates shown";
   $$(".filter").forEach(x => x.classList.toggle("active", x.dataset.filter === state.filter));
   const base = state.view === "saved" ? "Articles you have kept for later."
     : state.view === "snoozed" ? "Articles waiting to come back."
@@ -2020,7 +2064,7 @@ function renderOrganize() {
   };
   $("#organizeBody").innerHTML = `
     <div class="org-section"><h3>Folders</h3><p class="muted">Group your feeds. Deleting a folder keeps its feeds, ungrouped.</p>${state.folders.map(folderRow).join("") || '<p class="muted">No folders yet.</p>'}<div class="org-new"><input id="newFolder" placeholder="New folder name" aria-label="New folder name"><button type="button" class="primary" data-org-add-folder>Add</button></div></div>
-    <div class="org-section"><h3>Feeds</h3><p class="muted">Move each feed into a folder, or unsubscribe from it.</p>${state.feeds.map(f => { const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id; return `<div class="org-row"><span class="org-name">${esc(f.title)}</span><select data-org-move="${esc(f.id)}" aria-label="Folder for ${esc(f.title)}"><option value="">No folder</option>${state.folders.map(g => `<option value="${esc(g)}" ${f.group === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select><button type="button" class="quiet" data-org-unsub="${esc(f.id)}">${armed ? "Confirm unsubscribe" : "Unsubscribe"}</button></div>`; }).join("") || '<p class="muted">No feeds yet.</p>'}</div>
+    <div class="org-section"><h3>Feeds</h3><p class="muted">Move each feed into a folder, mute it, or unsubscribe from it.</p>${state.feeds.map(f => { const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id; return `<div class="org-row"><span class="org-name">${esc(f.title)}</span><select data-org-move="${esc(f.id)}" aria-label="Folder for ${esc(f.title)}"><option value="">No folder</option>${state.folders.map(g => `<option value="${esc(g)}" ${f.group === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select><button type="button" class="quiet" data-org-mute="${esc(f.id)}">${f.muted ? "Unmute" : "Mute"}</button><button type="button" class="quiet" data-org-unsub="${esc(f.id)}">${armed ? "Confirm unsubscribe" : "Unsubscribe"}</button></div>`; }).join("") || '<p class="muted">No feeds yet.</p>'}</div>
     <div class="org-section"><h3>Tags</h3><p class="muted">Tags are applied to articles from the reader (press t). Renaming a tag updates every article that has it.</p>${state.tags.map(tagRow).join("") || '<p class="muted">No tags yet.</p>'}<div class="org-new"><input id="newTag" placeholder="New tag name" aria-label="New tag name"><button type="button" class="primary" data-org-add-tag>Add</button></div></div>`;
 }
 function showOrganize() {
@@ -2118,6 +2162,7 @@ async function importSettings(file) {
     const prog = pick("#progressSelect", d.settings.progressPosition); if (prog) next.progressPosition = prog;
     const exc = pick("#cardExcerptSelect", d.settings.cardExcerpt); if (exc) next.cardExcerpt = exc;
     if (typeof d.settings.cardImage === "boolean") next.cardImage = d.settings.cardImage;
+    if (typeof d.settings.hideDuplicates === "boolean") next.hideDuplicates = d.settings.hideDuplicates;
     if (typeof d.settings.backgroundSync === "boolean") next.backgroundSync = d.settings.backgroundSync;
     if (typeof d.settings.notifyNew === "boolean") next.notifyNew = d.settings.notifyNew;
     if (typeof d.settings.proxyFallback === "boolean") next.proxyFallback = d.settings.proxyFallback;
@@ -2147,6 +2192,7 @@ function showSettings() {
   $("#progressSelect").value = state.settings.progressPosition || "bottom";
   $("#cardExcerptSelect").value = state.settings.cardExcerpt || "full";
   $("#cardImageToggle").checked = state.settings.cardImage !== false;
+  $("#hideDuplicatesToggle").checked = state.settings.hideDuplicates !== false;
   $("#backgroundSyncToggle").checked = !!state.settings.backgroundSync;
   $("#notifyNewToggle").checked = !!state.settings.notifyNew;
   $("#proxyToggle").checked = !!state.settings.proxyFallback;
@@ -2214,6 +2260,20 @@ async function markFeedRead(feedId) {
   } });
 }
 
+/* Mute a feed (#117): hide its articles from All and Unread without
+   unsubscribing. The feed stays in the sidebar (greyed, with its
+   count) and its articles are still there in its own view; saved
+   articles stay in Saved. */
+function toggleMute(feedId) {
+  const f = state.feeds.find(f => f.id === feedId);
+  if (!f) return;
+  f.muted = !f.muted;
+  saveFeeds();
+  render();
+  renderOrganize();
+  toast(f.muted ? `Muted “${f.title}”. Its articles are hidden from All and Unread.` : `Unmuted “${f.title}”.`);
+}
+
 /* Mark above / below (#106): everything before or after the selected
    article in the list as it currently stands (view, filter, search,
    sort), with the same Undo as the other bulk mark-read actions. Only
@@ -2256,6 +2316,8 @@ function bind() {
     if (unsub) { requestUnsubscribe(unsub.dataset.unsub); return; }
     const markReadBtn = e.target.closest("[data-mark-read]");
     if (markReadBtn) { markFeedRead(markReadBtn.dataset.markRead); return; }
+    const muteBtn = e.target.closest("[data-mute]");
+    if (muteBtn) { toggleMute(muteBtn.dataset.mute); return; }
     const feed = e.target.closest("[data-feed]");
     if (feed) {
       state.view = "feed"; state.feed = feed.dataset.feed; state.tag = null; state.selected = null;
@@ -2368,6 +2430,8 @@ function bind() {
     if (delTag) { await deleteTag(delTag.dataset.orgDeleteTag); return; }
     const orgUnsub = e.target.closest("[data-org-unsub]");
     if (orgUnsub) { await requestUnsubscribe(orgUnsub.dataset.orgUnsub); return; }
+    const orgMute = e.target.closest("[data-org-mute]");
+    if (orgMute) { toggleMute(orgMute.dataset.orgMute); return; }
     if (e.target.closest("#organizeDone") || e.target.closest("#organizeClose")) $("#organizeDialog").close();
   });
   $("#organizeDialog").addEventListener("change", e => {
@@ -2407,6 +2471,12 @@ function bind() {
     $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
     renderList();
   };
+  $("#dupToggle").onclick = () => {
+    state.settings.hideDuplicates = !(state.settings.hideDuplicates !== false);
+    local(S, state.settings);
+    render();
+    toast(state.settings.hideDuplicates !== false ? "Duplicate articles hidden." : "Duplicate articles shown.");
+  };
   $$(".filter").forEach(b => b.onclick = () => {
     $$(".filter").forEach(x => x.classList.toggle("active", x === b));
     state.filter = b.dataset.filter;
@@ -2444,6 +2514,7 @@ function bind() {
       theme: $("#themeSelect").value, width: $("#widthSelect").value, size: $("#sizeSelect").value,
       readerFont: $("#fontSelect").value, lineHeight: $("#lineHeightSelect").value,
       ttsRate: state.settings.ttsRate || 1,
+      hideDuplicates: $("#hideDuplicatesToggle").checked,
       proxyFallback: $("#proxyToggle").checked, progressPosition: $("#progressSelect").value,
       cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
       backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,

@@ -41,7 +41,7 @@
 <div class="mobile-bar"><button id="menu" aria-label="Open menu"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button><span id="mobileTitle">All articles</span><button id="mobileAdd" aria-label="Add feed">+</button></div>
 <noscript><p class="noscript-note">RSS Reader needs JavaScript to load and display your feeds. Your subscriptions are stored in this browser.</p></noscript>
 <div class="list-heading"><div><p class="eyebrow">YOUR READING DESK</p><h1 id="heading">All articles</h1><p id="subtitle">Your subscriptions, gathered in one place.</p></div><div class="list-actions"><button id="refresh" title="Refresh feeds (r)" aria-label="Refresh feeds"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></button><button id="markRead" class="quiet">Mark visible read</button><button id="markAbove" class="quiet" title="Mark articles above the selected one read (Ctrl+M)">Mark above read</button><button id="markBelow" class="quiet" title="Mark articles below the selected one read (Shift+M)">Mark below read</button></div></div>
-<div class="filters"><div><button class="filter active" data-filter="all">Everything</button><button class="filter" data-filter="today">Today</button><button class="filter" data-filter="week">This week</button></div><button id="sort" class="quiet">Newest first ↓</button></div>
+<div class="filters"><div><button class="filter active" data-filter="all">Everything</button><button class="filter" data-filter="today">Today</button><button class="filter" data-filter="week">This week</button></div><div class="filters-right"><button id="dupToggle" class="quiet" title="Show or hide articles that appear in more than one feed">Duplicates hidden</button><button id="sort" class="quiet">Newest first ↓</button></div></div>
 <div id="articleList" class="article-list"><div class="empty"><div class="empty-mark">R</div><h2>Your reading starts here.</h2><p>Add a feed to begin. Your subscriptions and reading history stay in this browser.</p><button id="firstAdd" class="primary">Add your first feed</button></div></div>
 </main>
 <div class="splitter" id="splitList" role="separator" aria-orientation="vertical" aria-label="Resize article list" tabindex="0"></div>
@@ -57,6 +57,7 @@
 <label class="setting">Reading progress bar<select id="progressSelect"><option value="bottom">Bottom</option><option value="top">Top</option></select></label>
 <label class="setting">Preview text<select id="cardExcerptSelect"><option value="none">None</option><option value="short">Short</option><option value="full">Full</option></select></label>
 <label class="setting">Show thumbnails<input id="cardImageToggle" type="checkbox"></label>
+<label class="setting">Hide duplicate articles<input id="hideDuplicatesToggle" type="checkbox"></label>
 <label class="setting">Background refresh<input id="backgroundSyncToggle" type="checkbox"></label>
 <label class="setting">New article notifications<input id="notifyNewToggle" type="checkbox"></label>
 <label class="setting">Proxy fallback for blocked feeds<input id="proxyToggle" type="checkbox"></label>
