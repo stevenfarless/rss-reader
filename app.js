@@ -1112,14 +1112,16 @@ async function saveItems(feed, items) {
       image: x.image || old?.image || "",
       enclosure: x.enclosure || old?.enclosure || null,
       read: old?.read || false, saved: old?.saved || false,
+      snoozedUntil: old?.snoozedUntil || null,
       tags: old?.tags || []
     });
   }
   await putMany(fresh);
-  // Prune items no longer in the feed, unless the user saved them or read them.
+  // Prune items no longer in the feed, unless the user saved them, read them,
+  // or snoozed them (a snoozed article must survive until it comes back).
   // Cap each feed at MAX_ITEMS_PER_FEED newest items.
   const mine = state.items.filter(i => i.feedId === feed.id);
-  const pruneIds = mine.filter(old => !seen.has(old.id) && !old.saved && !old.read).map(o => o.id);
+  const pruneIds = mine.filter(old => !seen.has(old.id) && !old.saved && !old.read && !(old.snoozedUntil && old.snoozedUntil > Date.now())).map(o => o.id);
   if (pruneIds.length) await deleteMany(pruneIds);
   state.items = await dbAll();
   const freshMine = state.items.filter(i => i.feedId === feed.id)
@@ -1177,13 +1179,20 @@ async function refresh() {
 }
 
 /* ---------- list / render ---------- */
+/* A snoozed article is hidden from every list until its time comes, and
+   only the Snoozed view shows it. Expired snoozes reappear on their own,
+   because this is a time comparison, not a flag that needs clearing. */
+const isSnoozed = x => x.snoozedUntil && x.snoozedUntil > Date.now();
 function visible() {
-  let a = state.items.filter(x =>
-    state.view === "unread" ? !x.read
-    : state.view === "saved" ? x.saved
-    : state.view === "feed" ? x.feedId === state.feed
-    : state.view === "tag" ? (x.tags || []).includes(state.tag)
-    : true);
+  let a = state.items.filter(x => {
+    if (state.view === "snoozed") return isSnoozed(x);
+    if (isSnoozed(x)) return false;
+    if (state.view === "unread") return !x.read;
+    if (state.view === "saved") return x.saved;
+    if (state.view === "feed") return x.feedId === state.feed;
+    if (state.view === "tag") return (x.tags || []).includes(state.tag);
+    return true;
+  });
   if (state.filter === "today") {
     a = a.filter(x => { const d = date(x.published); return d && d.toDateString() === new Date().toDateString(); });
   }
@@ -1208,6 +1217,7 @@ function renderNav() {
   $("#allCount").textContent = state.items.length;
   $("#unreadCount").textContent = unread;
   $("#savedCount").textContent = state.items.filter(x => x.saved).length;
+  $("#snoozedCount").textContent = state.items.filter(isSnoozed).length;
   $$(".nav").forEach(b => {
     b.classList.toggle("active", b.dataset.view === state.view && state.view !== "feed");
     if (b.dataset.view === state.view && state.view !== "feed") b.setAttribute("aria-current", "true");
@@ -1243,7 +1253,7 @@ function renderNav() {
 }
 function renderList() {
   const a = visible();
-  const titles = { all: "All articles", unread: "Unread", saved: "Saved", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", tag: state.tag ? "Tag: " + state.tag : "Tag" };
+  const titles = { all: "All articles", unread: "Unread", saved: "Saved", snoozed: "Snoozed", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", tag: state.tag ? "Tag: " + state.tag : "Tag" };
   $("#heading").textContent = titles[state.view];
   $("#mobileTitle").textContent = titles[state.view];
   // Keep the sort button and filter pills in step with the persisted
@@ -1251,6 +1261,7 @@ function renderList() {
   $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
   $$(".filter").forEach(x => x.classList.toggle("active", x.dataset.filter === state.filter));
   const base = state.view === "saved" ? "Articles you have kept for later."
+    : state.view === "snoozed" ? "Articles waiting to come back."
     : state.view === "unread" ? "Stories you have not read yet."
     : state.view === "tag" ? `Articles tagged “${state.tag}”.`
     : "Your subscriptions, gathered in one place.";
@@ -1263,10 +1274,17 @@ function renderList() {
     const excerpt = exc === "none" ? "" : `<p>${esc(snippet(cleanSummary(x.summary), exc === "short" ? 100 : 210))}</p>`;
     const thumb = state.settings.cardImage !== false && x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : "";
     const rt = readingTimeText(x);
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0"><div class="article-main"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? `<span>·</span><span>${rt}</span>` : ""}</div><h2>${esc(x.title)}</h2>${excerpt}<div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button></span></div></div>${thumb}</article>`;
+    const snoozeNote = state.view === "snoozed" && x.snoozedUntil ? `<span>·</span><span>Snoozed until ${esc(fmtDateTime(new Date(x.snoozedUntil)))}</span>` : "";
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0"><div class="article-main"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? `<span>·</span><span>${rt}</span>` : ""}${snoozeNote}</div><h2>${esc(x.title)}</h2>${excerpt}<div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button>${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div>${thumb}</article>`;
   }).join("") : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>';
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
+  // Mark above/below act on the selected article in this list: without
+  // a selection there is nothing above or below to mark.
+  const hasSel = a.some(x => x.id === state.selected);
+  const ma = $("#markAbove"), mb = $("#markBelow");
+  if (ma) ma.disabled = !hasSel;
+  if (mb) mb.disabled = !hasSel;
 }
 
 /* ---------- sanitising ---------- */
@@ -1494,6 +1512,45 @@ const ttsBarHTML = x => {
   const opt = v => `<option value="${v}"${rate === v ? " selected" : ""}>${v}×</option>`;
   return `<div class="tts-bar" id="ttsBar"${active ? "" : " hidden"}><span>Listening</span><button type="button" data-tts="pause">${tts?.paused ? "Resume" : "Pause"}</button><button type="button" data-tts="stop">Stop</button><label>Speed <select id="ttsSpeed" aria-label="Reading speed">${opt(0.75)}${opt(1)}${opt(1.25)}${opt(1.5)}${opt(2)}</select></label></div>`;
 };
+/* ---------- snoozing (#113) ---------- */
+/* Later today is four hours out; tomorrow and next week come back at
+   9:00 AM. Saved is keep forever; snoozed is come back later — the
+   two stay separate, and a snoozed article is never deleted. */
+function snoozeUntil(kind) {
+  const now = new Date();
+  if (kind === "later") return Date.now() + 4 * 3600 * 1000;
+  const d = new Date(now);
+  d.setDate(d.getDate() + (kind === "tomorrow" ? 1 : 7));
+  d.setHours(9, 0, 0, 0);
+  return d.getTime();
+}
+const snoozeMenuHTML = x => {
+  const until = isSnoozed(x) ? new Date(x.snoozedUntil) : null;
+  const fmt = d => d.toLocaleDateString([], { weekday: "short" }) + " " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const later = new Date(Date.now() + 4 * 3600 * 1000);
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1); tomorrow.setHours(9, 0, 0, 0);
+  const week = new Date(); week.setDate(week.getDate() + 7); week.setHours(9, 0, 0, 0);
+  return `<div class="snooze-menu" id="snoozeMenu" hidden><button type="button" data-snooze="later">Later today · ${esc(fmt(later))}</button><button type="button" data-snooze="tomorrow">Tomorrow · ${esc(fmt(tomorrow))}</button><button type="button" data-snooze="week">Next week · ${esc(fmt(week))}</button>${until ? `<button type="button" data-snooze="clear">Unsnooze (back now)</button>` : ""}</div>`;
+};
+async function snoozeItem(x, kind) {
+  const until = snoozeUntil(kind);
+  x.snoozedUntil = until;
+  await put(x);
+  renderNav();
+  renderList();
+  toast(`Snoozed until ${fmtDateTime(new Date(until))}.`, { label: "Undo", fn: async () => {
+    x.snoozedUntil = null;
+    await put(x);
+    render();
+  } });
+}
+async function unsnoozeItem(x) {
+  x.snoozedUntil = null;
+  await put(x);
+  render();
+  if (state.selected === x.id) renderReader(x);
+  toast("Back in your lists.");
+}
 function renderReader(x) {
   // Re-rendering the reader rebuilds its buttons, so any playback
   // stops first rather than playing on with no controls.
@@ -1522,7 +1579,7 @@ function renderReader(x) {
   const isAudio = !!x.enclosure?.type?.startsWith("audio/");
   const canListen = "speechSynthesis" in window;
   const audioHTML = isAudio ? `<div class="audio-player"><audio id="audioPlayer" controls preload="metadata" src="${esc(x.enclosure.url)}"></audio><div class="audio-controls"><label>Speed <select id="audioSpeed" aria-label="Playback speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><a href="${esc(x.enclosure.url)}" target="_blank" rel="noopener">Open audio ↗</a></div></div>` : "";
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="false" ${canListen ? "" : "disabled"}>${icon("speak")}</button><button data-reader="share" title="Share article" aria-label="Share article">${icon("share")}</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${icon("doc")}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div>${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}${rt ? " · " + rt : ""}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${audioHTML}${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div></div>${progTop ? "" : barHTML}`;
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="false" ${canListen ? "" : "disabled"}>${icon("speak")}</button><button data-reader="share" title="Share article" aria-label="Share article">${icon("share")}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">${icon("clock")}</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${icon("doc")}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}${rt ? " · " + rt : ""}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${audioHTML}${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div></div>${progTop ? "" : barHTML}`;
   const bodyEl = $("#body");
   // Append the cleaned body's children, not the <body> element itself.
   // cleanHTML drops the page chrome (header/nav/footer); the leading-nav
@@ -2157,8 +2214,34 @@ async function markFeedRead(feedId) {
   } });
 }
 
+/* Mark above / below (#106): everything before or after the selected
+   article in the list as it currently stands (view, filter, search,
+   sort), with the same Undo as the other bulk mark-read actions. Only
+   the visible list is acted on, never the whole library. */
+async function markAboveBelow(which) {
+  const a = visible();
+  const i = a.findIndex(x => x.id === state.selected);
+  if (i === -1) { toast("Select an article first."); return; }
+  const targets = (which === "above" ? a.slice(0, i) : a.slice(i + 1)).filter(x => !x.read);
+  if (!targets.length) { toast(which === "above" ? "Nothing above this article is unread." : "Nothing below this article is unread."); return; }
+  for (const x of targets) x.read = true;
+  await putMany(targets);
+  render();
+  toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} ${which} read.`, { label: "Undo", fn: async () => {
+    for (const x of targets) x.read = false;
+    await putMany(targets);
+    render();
+  } });
+}
+
 function bind() {
   document.addEventListener("click", async e => {
+    // The snooze menu closes on any click outside it or its button.
+    // Remember whether it was open first: the snooze button toggles
+    // from that pre-click state, so it can still close the menu.
+    const snoozeMenu = $("#snoozeMenu");
+    const snoozeMenuWasOpen = !!(snoozeMenu && !snoozeMenu.hidden);
+    if (snoozeMenuWasOpen && !e.target.closest("#snoozeMenu") && !e.target.closest('[data-reader="snooze"]')) snoozeMenu.hidden = true;
     const scrim = e.target.closest("#scrim");
     if (scrim) { $("#sidebar").classList.remove("open"); scrim.classList.remove("show"); return; }
     const nav = e.target.closest("[data-view]");
@@ -2186,6 +2269,7 @@ function bind() {
       const x = state.items.find(i => i.id === act.dataset.id);
       if (x) {
         if (act.dataset.action === "share") { shareArticle(x); return; }
+        if (act.dataset.action === "unsnooze") { await unsnoozeItem(x); return; }
         const key = act.dataset.action === "save" ? "saved" : "read";
         x[key] = !x[key];
         await put(x);
@@ -2202,6 +2286,16 @@ function bind() {
       if (x) removeTagFromItem(x, tagRemove.dataset.tagRemove);
       return;
     }
+    const snz = e.target.closest("[data-snooze]");
+    if (snz && state.selected) {
+      const x = selectedItem();
+      if (x) {
+        if (snz.dataset.snooze === "clear") await unsnoozeItem(x);
+        else await snoozeItem(x, snz.dataset.snooze);
+      }
+      const m = $("#snoozeMenu"); if (m) m.hidden = true;
+      return;
+    }
     const ttsBtn = e.target.closest("[data-tts]");
     if (ttsBtn) {
       if (ttsBtn.dataset.tts === "pause") { if (tts?.paused) resumeTTS(); else pauseTTS(); }
@@ -2216,6 +2310,7 @@ function bind() {
       if (ra.dataset.reader === "read") { x.read = !x.read; await put(x); renderNav(); renderList(); renderReader(x); toast(x.read ? "Article marked read." : "Article marked unread."); return; }
       if (ra.dataset.reader === "listen") { if (tts?.itemId === x.id) stopTTS(); else startTTS(x); return; }
       if (ra.dataset.reader === "share") { shareArticle(x); return; }
+      if (ra.dataset.reader === "snooze") { const m = $("#snoozeMenu"); if (m) { m.hidden = snoozeMenuWasOpen; ra.setAttribute("aria-expanded", String(!m.hidden)); } return; }
       if (ra.dataset.reader === "open") { window.open(x.url, "_blank", "noopener"); return; }
       if (ra.dataset.reader === "fulltext") { loadFullText(x); return; }
       if (ra.dataset.reader === "close") { closeReader(); return; }
@@ -2320,6 +2415,8 @@ function bind() {
     renderList();
   });
   $("#markRead").onclick = markVisibleRead;
+  $("#markAbove").onclick = () => markAboveBelow("above");
+  $("#markBelow").onclick = () => markAboveBelow("below");
   $("#importOpml").onclick = () => $("#opmlFile").click();
   $("#exportOpml").onclick = exportOPML;
   $("#opmlFile").onchange = e => { if (e.target.files[0]) importOPML(e.target.files[0]); e.target.value = ""; };
@@ -2400,6 +2497,12 @@ function bind() {
   document.onkeydown = e => {
     const tag = document.activeElement?.tagName;
     if (["INPUT", "SELECT", "TEXTAREA"].includes(tag) || $("dialog[open]")) return;
+    // Ctrl+M marks above read, Shift+M marks below (Inoreader's
+    // bindings). Checked before the modifier early-return below.
+    // The key is compared case-insensitively: some keyboards and
+    // automation send Shift+M as key "m" with shiftKey set.
+    if (e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "m") { e.preventDefault(); markAboveBelow("above"); return; }
+    if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "m") { e.preventDefault(); markAboveBelow("below"); return; }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "Escape") {
       $("#sidebar").classList.remove("open");

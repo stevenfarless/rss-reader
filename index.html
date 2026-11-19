@@ -22,6 +22,7 @@
 <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></symbol>
 <symbol id="i-speak" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></symbol>
 <symbol id="i-share" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13"/><path d="M7 8l5-5 5 5"/><path d="M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
 </defs></svg>
 <div class="layout">
 <aside class="sidebar" id="sidebar">
@@ -29,7 +30,7 @@
 <div class="search" role="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><input id="search" type="search" placeholder="Search articles" aria-label="Search articles"><button type="button" id="searchClear" aria-label="Clear search" hidden><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button><kbd>/</kbd></div>
 <div class="side-tools"><button id="add" class="primary">+ Add feed</button><button id="theme" title="Toggle theme" aria-label="Toggle theme"><svg class="ic" aria-hidden="true"><use href="#i-theme"/></svg></button><button id="settings" title="Settings" aria-label="Settings"><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg></button></div>
 <div class="side-label">LIBRARY</div>
-<button class="nav active" data-view="all">All articles <span id="allCount">0</span></button><button class="nav" data-view="unread">Unread <span id="unreadCount">0</span></button><button class="nav" data-view="saved">Saved <span id="savedCount">0</span></button>
+<button class="nav active" data-view="all">All articles <span id="allCount">0</span></button><button class="nav" data-view="unread">Unread <span id="unreadCount">0</span></button><button class="nav" data-view="saved">Saved <span id="savedCount">0</span></button><button class="nav" data-view="snoozed">Snoozed <span id="snoozedCount">0</span></button>
 <div class="feed-head"><span class="side-label">YOUR FEEDS</span></div><div id="feeds" class="feeds"><p class="muted">Your feeds will appear here.</p></div>
 <div class="feed-head"><span class="side-label">TAGS</span></div><div id="tags" class="tag-list"><p class="muted">Tag articles from the reader to find them here.</p></div>
 <p class="local-note">Your subscriptions and preferences stay in this browser.</p>
@@ -39,7 +40,7 @@
 <main class="list-pane">
 <div class="mobile-bar"><button id="menu" aria-label="Open menu"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button><span id="mobileTitle">All articles</span><button id="mobileAdd" aria-label="Add feed">+</button></div>
 <noscript><p class="noscript-note">RSS Reader needs JavaScript to load and display your feeds. Your subscriptions are stored in this browser.</p></noscript>
-<div class="list-heading"><div><p class="eyebrow">YOUR READING DESK</p><h1 id="heading">All articles</h1><p id="subtitle">Your subscriptions, gathered in one place.</p></div><div class="list-actions"><button id="refresh" title="Refresh feeds (r)" aria-label="Refresh feeds"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></button><button id="markRead" class="quiet">Mark visible read</button></div></div>
+<div class="list-heading"><div><p class="eyebrow">YOUR READING DESK</p><h1 id="heading">All articles</h1><p id="subtitle">Your subscriptions, gathered in one place.</p></div><div class="list-actions"><button id="refresh" title="Refresh feeds (r)" aria-label="Refresh feeds"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></button><button id="markRead" class="quiet">Mark visible read</button><button id="markAbove" class="quiet" title="Mark articles above the selected one read (Ctrl+M)">Mark above read</button><button id="markBelow" class="quiet" title="Mark articles below the selected one read (Shift+M)">Mark below read</button></div></div>
 <div class="filters"><div><button class="filter active" data-filter="all">Everything</button><button class="filter" data-filter="today">Today</button><button class="filter" data-filter="week">This week</button></div><button id="sort" class="quiet">Newest first ↓</button></div>
 <div id="articleList" class="article-list"><div class="empty"><div class="empty-mark">R</div><h2>Your reading starts here.</h2><p>Add a feed to begin. Your subscriptions and reading history stay in this browser.</p><button id="firstAdd" class="primary">Add your first feed</button></div></div>
 </main>
@@ -77,6 +78,8 @@
 <tr><td><kbd>s</kbd></td><td>Save / unsave article</td></tr>
 <tr><td><kbd>t</kbd></td><td>Add a tag to the open article</td></tr>
 <tr><td><kbd>a</kbd></td><td>Mark visible articles read</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>M</kbd></td><td>Mark articles above the selected one read</td></tr>
+<tr><td><kbd>Shift</kbd>+<kbd>M</kbd></td><td>Mark articles below the selected one read</td></tr>
 <tr><td><kbd>u</kbd></td><td>Back to the article list</td></tr>
 <tr><td><kbd>g</kbd> then <kbd>a</kbd> / <kbd>u</kbd> / <kbd>s</kbd></td><td>Go to All / Unread / Saved</td></tr>
 <tr><td><kbd>r</kbd></td><td>Refresh all feeds</td></tr>
