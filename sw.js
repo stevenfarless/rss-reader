@@ -1,4 +1,4 @@
-const CACHE = "rss-reader-shell-v30";
+const CACHE = "rss-reader-shell-v31";
 const RUNTIME_CACHE = "rss-reader-runtime-v7";
 const RUNTIME_MAX = 50;
 const FILES = ["./", "./index.html", "./styles.css", "./markdown.js", "./purify.min.js", "./app.js", "./manifest.webmanifest", "./assets/icon.svg", "./assets/icon-192.png", "./assets/icon-512.png", "./assets/icon-maskable-512.png", "./assets/apple-touch-icon.png", "./fonts/GentiumBookPlus-Regular.woff2", "./fonts/GentiumBookPlus-Bold.woff2", "./fonts/GentiumBookPlus-Italic.woff2", "./fonts/GentiumBookPlus-BoldItalic.woff2"];
@@ -77,11 +77,14 @@ function swFetch(url, opts) {
 }
 function swOpenDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open("rss-reader-cache", 2);
+    const r = indexedDB.open("rss-reader-cache", 3);
     r.onupgradeneeded = () => {
       const d = r.result;
       if (!d.objectStoreNames.contains("items")) d.createObjectStore("items", { keyPath: "id" });
       if (!d.objectStoreNames.contains("sync")) d.createObjectStore("sync", { keyPath: "key" });
+      // The page owns highlights; the worker only creates the store so
+      // the schema stays in step with the page (version 3).
+      if (!d.objectStoreNames.contains("highlights")) d.createObjectStore("highlights", { keyPath: "id" });
     };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);

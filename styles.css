@@ -123,3 +123,26 @@ body.sidebar-collapsed #splitSide{display:none}
 .discovery-filter-btn{flex:1;padding:7px 6px;font:600 12px var(--sans);color:var(--soft);background:var(--bg);border:1px solid var(--line);border-radius:6px;cursor:pointer}
 .discovery-filter-btn.active{color:#171916;background:var(--accent);border-color:var(--accent)}
 .discovery-filter-btn:disabled{opacity:.45;cursor:default}
+/* Folder name as a button (#118): opens the folder as one merged list.
+   It keeps the folder-label look, with a hover and an active state. */
+.folder-head .folder-open{cursor:pointer;display:flex;align-items:center;gap:8px;min-width:0;background:none;border:0;border-radius:5px;padding:4px 6px;margin-left:-6px;color:var(--soft);font-size:10px;letter-spacing:.12em;text-transform:uppercase;font-weight:700;text-align:left}
+.folder-head .folder-open span{font-size:12px;letter-spacing:0;text-transform:none;color:var(--soft)}
+.folder-head .folder-open:hover{background:var(--panel2);color:var(--text)}
+.folder-head .folder-open.active{background:var(--panel2);color:var(--text)}
+/* Highlights (#116): the marked passage, the floating button, and the
+   per-article and global lists. */
+mark.hl{background:var(--accentbg);color:var(--text);border-radius:2px;padding:0 1px}
+mark.hl.hl-flash{outline:2px solid var(--accent);outline-offset:2px}
+.hl-btn{position:fixed;z-index:20;background:var(--accent);color:#171916;border:0;border-radius:6px;padding:8px 14px;font:600 13px var(--sans);box-shadow:0 4px 16px #0006;cursor:pointer}
+.hl-btn[hidden]{display:none}
+.hl-section{border-top:1px solid var(--line);margin-top:35px;padding-top:15px}
+.hl-section h3{font:700 18px var(--serif);margin:0 0 12px}
+.hl-item{padding:12px 0;border-bottom:1px solid var(--line)}
+.hl-item blockquote{margin:0 0 6px;padding-left:14px;border-left:2px solid var(--accent);color:var(--text);font:15px/1.5 var(--serif)}
+.hl-note{color:var(--muted);font-size:13px;margin:0 0 6px}
+.hl-actions{display:flex;gap:6px;flex-wrap:wrap}
+.hl-actions .quiet{padding:5px 8px}
+.hl-quote{margin:0 0 6px;padding-left:14px;border-left:2px solid var(--accent);color:var(--text);font:15px/1.5 var(--serif)}
+.hl-row{cursor:pointer}
+#hlDialog blockquote{margin:0 0 12px;padding-left:14px;border-left:2px solid var(--accent);color:var(--text);font:15px/1.5 var(--serif)}
+#hlDialog textarea{width:100%;padding:10px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:5px;font:14px var(--sans);resize:vertical}
