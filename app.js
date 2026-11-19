@@ -27,9 +27,12 @@ const state = {
   feeds: [], items: [], view: "all", feed: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null,
   folders: [], tags: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", proxyFallback: false, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false }
+  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, proxyFallback: false, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false }
 };
 let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null;
+/* Text-to-speech state (#105): the article being read, its sentence
+   chunks, and where playback has reached. Null when nothing is playing. */
+let tts = null;
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -65,6 +68,15 @@ const snippet = (s, n) => {
   if (s.length <= n) return s;
   const cut = s.slice(0, n).replace(/\s+\S*$/, "");
   return (cut || s.slice(0, n)) + "…";
+};
+/* Estimated reading time (#110): words in the text the reader would
+   show (full text when loaded, otherwise the feed content or summary)
+   at about 200 words per minute. Under 40 words there is nothing
+   worth estimating, so the caller omits it. */
+const readingTimeText = x => {
+  const words = plainText(x.fullContent || x.content || x.summary || "").split(/\s+/).filter(Boolean).length;
+  if (words < 40) return "";
+  return Math.max(1, Math.round(words / 200)) + " min read";
 };
 /* Byline timestamp without seconds ("11/16/2026 · 11:00 AM"). */
 const fmtDateTime = d => d.toLocaleDateString() + " · " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -433,6 +445,10 @@ function applySettings() {
   if (meta) meta.content = t === "light" ? "#f4f2ec" : "#171916";
   document.documentElement.dataset.width = state.settings.width;
   document.documentElement.dataset.size = state.settings.size;
+  // Reader typography (#111): serif/comfortable are the defaults, so
+  // the existing look is unchanged until the user picks otherwise.
+  document.documentElement.dataset.readerFont = state.settings.readerFont || "serif";
+  document.documentElement.dataset.lineHeight = state.settings.lineHeight || "comfortable";
   applySidebarCollapsed();
   applyPaneWidths();
 }
@@ -1246,7 +1262,8 @@ function renderList() {
     const exc = state.settings.cardExcerpt || "full";
     const excerpt = exc === "none" ? "" : `<p>${esc(snippet(cleanSummary(x.summary), exc === "short" ? 100 : 210))}</p>`;
     const thumb = state.settings.cardImage !== false && x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : "";
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0"><div class="article-main"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time></div><h2>${esc(x.title)}</h2>${excerpt}<div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button></span></div></div>${thumb}</article>`;
+    const rt = readingTimeText(x);
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0"><div class="article-main"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? `<span>·</span><span>${rt}</span>` : ""}</div><h2>${esc(x.title)}</h2>${excerpt}<div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button></span></div></div>${thumb}</article>`;
   }).join("") : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>';
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
@@ -1469,9 +1486,21 @@ function readerBodyHTML(x) {
 /* Build the reader pane for an item without changing its read state.
    openItem() marks the item read first; toggles (m, list buttons) call
    this directly so marking an item unread is not immediately undone. */
+/* Text-to-speech bar (#105): shown while an article is being read
+   aloud. The speed selector applies from the next spoken chunk. */
+const ttsBarHTML = x => {
+  const active = tts && tts.itemId === x.id;
+  const rate = state.settings.ttsRate || 1;
+  const opt = v => `<option value="${v}"${rate === v ? " selected" : ""}>${v}×</option>`;
+  return `<div class="tts-bar" id="ttsBar"${active ? "" : " hidden"}><span>Listening</span><button type="button" data-tts="pause">${tts?.paused ? "Resume" : "Pause"}</button><button type="button" data-tts="stop">Stop</button><label>Speed <select id="ttsSpeed" aria-label="Reading speed">${opt(0.75)}${opt(1)}${opt(1.25)}${opt(1.5)}${opt(2)}</select></label></div>`;
+};
 function renderReader(x) {
+  // Re-rendering the reader rebuilds its buttons, so any playback
+  // stops first rather than playing on with no controls.
+  stopTTS();
   const f = state.feeds.find(f => f.id === x.feedId);
   const d = date(x.published);
+  const rt = readingTimeText(x);
   const { showingFull, body } = readerBodyHTML(x);
   // WordPress API items already carry the full article, and so does any
   // feed item with long content — do not offer to "load" what is there.
@@ -1491,8 +1520,9 @@ function renderReader(x) {
   const progTop = state.settings.progressPosition === "top";
   const barHTML = `<div id="readProgress" class="${progTop ? "top" : "bottom"}"><i></i></div>`;
   const isAudio = !!x.enclosure?.type?.startsWith("audio/");
+  const canListen = "speechSynthesis" in window;
   const audioHTML = isAudio ? `<div class="audio-player"><audio id="audioPlayer" controls preload="metadata" src="${esc(x.enclosure.url)}"></audio><div class="audio-controls"><label>Speed <select id="audioSpeed" aria-label="Playback speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><a href="${esc(x.enclosure.url)}" target="_blank" rel="noopener">Open audio ↗</a></div></div>` : "";
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${icon("doc")}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div><h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${audioHTML}${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div></div>${progTop ? "" : barHTML}`;
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="false" ${canListen ? "" : "disabled"}>${icon("speak")}</button><button data-reader="share" title="Share article" aria-label="Share article">${icon("share")}</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${icon("doc")}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div>${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}${rt ? " · " + rt : ""}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${audioHTML}${x.image && !showingFull ? `<p class="reader-hero"><img src="${esc(x.image)}" alt=""></p>` : ""}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div></div>${progTop ? "" : barHTML}`;
   const bodyEl = $("#body");
   // Append the cleaned body's children, not the <body> element itself.
   // cleanHTML drops the page chrome (header/nav/footer); the leading-nav
@@ -1585,6 +1615,119 @@ function bindAudioPlayer(x) {
     } catch {}
   }
 }
+/* ---------- text-to-speech (#105) ---------- */
+/* The Web Speech API is built into the browser: no backend, no cost.
+   The article is read in sentence chunks of about 500 characters, so
+   pause/resume and speed changes have somewhere to take effect, and
+   one failed utterance does not lose the whole article. No sentence
+   highlighting: boundary events are unreliable across browsers, so
+   this version just plays the text. */
+function ttsChunksFor(x) {
+  const text = (x.title + ". " + plainText(x.fullContent || x.content || x.summary || "")).replace(/\s+/g, " ").trim();
+  const sentences = text.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) || [text];
+  const chunks = [];
+  let cur = "";
+  for (const s of sentences) {
+    if (cur && (cur + s).length > 500) { chunks.push(cur.trim()); cur = s; }
+    else cur += s;
+  }
+  if (cur.trim()) chunks.push(cur.trim());
+  return chunks.filter(Boolean);
+}
+function updateTTSUI() {
+  const bar = $("#ttsBar");
+  const btn = $('[data-reader="listen"]');
+  if (btn) {
+    btn.classList.toggle("listening", !!tts);
+    btn.setAttribute("aria-pressed", String(!!tts));
+    btn.title = tts ? "Stop listening" : "Listen to article";
+  }
+  if (!bar) return;
+  bar.hidden = !tts;
+  const pause = bar.querySelector('[data-tts="pause"]');
+  if (pause) pause.textContent = tts?.paused ? "Resume" : "Pause";
+}
+function speakChunk() {
+  if (!tts) return;
+  if (tts.index >= tts.chunks.length) { stopTTS(); toast("Finished reading."); return; }
+  const u = new SpeechSynthesisUtterance(tts.chunks[tts.index]);
+  u.rate = state.settings.ttsRate || 1;
+  u.onend = () => {
+    if (!tts) return;
+    // Paused when the chunk ended: do not advance; resuming replays
+    // this chunk from its start rather than skipping ahead.
+    if (tts.paused) return;
+    tts.index++;
+    speakChunk();
+  };
+  u.onerror = e => {
+    if (!tts) return;
+    if (e?.error === "canceled" || e?.error === "interrupted") return;
+    stopTTS();
+    toast("Text-to-speech stopped: the browser could not read this article.");
+  };
+  speechSynthesis.speak(u);
+  updateTTSUI();
+}
+function startTTS(x) {
+  if (!("speechSynthesis" in window)) { toast("Text-to-speech is not available in this browser."); return; }
+  stopTTS();
+  const chunks = ttsChunksFor(x);
+  if (!chunks.length) { toast("Nothing to read in this article."); return; }
+  tts = { itemId: x.id, chunks, index: 0, paused: false };
+  speakChunk();
+}
+function pauseTTS() {
+  if (!tts || tts.paused) return;
+  tts.paused = true;
+  try { speechSynthesis.pause(); } catch {}
+  updateTTSUI();
+}
+function resumeTTS() {
+  if (!tts || !tts.paused) return;
+  tts.paused = false;
+  try { speechSynthesis.resume(); } catch {}
+  // If the utterance already ended while paused, resume() does
+  // nothing: restart the current chunk so playback continues.
+  setTimeout(() => { if (tts && !speechSynthesis.speaking && tts.index < tts.chunks.length) speakChunk(); }, 300);
+  updateTTSUI();
+}
+function stopTTS() {
+  if (!tts) return;
+  tts = null;
+  try { speechSynthesis.cancel(); } catch {}
+  updateTTSUI();
+}
+
+/* ---------- sharing (#112) ---------- */
+/* Share the original article link, not anything stored in the app.
+   The system share sheet where the browser has one; otherwise copy
+   the link to the clipboard, with a textarea fallback for browsers
+   whose clipboard API is unavailable. */
+async function shareArticle(x) {
+  if (navigator.share) {
+    try { await navigator.share({ title: x.title, text: x.title, url: x.url }); return; }
+    catch (e) { if (e?.name === "AbortError") return; }
+  }
+  const copyFallback = () => {
+    const ta = document.createElement("textarea");
+    ta.value = x.url;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch {}
+    ta.remove();
+    return ok;
+  };
+  try {
+    await navigator.clipboard.writeText(x.url);
+    toast("Link copied to clipboard.");
+  } catch {
+    toast(copyFallback() ? "Link copied to clipboard." : "Sharing is not available in this browser. Open the original article to copy its address.");
+  }
+}
 function openItem(itemId) {
   const x = state.items.find(i => i.id === itemId);
   if (!x) return;
@@ -1597,6 +1740,7 @@ function openItem(itemId) {
   renderReader(x);
 }
 function closeReader() {
+  stopTTS();
   const wasOpen = $("#reader").classList.contains("open") || !!state.selected;
   $("#reader").classList.remove("open");
   state.selected = null;
@@ -1613,6 +1757,7 @@ function render() {
 
 /* ---------- folders & tags ---------- */
 function goTag(tag) {
+  stopTTS();
   state.view = "tag"; state.tag = tag; state.feed = null; state.selected = null;
   $("#reader").classList.remove("open");
   render();
@@ -1910,6 +2055,9 @@ async function importSettings(file) {
     const theme = pick("#themeSelect", d.settings.theme); if (theme) next.theme = theme;
     const width = pick("#widthSelect", d.settings.width); if (width) next.width = width;
     const size = pick("#sizeSelect", d.settings.size); if (size) next.size = size;
+    const font = pick("#fontSelect", d.settings.readerFont); if (font) next.readerFont = font;
+    const lh = pick("#lineHeightSelect", d.settings.lineHeight); if (lh) next.lineHeight = lh;
+    if (typeof d.settings.ttsRate === "number" && d.settings.ttsRate >= 0.5 && d.settings.ttsRate <= 2) next.ttsRate = d.settings.ttsRate;
     const prog = pick("#progressSelect", d.settings.progressPosition); if (prog) next.progressPosition = prog;
     const exc = pick("#cardExcerptSelect", d.settings.cardExcerpt); if (exc) next.cardExcerpt = exc;
     if (typeof d.settings.cardImage === "boolean") next.cardImage = d.settings.cardImage;
@@ -1937,6 +2085,8 @@ function showSettings() {
   $("#themeSelect").value = state.settings.theme;
   $("#widthSelect").value = state.settings.width;
   $("#sizeSelect").value = state.settings.size;
+  $("#fontSelect").value = state.settings.readerFont || "serif";
+  $("#lineHeightSelect").value = state.settings.lineHeight || "comfortable";
   $("#progressSelect").value = state.settings.progressPosition || "bottom";
   $("#cardExcerptSelect").value = state.settings.cardExcerpt || "full";
   $("#cardImageToggle").checked = state.settings.cardImage !== false;
@@ -1973,6 +2123,7 @@ function moveUnread(dir) {
   openItem(a[n].id);
 }
 function goView(view) {
+  stopTTS();
   state.view = view; state.feed = null; state.tag = null; state.selected = null;
   $("#reader").classList.remove("open");
   render();
@@ -2034,6 +2185,7 @@ function bind() {
     if (act) {
       const x = state.items.find(i => i.id === act.dataset.id);
       if (x) {
+        if (act.dataset.action === "share") { shareArticle(x); return; }
         const key = act.dataset.action === "save" ? "saved" : "read";
         x[key] = !x[key];
         await put(x);
@@ -2050,12 +2202,20 @@ function bind() {
       if (x) removeTagFromItem(x, tagRemove.dataset.tagRemove);
       return;
     }
+    const ttsBtn = e.target.closest("[data-tts]");
+    if (ttsBtn) {
+      if (ttsBtn.dataset.tts === "pause") { if (tts?.paused) resumeTTS(); else pauseTTS(); }
+      if (ttsBtn.dataset.tts === "stop") stopTTS();
+      return;
+    }
     const ra = e.target.closest("[data-reader]");
     if (ra && state.selected) {
       const x = selectedItem();
       if (!x) return;
       if (ra.dataset.reader === "save") { x.saved = !x.saved; await put(x); openItem(x.id); return; }
       if (ra.dataset.reader === "read") { x.read = !x.read; await put(x); renderNav(); renderList(); renderReader(x); toast(x.read ? "Article marked read." : "Article marked unread."); return; }
+      if (ra.dataset.reader === "listen") { if (tts?.itemId === x.id) stopTTS(); else startTTS(x); return; }
+      if (ra.dataset.reader === "share") { shareArticle(x); return; }
       if (ra.dataset.reader === "open") { window.open(x.url, "_blank", "noopener"); return; }
       if (ra.dataset.reader === "fulltext") { loadFullText(x); return; }
       if (ra.dataset.reader === "close") { closeReader(); return; }
@@ -2128,6 +2288,14 @@ function bind() {
   $("#refresh").onclick = refresh;
   bindSplitters();
   $("#reader").addEventListener("scroll", updateReadProgress, { passive: true });
+  // The listening speed applies from the next spoken chunk and is
+  // remembered with the other settings.
+  document.addEventListener("change", e => {
+    if (e.target.id === "ttsSpeed") {
+      state.settings.ttsRate = Number(e.target.value) || 1;
+      local(S, state.settings);
+    }
+  });
   window.addEventListener("resize", updateReadProgress);
   $("#settings").onclick = showSettings;
   $("#theme").onclick = () => {
@@ -2177,6 +2345,8 @@ function bind() {
   $("#saveSettings").onclick = () => {
     state.settings = {
       theme: $("#themeSelect").value, width: $("#widthSelect").value, size: $("#sizeSelect").value,
+      readerFont: $("#fontSelect").value, lineHeight: $("#lineHeightSelect").value,
+      ttsRate: state.settings.ttsRate || 1,
       proxyFallback: $("#proxyToggle").checked, progressPosition: $("#progressSelect").value,
       cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
       backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
@@ -2216,6 +2386,7 @@ function bind() {
     applySidebarCollapsed();
   };
   window.addEventListener("popstate", () => {
+    stopTTS();
     if ($("#reader").classList.contains("open") || state.selected) {
       $("#reader").classList.remove("open");
       state.selected = null;

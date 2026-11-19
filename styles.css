@@ -25,6 +25,21 @@ body.sidebar-collapsed #sideToggle svg{transform:rotate(180deg)}
 .reader-empty h2{color:var(--text);font-size:19px;margin:10px 0 6px}
 .reader-empty p{margin:0 0 6px}#toast.show{opacity:1;transform:translate(-50%,0)}
 :root[data-width=narrow]{--reading-width:560px}:root[data-width=comfortable]{--reading-width:680px}:root[data-width=wide]{--reading-width:850px}:root[data-size=small]{--reading-size:16px}:root[data-size=normal]{--reading-size:18px}:root[data-size=large]{--reading-size:20px}
+/* Reader typography (#111): serif and comfortable line height are the
+   defaults, matching the existing look. Sans also covers the reader
+   headings, so the article reads in one voice. */
+:root[data-reader-font="sans"] .reader-body{font-family:var(--sans)}
+:root[data-reader-font="sans"] .reader-content h1,:root[data-reader-font="sans"] .reader-body h1,:root[data-reader-font="sans"] .reader-body h2,:root[data-reader-font="sans"] .reader-body h3,:root[data-reader-font="sans"] .reader-body h4,:root[data-reader-font="sans"] .reader-body h5,:root[data-reader-font="sans"] .reader-body h6{font-family:var(--sans)}
+:root[data-line-height="compact"] .reader-body{line-height:1.45}
+:root[data-line-height="roomy"] .reader-body{line-height:1.95}
+/* Text-to-speech bar (#105) and the active Listen button. */
+.tts-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0 0;padding:10px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;font-size:12px;color:var(--muted)}
+.tts-bar[hidden]{display:none}
+.tts-bar button{background:none;border:1px solid var(--line);border-radius:5px;padding:6px 10px;color:var(--text);font-size:12px}
+.tts-bar select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px}
+.tts-bar label{display:flex;align-items:center;gap:6px}
+.reader-actions button.listening{color:var(--accent)}
+.reader-actions{flex-wrap:wrap}
 @media(max-width:1050px){.layout{grid-template-columns:clamp(180px,var(--side-w,205px),420px) minmax(300px,clamp(300px,var(--list-w,400px),640px)) minmax(300px,1fr)}.list-pane{padding:28px 18px}.reader{padding:35px 25px}}
 @media(max-width:760px){#sideToggle{display:none}.layout{display:block;position:relative}.sidebar{position:absolute;z-index:6;inset:0 auto 0 0;width:270px;transform:translateX(-105%);transition:transform .2s;box-shadow:10px 0 35px #0005;padding-bottom:calc(16px + env(safe-area-inset-bottom))}.sidebar.open{transform:translateX(0)}.scrim{display:none;position:absolute;inset:0;z-index:5;background:#0009}.scrim.show{display:block}.list-pane{height:100%;border:0;padding:17px 16px}.mobile-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-top:env(safe-area-inset-top)}.mobile-bar button{width:32px;height:32px}.list-heading h1{font-size:27px}.list-heading .quiet{font-size:11px;padding:6px 8px;white-space:nowrap}.reader{display:none;position:absolute;inset:0;z-index:4;background:var(--bg);padding:22px 19px}.reader.open{display:block}.reader-content h1{font-size:30px}.empty{padding-top:14vh}}
 @media(pointer:coarse){.mobile-bar button,.side-tools button,#sideToggle,.feed-unsub{min-width:44px;min-height:44px}.article-actions button,.reader-actions button{min-width:44px;min-height:44px;padding:10px}.nav,.feed-row{min-height:44px}.filter{min-height:44px;padding:10px 12px}}
