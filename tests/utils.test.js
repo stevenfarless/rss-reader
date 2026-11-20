@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed } = require("../utils.js");
+const { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle } = require("../utils.js");
 
 test("normalizeFeedUrl adds https to a bare address and upgrades http", () => {
   assert.equal(normalizeFeedUrl("example.com/feed"), "https://example.com/feed");
@@ -130,4 +130,13 @@ test("allFoldersCollapsed is true only when every named folder is collapsed", ()
   assert.equal(allFoldersCollapsed(["News", "Tech"], new Set(["News"])), false);
   assert.equal(allFoldersCollapsed(["News"], new Set()), false);
   assert.equal(allFoldersCollapsed([], new Set()), false);
+});
+
+test("authorIsFeedTitle matches the author to the feed title, ignoring case and whitespace", () => {
+  assert.equal(authorIsFeedTitle("Bart D. Ehrman", "Bart D. Ehrman"), true);
+  assert.equal(authorIsFeedTitle(" bart d. ehrman ", "Bart D. Ehrman"), true);
+  assert.equal(authorIsFeedTitle("John Smith", "Bart D. Ehrman"), false);
+  assert.equal(authorIsFeedTitle("", "Bart D. Ehrman"), false);
+  assert.equal(authorIsFeedTitle(null, "Bart D. Ehrman"), false);
+  assert.equal(authorIsFeedTitle("Bart D. Ehrman", ""), false);
 });
