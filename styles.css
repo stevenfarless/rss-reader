@@ -7,6 +7,17 @@
 /* Inter is a variable font (weight 100-900, optical size axis); let the
    browser pick the optical size. License: fonts/inter-font-license.txt (OFL 1.1). */
 html{font-optical-sizing:auto}
+/* Nunito (variable, weight 200-1000) and Ubuntu (400/700) are reader font
+   options. Both are latin-subset WOFF2 files from Google Fonts, so text
+   outside that range falls back to Inter/system-ui. Licenses:
+   fonts/nunito-font-license.txt (OFL 1.1) and
+   fonts/ubuntu-font-license.txt (Ubuntu Font Licence 1.0). */
+@font-face{font-family:Nunito;src:url("./fonts/NunitoVariable.woff2") format("woff2");font-weight:200 1000;font-style:normal;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Nunito;src:url("./fonts/NunitoVariable-Italic.woff2") format("woff2");font-weight:200 1000;font-style:italic;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Ubuntu;src:url("./fonts/Ubuntu-Regular.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Ubuntu;src:url("./fonts/Ubuntu-Bold.woff2") format("woff2");font-weight:700;font-style:normal;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Ubuntu;src:url("./fonts/Ubuntu-Italic.woff2") format("woff2");font-weight:400;font-style:italic;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Ubuntu;src:url("./fonts/Ubuntu-BoldItalic.woff2") format("woff2");font-weight:700;font-style:italic;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
 :root{color-scheme:dark;--bg:#171916;--panel:#1d201c;--panel2:#232720;--line:#343a31;--text:#e9e7df;--muted:#a2a597;--soft:#9a9d8f;--accent:#c5a77a;--accentbg:#393326;--err:#e18d7d;--serif:Gentium,Georgia,serif;--sans:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 :root[data-theme=light]{color-scheme:light;--bg:#f4f2ec;--panel:#faf9f5;--panel2:#e7e4d6;--line:#d5d2c5;--text:#292b25;--muted:#4b4e41;--soft:#56594b;--accent:#6d5228;--accentbg:#e9dcc2;--err:#a33d2e}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);display:flex;flex-direction:column;height:100dvh;overflow:hidden}button,input,select{font:inherit}button{cursor:pointer;color:inherit}button:disabled{opacity:.45;cursor:default}
@@ -44,6 +55,13 @@ body.sidebar-collapsed #sideToggle svg{transform:rotate(180deg)}
    headings, so the article reads in one voice. */
 :root[data-reader-font="sans"] .reader-body{font-family:var(--sans)}
 :root[data-reader-font="sans"] .reader-content h1,:root[data-reader-font="sans"] .reader-body h1,:root[data-reader-font="sans"] .reader-body h2,:root[data-reader-font="sans"] .reader-body h3,:root[data-reader-font="sans"] .reader-body h4,:root[data-reader-font="sans"] .reader-body h5,:root[data-reader-font="sans"] .reader-body h6{font-family:var(--sans)}
+/* Nunito and Ubuntu reader options (#153, #155): same pattern as sans,
+   covering the reader body and headings so the article reads in one voice. */
+:root{--nunito:Nunito,Inter,system-ui,sans-serif;--ubuntu:Ubuntu,Inter,system-ui,sans-serif}
+:root[data-reader-font="nunito"] .reader-body{font-family:var(--nunito)}
+:root[data-reader-font="nunito"] .reader-content h1,:root[data-reader-font="nunito"] .reader-body h1,:root[data-reader-font="nunito"] .reader-body h2,:root[data-reader-font="nunito"] .reader-body h3,:root[data-reader-font="nunito"] .reader-body h4,:root[data-reader-font="nunito"] .reader-body h5,:root[data-reader-font="nunito"] .reader-body h6{font-family:var(--nunito)}
+:root[data-reader-font="ubuntu"] .reader-body{font-family:var(--ubuntu)}
+:root[data-reader-font="ubuntu"] .reader-content h1,:root[data-reader-font="ubuntu"] .reader-body h1,:root[data-reader-font="ubuntu"] .reader-body h2,:root[data-reader-font="ubuntu"] .reader-body h3,:root[data-reader-font="ubuntu"] .reader-body h4,:root[data-reader-font="ubuntu"] .reader-body h5,:root[data-reader-font="ubuntu"] .reader-body h6{font-family:var(--ubuntu)}
 :root[data-line-height="compact"] .reader-body{line-height:1.45}
 :root[data-line-height="roomy"] .reader-body{line-height:1.95}
 /* Text-to-speech bar (#105) and the active Listen button. */
