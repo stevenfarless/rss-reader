@@ -5,7 +5,7 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 ## Features
 
 - RSS 2.0, RSS 1.0/RDF, Atom, and JSON Feed parsing
-- Search Apple Podcasts and public RSS directories (RSS.mobi and RSSAmp, plus Feedsearch for website addresses) in one deduplicated result list; add feeds directly or enter a URL manually
+- One Add a feed box: type a feed or website address to add it directly (conventional locations and WordPress are probed for bare sites), or type a publication, podcast, or topic to search Apple Podcasts and public RSS directories (RSS.mobi and RSSAmp, plus Feedsearch for website addresses) in one deduplicated result list
 - Discover feed links from publisher pages
 - Feed refresh, unread and saved article views, and per-feed navigation
 - Feed folders: create, rename, delete, and move feeds between folders (OPML folders are kept on import). Click a folder name in the sidebar to read all of its feeds as one merged newest-first list
@@ -58,7 +58,7 @@ Feeds that block cross-origin requests and offer none of the above still cannot 
 
 ## Feed discovery
 
-The Add Feed search queries Apple Podcasts, RSSAmp, and RSS.mobi. Website-address searches also query Feedsearch. Search terms are sent to those services; subscriptions and preferences remain in this browser. Results from the providers are combined and deduplicated by feed URL. Each provider is independent, so a temporary outage does not block the others.
+The Add Feed box takes a feed or website address, or a name or topic. An address is added directly: a bare website is probed at the conventional locations (`/feed`, `/rss`, `/feed.xml`, `/rss.xml`, `/atom.xml`, `/index.xml`) and through the WordPress API. A name or topic queries Apple Podcasts, RSSAmp, and RSS.mobi, and a website address also queries Feedsearch as a fallback if the direct add fails. Search terms are sent to those services; subscriptions and preferences remain in this browser. Results from the providers are combined and deduplicated by feed URL. Each provider is independent, so a temporary outage does not block the others.
 
 ## Local data
 

@@ -25,7 +25,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.3";
+const APP_VERSION = "1.8.4";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -1053,13 +1053,26 @@ async function searchFeeds(raw) {
     renderDiscoveryResults(items);
   } finally { clearTimeout(timeout); }
 }
+/* One box for adding a feed (#157): an address (feed URL or bare
+   website) goes the direct-add path; anything else is a directory
+   search. Same address test Feedsearch uses for URL queries. */
+function looksLikeAddress(q) {
+  return /^(https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?$/i.test(q.trim());
+}
 function scheduleFeedSearch() {
   discoveryRun++;
   clearTimeout(discoveryTimer);
   const q = $("#feedSearchInput").value;
+  $("#feedError").textContent = "";
   if (q.trim().length < 2) {
     if (discoveryController) discoveryController.abort();
-    $("#feedSearchStatus").textContent = "Search by publication, podcast, topic, or website.";
+    $("#feedSearchStatus").textContent = "Type an address to add it, or a name or topic to search.";
+    $("#feedSearchResults").innerHTML = "";
+    return;
+  }
+  if (looksLikeAddress(q)) {
+    if (discoveryController) discoveryController.abort();
+    $("#feedSearchStatus").textContent = "Press Enter or Add feed to add this address.";
     $("#feedSearchResults").innerHTML = "";
     return;
   }
@@ -2564,10 +2577,9 @@ function showOrganize() {
 function showFeed() {
   $("#feedError").textContent = "";
   $("#feedSearchInput").value = "";
-  $("#feedSearchStatus").textContent = "Search by publication, podcast, topic, or website.";
+  $("#feedSearchStatus").textContent = "Type an address to add it, or a name or topic to search.";
   $("#feedSearchResults").innerHTML = "";
   window.feedDiscoveryResults = [];
-  $("#feedUrl").value = "";
   $("#feedDialog").showModal();
   $("#feedSearchInput").focus();
 }
@@ -3021,9 +3033,9 @@ function bind() {
   $("#home").onclick = () => { goView("all"); };
   $("#add").onclick = $("#mobileAdd").onclick = $("#firstAdd").onclick = showFeed;
   $("#feedSearchInput").addEventListener("input", scheduleFeedSearch);
-  $("#feedSearchInput").addEventListener("keydown", e => {
-    if (e.key === "Enter") { e.preventDefault(); clearTimeout(discoveryTimer); searchFeeds(e.target.value); }
-  });
+  // Enter in the single box submits the form, which runs the unified
+  // add logic (#157): direct add for an address, directory search
+  // for words. No separate key handler.
   $("#feedSearchResults").addEventListener("click", e => {
     const f = e.target.closest("[data-discovery-filter]");
     if (f && !f.disabled) {
@@ -3183,16 +3195,28 @@ function bind() {
   $("#feedDialog").addEventListener("click", e => {
     if (e.target.closest('button[value="cancel"]')) $("#feedDialog").close();
   });
+  // Unified add (#157): one box. An address is added directly
+  // (loadFeedFromUrl probes /feed, /rss, … and WordPress for a bare
+  // site); words run a directory search instead.
   $("#feedForm").onsubmit = async e => {
     if (e.submitter?.value === "cancel") return;
     e.preventDefault();
+    clearTimeout(discoveryTimer);
+    if (discoveryController) discoveryController.abort();
+    const q = $("#feedSearchInput").value.trim();
+    if (!q) { $("#feedSearchStatus").textContent = "Type a feed or website address, or a name or topic to search."; return; }
+    if (!looksLikeAddress(q)) { searchFeeds(q); return; }
     const b = $("#saveFeed");
     b.disabled = true;
     try {
-      await addFeed($("#feedUrl").value.trim());
+      await addFeed(q);
       $("#feedDialog").close();
     } catch (err) {
-      $("#feedError").textContent = classifyError(err, /^http:/i.test($("#feedUrl").value.trim()));
+      $("#feedError").textContent = classifyError(err, /^http:/i.test(q));
+      // Direct add failed: fall back to directory search, which can
+      // surface the site's feeds even when a direct fetch cannot.
+      // An already-subscribed feed needs no search.
+      if (!/already subscribe/i.test(err.message || "")) searchFeeds(q);
     } finally { b.disabled = false; }
   };
   $("#saveSettings").onclick = () => {
