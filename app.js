@@ -1672,6 +1672,7 @@ function setupFeedDrag() {
   });
 }
 function moveFeedByDrag(draggedId, target) {
+  const before = state.feeds.find(f => f.id === draggedId)?.group || "";
   const feed = moveFeedInList(state.feeds, draggedId, target);
   if (!feed) return;
   // Dropping on a collapsed folder expands it, so the feed is visible
@@ -1682,7 +1683,12 @@ function moveFeedByDrag(draggedId, target) {
   }
   saveFeeds();
   renderNav();
-  toast(`Moved “${feed.title}”${feed.group ? ` to ${feed.group}` : " out of its folder"}.`);
+  // Only name a folder change: a reorder inside the same folder
+  // (including ungrouped) is just a move, not "out of its folder".
+  let where = "";
+  if (feed.group && feed.group !== before) where = ` to ${feed.group}`;
+  else if (!feed.group && before) where = " out of its folder";
+  toast(`Moved “${feed.title}”${where}.`);
 }
 /* The sort control is a compact arrow in the list header (#175):
    ↓ newest first, ↑ oldest first. */
