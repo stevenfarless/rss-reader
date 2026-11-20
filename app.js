@@ -515,7 +515,7 @@ function applyPaneWidths() {
 /* Place the splitter handles on the panes' right edges. Skipped on
    mobile, where the sidebar is a drawer and the splitters are hidden. */
 function positionSplitters() {
-  if (!matchMedia("(min-width:761px)").matches) return;
+  if (!matchMedia("(min-width:821px)").matches) return;
   const layout = $(".layout");
   const side = $("#sidebar"), list = $(".list-pane");
   if (!layout || !side || !list) return;
@@ -535,6 +535,7 @@ function bindSplitter(el, kind) {
     e.preventDefault();
     el.setPointerCapture(e.pointerId);
     el.classList.add("dragging");
+    document.body.classList.add("dragging-splitter");
     const startX = e.clientX, start = state.settings[key];
     const move = ev => {
       state.settings[key] = clampW(start + (ev.clientX - startX), range);
@@ -544,6 +545,9 @@ function bindSplitter(el, kind) {
     };
     const up = () => {
       el.classList.remove("dragging");
+      document.body.classList.remove("dragging-splitter");
+      // A drag can still leave a selection behind; clear it (#139).
+      try { getSelection()?.removeAllRanges(); } catch {}
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
@@ -1109,8 +1113,18 @@ async function addFeed(raw) {
   // Rules can tag a newly added feed's articles; sync the tag list so
   // those tags appear in the sidebar immediately, not at the next refresh.
   syncTags(); saveTags();
+  // Make the add unmissable (#137): open the new feed's view, flash
+  // its row in the sidebar, and name it in the confirmation.
+  state.view = "feed"; state.feed = feed.id; state.folder = null; state.tag = null; state.savedSearch = null; state.selected = null;
   render();
-  toast("Feed added" + (loaded.via === "feed" ? "." : loaded.via === "wp" ? " (via the site's WordPress API)." : " (via the proxy fallback)."));
+  const row = document.querySelector(`[data-feed="${CSS.escape(feed.id)}"]`);
+  if (row) {
+    row.scrollIntoView({ block: "nearest" });
+    row.classList.add("just-added");
+    setTimeout(() => row.classList.remove("just-added"), 2300);
+  }
+  const n = loaded.parsed.items.length;
+  toast(`“${feed.title}” added — ${n} article${n === 1 ? "" : "s"}.`);
 }
 
 /* Rules (#109): run on newly fetched articles at refresh time. A rule
@@ -1482,11 +1496,13 @@ function renderList() {
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
   // Mark above/below act on the selected article in this list: without
-  // a selection there is nothing above or below to mark.
+  // a selection there is nothing above or below to mark. Mark visible
+  // read is disabled when nothing visible is unread (#136 follow-up).
   const hasSel = a.some(x => x.id === state.selected);
-  const ma = $("#markAbove"), mb = $("#markBelow");
+  const ma = $("#markAbove"), mb = $("#markBelow"), mr = $("#markRead");
   if (ma) ma.disabled = !hasSel;
   if (mb) mb.disabled = !hasSel;
+  if (mr) mr.disabled = !a.some(x => !x.read);
 }
 
 /* ---------- sanitising ---------- */
