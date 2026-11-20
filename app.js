@@ -6,11 +6,11 @@
    1. Direct fetch of the feed (works when the publisher sends CORS headers).
    2. WordPress REST API (/wp-json/wp/v2/posts) for WordPress sites — WordPress
       sends permissive CORS headers on its API even when its /feed does not.
-   3. A public feed-to-JSON service (rss2json), only when the user opts in
-      in Settings ("proxyFallback"): the feed passes through a third party.
+   3. A public feed-to-JSON service (rss2json), as a last resort: the feed
+      passes through a third party.
    Full-article text is fetched the same way: directly, or via the
    WordPress API looked up by the article slug (which returns full
-   content), or via the opt-in reader/proxy services. */
+   content), or via the reader/proxy services. */
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -31,13 +31,13 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.7";
+const APP_VERSION = "1.8.8";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null, savedSearch: null,
   folders: [], tags: [], savedSearches: [], rules: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, proxyFallback: false, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false }
+  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false }
 };
 let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null;
 /* Text-to-speech state (#105): the article being read, its sentence
@@ -272,7 +272,6 @@ function validateSettings(d) {
   if (typeof d.hideDuplicates === "boolean") next.hideDuplicates = d.hideDuplicates;
   if (typeof d.backgroundSync === "boolean") next.backgroundSync = d.backgroundSync;
   if (typeof d.notifyNew === "boolean") next.notifyNew = d.notifyNew;
-  if (typeof d.proxyFallback === "boolean") next.proxyFallback = d.proxyFallback;
   if (typeof d.sidebarCollapsed === "boolean") next.sidebarCollapsed = d.sidebarCollapsed;
   if (typeof d.sidebarWidth === "number" && d.sidebarWidth >= 180 && d.sidebarWidth <= 420) next.sidebarWidth = d.sidebarWidth;
   if (typeof d.listWidth === "number" && d.listWidth >= 320 && d.listWidth <= 640) next.listWidth = d.listWidth;
@@ -407,7 +406,7 @@ function deleteMany(ids) { return runBatch("readwrite", s => { for (const id of 
    Fire-and-forget: a mirror failure must not break the UI. */
 function mirrorSync() {
   const feeds = state.feeds.map(f => ({ id: f.id, url: f.url, title: f.title, via: f.via, wpRoot: f.wpRoot, site: f.site }));
-  const settings = { proxyFallback: !!state.settings.proxyFallback, notifyNew: !!state.settings.notifyNew };
+  const settings = { notifyNew: !!state.settings.notifyNew };
   runBatch("readwrite", s => {
     s.put({ key: "feeds", value: feeds });
     s.put({ key: "settings", value: settings });
@@ -477,7 +476,7 @@ function readSettingsFromDialog() {
     readerFont: $("#fontSelect").value, lineHeight: $("#lineHeightSelect").value,
     ttsRate: state.settings.ttsRate || 1,
     hideDuplicates: $("#hideDuplicatesToggle").checked,
-    proxyFallback: $("#proxyToggle").checked, progressPosition: $("#progressSelect").value,
+    progressPosition: $("#progressSelect").value,
     cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
     sidebarCollapsed: state.settings.sidebarCollapsed || false,
@@ -955,7 +954,6 @@ async function loadFeedFromUrl(rawUrl) {
     return null;
   };
   const tryProxy = async () => {
-    if (!state.settings.proxyFallback) return null;
     try {
       const parsed = await loadViaProxy(url);
       return { parsed, via: "proxy", url, wpRoot: "" };
@@ -1749,7 +1747,6 @@ async function fetchArticleHtml(url, title) {
     if (!/<(article|main|body|div|p)[\s>]/i.test(text)) throw Error("Not an article page.");
     return text;
   } catch (e) { directErr = e; }
-  if (!state.settings.proxyFallback) throw directErr;
   // Reader service (returns the article as Markdown). Fast when it works;
   // it rate-limits shared IPs, so a failure here just falls through.
   // If the title appears only after a long run of navigation text, the
@@ -1875,9 +1872,7 @@ async function loadFullText(item) {
     toast("Full article loaded.");
   } catch (e) {
     if (btn) { btn.disabled = false; btn.title = "Load full article"; btn.textContent = "Load full article"; }
-    toast(state.settings.proxyFallback
-      ? "Full text unavailable — the publisher blocks direct access and the reader services could not fetch this page."
-      : "Full text unavailable — showing the feed excerpt. Turn on the proxy fallback in Settings to try reader services.");
+    toast("Full text unavailable — the publisher blocks direct access and the reader services could not fetch this page.");
   }
 }
 
@@ -2927,7 +2922,6 @@ function showSettings() {
   $("#hideDuplicatesToggle").checked = state.settings.hideDuplicates !== false;
   $("#backgroundSyncToggle").checked = !!state.settings.backgroundSync;
   $("#notifyNewToggle").checked = !!state.settings.notifyNew;
-  $("#proxyToggle").checked = !!state.settings.proxyFallback;
   // App updates (#144): the running version, and the last check result
   // (an update waiting shows here as well as in the banner).
   const av = $("#appVersion");

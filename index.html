@@ -66,8 +66,7 @@
 <label class="setting">Background refresh<input id="backgroundSyncToggle" type="checkbox"></label>
 <label class="setting">New article notifications<input id="notifyNewToggle" type="checkbox"></label>
 <p class="muted" id="syncNote" role="status"></p>
-<label class="setting">Try a helper service for blocked feeds<input id="proxyToggle" type="checkbox"></label>
-<p class="privacy">Proxy fallback: when a feed cannot load directly, the reader tries the site's own WordPress API first, then public feed-to-JSON and reader services as a last resort. Those services see the feed or article address. Off by default.</p>
+<p class="privacy">When a feed cannot load directly, the reader tries the site's own WordPress API first, then public feed-to-JSON and reader services as a last resort. Those services see the feed or article address.</p>
 <p class="privacy">Background refresh and notifications work only where the browser allows them (Chrome on Android, installed app), at most every 12 hours, and only article text is kept offline.</p>
 <h3 class="settings-group">Manage</h3>
 <div class="backup"><strong>App updates</strong><p>Version <span id="appVersion"></span>. The reader checks for new versions when it opens, every 30 minutes, and when the tab is shown again.</p><button type="button" id="checkUpdates" class="quiet">Check for updates</button><p id="updateStatus" class="muted" role="status"></p></div>
