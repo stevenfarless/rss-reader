@@ -865,7 +865,12 @@ async function loadFeedFromUrl(rawUrl) {
   }
   try {
     const parsed = await loadWordPressFeed(origin);
-    if (parsed.items.length) return { parsed, via: "wp", url, wpRoot: origin };
+    // The feed URL is the site's canonical /feed/, not the typed
+    // address: the API returns the same main-posts feed, and using
+    // /feed/ lets the duplicate check catch an already-subscribed
+    // main feed added by its feed URL (#160). Refresh loads through
+    // wpRoot, not this URL.
+    if (parsed.items.length) return { parsed, via: "wp", url: origin + "/feed/", wpRoot: origin };
   } catch {}
   if (state.settings.proxyFallback) {
     try {
