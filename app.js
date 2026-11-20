@@ -31,7 +31,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.10";
+const APP_VERSION = "1.8.11";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -1872,16 +1872,50 @@ async function loadFullText(item) {
     // article if it is still the one on screen, or the completed load
     // would yank the reader back to a stale article.
     if (state.selected === item.id) openItem(item.id);
-    else if (btn) { btn.disabled = false; btn.title = "Load full article"; btn.textContent = "Load full article"; }
+    else if (btn) { btn.disabled = false; btn.title = "Load full article (w)"; btn.textContent = "Load full article"; }
     toast("Full article loaded.");
   } catch (e) {
-    if (btn) { btn.disabled = false; btn.title = "Load full article"; btn.textContent = "Load full article"; }
+    if (btn) { btn.disabled = false; btn.title = "Load full article (w)"; btn.textContent = "Load full article"; }
     toast("Full text unavailable — the publisher blocks direct access and the reader services could not fetch this page.");
   }
 }
 
+/* Full-article view state (#173): ids the user toggled back to the feed
+   excerpt with W (or the More menu). In-memory only: the fetched full
+   text stays stored on the item, so toggling back on is instant. */
+const fullOffIds = new Set();
+/* Whether the reader is showing fetched full text, and whether the feed
+   content already IS the full article (nothing to load or toggle). */
+function fullTextState(x) {
+  const f = state.feeds.find(f => f.id === x.feedId);
+  const showingFull = !!x.fullContent && !fullOffIds.has(x.id);
+  const alreadyFull = !showingFull && (
+    (f?.via === "wp" && stripTags(x.content || "").length > 200) ||
+    (x.fullContentIncluded && stripTags(x.content || "").length > 200)
+  );
+  return { showingFull, alreadyFull };
+}
+
+/* W toggles full article on and off, like Inoreader (#173). Toggling
+   off just hides the fetched text; toggling on again needs no fetch. */
+function toggleFullText(x) {
+  if (!x) return;
+  const { showingFull, alreadyFull } = fullTextState(x);
+  if (alreadyFull) return;
+  if (showingFull) {
+    fullOffIds.add(x.id);
+    renderReader(x);
+  } else if (x.fullContent) {
+    fullOffIds.delete(x.id);
+    renderReader(x);
+  } else {
+    fullOffIds.delete(x.id);
+    loadFullText(x);
+  }
+}
+
 function readerBodyHTML(x) {
-  const showingFull = !!x.fullContent;
+  const { showingFull } = fullTextState(x);
   let body = showingFull ? x.fullContent : (x.content || x.summary || "<p>No article text was included in this feed.</p>");
   // Convert plain-text Markdown locally; preserve existing HTML feeds.
   const hasHTML = body.trimStart().startsWith("<");
@@ -1964,11 +1998,10 @@ function renderReader(x) {
      content. Length is NOT a signal — some feeds (e.g. NASA) ship long
      excerpts padded with site boilerplate, which the old >1500-char
      guess mislabelled as full and left with no way to fetch the rest. */
-  const alreadyFull = !showingFull && (
-    (f?.via === "wp" && stripTags(x.content || "").length > 200) ||
-    (x.fullContentIncluded && stripTags(x.content || "").length > 200)
-  );
-  const canFull = !showingFull && !x.fullContent && !alreadyFull;
+  const { alreadyFull } = fullTextState(x);
+  // The menu item toggles (#173): enabled unless the feed content
+  // already is the full article.
+  const canFull = !alreadyFull;
   // The progress bar sits at the very edge of the reader (top or bottom,
   // per the setting), so it is placed before the content for top and
   // after it for bottom.
@@ -1982,8 +2015,9 @@ function renderReader(x) {
   // per article, so re-renders keep it and opening another article
   // collapses it again.
   const tagsOpen = tagsExpandedId === x.id;
+  const fullLabel = showingFull ? "Show feed excerpt" : x.fullContent ? "Show full article" : alreadyFull ? "Full article included in feed" : "Load full article";
   const tagsRowHTML = `<div class="tags-row" id="tagsRow"><button type="button" class="quiet" id="tagToggleBtn" aria-expanded="${tagsOpen}" aria-label="Tag article">${icon("tag")}<span>Tag</span></button>${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<span id="tagInputWrap" ${tagsOpen ? "" : "hidden"}><input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></span></div>`;
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" class="reader-btn" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}<span>${x.saved ? "Saved" : "Save"}</span></button><button data-reader="open" class="reader-btn" title="Open original (v)" aria-label="Open original">↗<span>Open original</span></button><div class="menu-wrap"><button id="moreMenuBtn" class="reader-btn" aria-haspopup="true" aria-expanded="false">···<span>More</span></button><div class="menu" id="moreMenu" hidden><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="${tts?.itemId === x.id}" ${canListen ? "" : "disabled"}>${tts?.itemId === x.id ? "Stop listening" : "Listen to article"}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">Snooze article</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}</button><button data-reader="share" title="Share article" aria-label="Share article">Share article</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "○ Mark unread" : "● Mark read"}</button></div></div><button data-reader="close" class="reader-btn" title="Close (u / Esc)" aria-label="Close article">${icon("close")}<span>Close</span></button></div>${tagsRowHTML}</div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" class="reader-btn" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}<span>${x.saved ? "Saved" : "Save"}</span></button><button data-reader="open" class="reader-btn" title="Open original (v)" aria-label="Open original">↗<span>Open original</span></button><div class="menu-wrap"><button id="moreMenuBtn" class="reader-btn" aria-haspopup="true" aria-expanded="false">···<span>More</span></button><div class="menu" id="moreMenu" hidden><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="${tts?.itemId === x.id}" ${canListen ? "" : "disabled"}>${tts?.itemId === x.id ? "Stop listening" : "Listen to article"}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">Snooze article</button><button data-reader="fulltext" title="${fullLabel}${alreadyFull ? "" : " (w)"}" aria-label="${fullLabel}" ${canFull ? "" : "disabled"}>${fullLabel}</button><button data-reader="share" title="Share article" aria-label="Share article">Share article</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "○ Mark unread" : "● Mark read"}</button></div></div><button data-reader="close" class="reader-btn" title="Close (u / Esc)" aria-label="Close article">${icon("close")}<span>Close</span></button></div>${tagsRowHTML}</div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
   const tagAdd = $("#tagAddBtn");
   if (tagAdd) tagAdd.onclick = () => { const x = selectedItem(); const inp = $("#tagInput"); if (x && inp) addTagToItem(x, inp.value); };
   // Tag button toggles the collapsed input (#171): expanding focuses it.
@@ -3170,7 +3204,7 @@ function bind() {
       if (ra.dataset.reader === "share") { shareArticle(x); return; }
       if (ra.dataset.reader === "snooze") { const m = $("#snoozeMenu"); if (m) { m.hidden = snoozeMenuWasOpen; ra.setAttribute("aria-expanded", String(!m.hidden)); } return; }
       if (ra.dataset.reader === "open") { window.open(x.url, "_blank", "noopener"); return; }
-      if (ra.dataset.reader === "fulltext") { loadFullText(x); return; }
+      if (ra.dataset.reader === "fulltext") { toggleFullText(x); return; }
       if (ra.dataset.reader === "close") { closeReader(); return; }
     }
     const row = e.target.closest("[data-item]");
@@ -3469,7 +3503,7 @@ function bind() {
       }
       return;
     }
-    if (e.repeat && ["r", "s", "a", "m"].includes(e.key)) return;
+    if (e.repeat && ["r", "s", "a", "m", "w"].includes(e.key.toLowerCase())) return;
     if (e.key === "r") { refresh(); return; }
     if (e.key === "j") { moveSelection(1); return; }
     if (e.key === "k") { moveSelection(-1); return; }
@@ -3500,6 +3534,7 @@ function bind() {
       if (inp) { inp.focus(); inp.select(); }
       return;
     }
+    if (e.key.toLowerCase() === "w" && sel) { toggleFullText(sel); return; }
   };
 }
 

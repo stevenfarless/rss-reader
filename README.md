@@ -16,7 +16,7 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Rules: automatically tag, save, or mark read new articles that match (feed/folder scope, title keyword, author). Rules run on new arrivals at refresh and never delete anything; manage them in Settings with an on/off toggle per rule
 - Highlights and notes: select text in the reader to save a highlight with an optional note; passages are marked back into the article when it opens, listed under the article and in a Highlights view, with edit-note, show-in-article, and delete
 - Markdown article rendering for plain-text RSS, Atom, and JSON Feed content, including headings, links, lists, tables, and code blocks
-- Full-article view: "Load full article" extracts the article text from the original page with Mozilla Readability (the library behind Firefox Reader View), with a hand-rolled fallback
+- Full-article view: "Load full article" (or press W to toggle full article / feed excerpt) extracts the article text from the original page with Mozilla Readability (the library behind Firefox Reader View), with a hand-rolled fallback
 - Listen to an article in the reader (text-to-speech, with pause/resume, stop, and speed)
 - Estimated reading time on cards and in the reader
 - Reader font (serif, sans-serif, Nunito, Ubuntu) and line height (compact/comfortable/roomy) in Settings
