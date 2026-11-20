@@ -31,15 +31,15 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.22";
+const APP_VERSION = "1.8.23";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null, savedSearch: null,
   folders: [], tags: [], savedSearches: [], rules: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom" }
+  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader" }
 };
-let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null;
+let db, timer, pendingSeq = null, pendingSeqTimer = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null;
 /* Text-to-speech state (#105): the article being read, its sentence
    chunks, and where playback has reached. Null when nothing is playing. */
 let tts = null;
@@ -441,6 +441,7 @@ function validateSettings(d) {
   if (typeof d.ttsRate === "number" && d.ttsRate >= 0.5 && d.ttsRate <= 2) next.ttsRate = d.ttsRate;
   const prog = pick("#progressSelect", d.progressPosition); if (prog) next.progressPosition = prog;
   const mbar = pick("#mobileBarSelect", d.mobileReaderBar); if (mbar) next.mobileReaderBar = mbar;
+  const preset = pick("#shortcutPresetSelect", d.shortcutPreset); if (preset) next.shortcutPreset = preset;
   const exc = pick("#cardExcerptSelect", d.cardExcerpt); if (exc) next.cardExcerpt = exc;
   if (typeof d.cardImage === "boolean") next.cardImage = d.cardImage;
   if (typeof d.hideDuplicates === "boolean") next.hideDuplicates = d.hideDuplicates;
@@ -661,6 +662,7 @@ function readSettingsFromDialog() {
     hideDuplicates: $("#hideDuplicatesToggle").checked,
     progressPosition: $("#progressSelect").value,
     mobileReaderBar: $("#mobileBarSelect").value,
+    shortcutPreset: $("#shortcutPresetSelect").value,
     cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
     sidebarCollapsed: state.settings.sidebarCollapsed || false,
@@ -3321,6 +3323,7 @@ function showSettings() {
   $("#lineHeightSelect").value = state.settings.lineHeight || "comfortable";
   $("#progressSelect").value = state.settings.progressPosition || "bottom";
   $("#mobileBarSelect").value = state.settings.mobileReaderBar || "bottom";
+  $("#shortcutPresetSelect").value = state.settings.shortcutPreset || "inoreader";
   $("#cardExcerptSelect").value = state.settings.cardExcerpt || "full";
   $("#cardImageToggle").checked = state.settings.cardImage !== false;
   $("#hideDuplicatesToggle").checked = state.settings.hideDuplicates !== false;
@@ -3336,7 +3339,276 @@ function showSettings() {
   renderToolbarOrderList();
   $("#settingsDialog").showModal();
 }
-function showHelp() { $("#helpDialog").showModal(); }
+function showHelp() { renderHelpRows(); $("#helpDialog").showModal(); }
+/* Display label for one key descriptor in the help dialog. A plain
+   letter stays lowercase ("g"); with a modifier it reads uppercase
+   ("Shift+A", "Ctrl+M"). */
+function displayDesc(desc) {
+  if (desc === "Shift+/") return "?";
+  const parts = desc.split("+");
+  const key = parts[parts.length - 1];
+  const mods = parts.slice(0, -1);
+  let label = key;
+  if (key === "Space") label = "Space";
+  else if (key === "Esc") label = "Esc";
+  else if (key === "Enter") label = "Enter";
+  else if (key.length === 1 && mods.length) label = key.toUpperCase();
+  return [...mods, label].join("+");
+}
+/* Rebuild the help dialog's table from the active preset's map, so
+   "?" always lists the keys that are actually live. Descriptors
+   that map to the same action share one row. */
+function renderHelpRows() {
+  const preset = PRESETS[shortcutPreset()] || PRESETS.inoreader;
+  const byAction = new Map();
+  for (const [desc, action] of Object.entries(preset.keys)) {
+    if (!byAction.has(action)) byAction.set(action, []);
+    byAction.get(action).push(desc);
+  }
+  const order = ["search", "nextOpen", "prevOpen", "moveNext", "movePrev", "nextUnread", "prevUnread", "oldestUnread",
+    "openSelected", "openOriginal", "openBackground", "openCurrentTab", "toggleRead", "toggleReadNext", "toggleReadPrev",
+    "markVisibleRead", "markAbove", "markBelow", "markReadAdvance", "markUnreadSkip", "save", "tag", "fullArticle",
+    "share", "addFeed", "refresh", "help", "closeReader", "sidebarToggle", "textBigger", "textSmaller", "textReset",
+    "unreadView", "allView", "folderToggle", "nextFeed", "prevFeed", "parentFolder", "firstArticle", "lastArticle",
+    "scrollTop", "copyUrl", "fullscreen", "unsubscribe", "editFeed",
+    "goAll", "goUnread", "goSaved", "goSnoozed", "goHighlights", "goToday", "goIndex", "goOrganize", "goPrefs", "goStarred", "goFeeds", "goHome"];
+  const rows = [...byAction.entries()]
+    .filter(([action]) => ACTION_LABELS[action])
+    .sort((x, y) => (order.indexOf(x[0]) + 1 || 99) - (order.indexOf(y[0]) + 1 || 99));
+  const body = rows.map(([action, descs]) => {
+    const keys = descs.map(d => {
+      // A two-key sequence ("g a", "z t") reads as "g then a".
+      const parts = d.split(" ");
+      return parts.map(p => `<kbd>${esc(displayDesc(p))}</kbd>`).join(" then ");
+    }).join(" / ");
+    return `<tr><td>${keys}</td><td>${esc(ACTION_LABELS[action])}</td></tr>`;
+  }).join("");
+  const tbody = $("#helpRows");
+  if (tbody) tbody.innerHTML = body;
+  const note = $("#helpPresetNote");
+  if (note) note.textContent = `Preset: ${preset.name}. Change it in Settings under Keyboard shortcuts. Quick access (.) is not built yet.`;
+}
+
+
+function shortcutPreset() { return state.settings.shortcutPreset || "inoreader"; }
+/* ---------- shortcut actions (#185) ----------
+   The preset maps above name these actions; each one is a small
+   function over the existing helpers. Actions that need an article
+   use the selected one (state.selected) and no-op when there is none. */
+function moveHighlight(dir) {
+  // Move the list highlight without opening the reader (Inoreader
+  // n/p): only state.selected changes, so "o" then opens it.
+  const list = visible();
+  if (!list.length) return;
+  const i = list.findIndex(x => x.id === state.selected);
+  const n = i === -1 ? (dir > 0 ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, i + dir));
+  state.selected = list[n].id;
+  render();
+  document.querySelector(`[data-article="${CSS.escape(list[n].id)}"]`)?.scrollIntoView({ block: "nearest" });
+}
+const TEXT_SIZES = ["small", "normal", "large"];
+function changeTextSize(dir) {
+  const i = TEXT_SIZES.indexOf(state.settings.size || "normal");
+  const n = Math.min(TEXT_SIZES.length - 1, Math.max(0, i + dir));
+  if (n === i) return;
+  state.settings.size = TEXT_SIZES[n];
+  local(S, state.settings);
+  applySettings();
+  toast(`Article text: ${TEXT_SIZES[n]}.`);
+}
+function resetTextSize() {
+  if ((state.settings.size || "normal") === "normal") return;
+  state.settings.size = "normal";
+  local(S, state.settings);
+  applySettings();
+  toast("Article text: normal.");
+}
+function moveFeedSelection(dir) {
+  // Next/previous feed in sidebar order (Feedly/NewsBlur/FreshRSS/
+  // CommaFeed Shift+J/K, Google Reader Shift+N/P).
+  const feeds = state.feeds;
+  if (!feeds.length) return;
+  const cur = feeds.findIndex(f => f.id === state.feed);
+  const n = cur === -1 ? (dir > 0 ? 0 : feeds.length - 1) : (cur + dir + feeds.length) % feeds.length;
+  const feed = feeds[n];
+  state.view = "feed"; state.feed = feed.id; state.folder = null; state.tag = null; state.savedSearch = null; state.selected = null;
+  render();
+  document.querySelector(`[data-feed="${CSS.escape(feed.id)}"]`)?.scrollIntoView({ block: "nearest" });
+}
+function toggleCurrentFolder() {
+  // Expand/collapse the folder holding the current feed (Inoreader /
+  // Google Reader / BazQux Shift+X, Feedbin e).
+  const group = state.folder || (state.feed ? (state.feeds.find(f => f.id === state.feed)?.group || "") : "");
+  if (!group) { toast("This feed is not in a folder."); return; }
+  if (collapsedFolders.has(group)) collapsedFolders.delete(group); else collapsedFolders.add(group);
+  saveCollapsedFolders();
+  renderNav();
+}
+function toggleSidebar() {
+  state.settings.sidebarCollapsed = !state.settings.sidebarCollapsed;
+  local(S, state.settings);
+  applySidebarCollapsed();
+}
+function markReadAdvance() {
+  // Feedly x: mark the selected article read and move to the next.
+  const sel = selectedItem();
+  if (!sel) return;
+  if (!sel.read) { sel.read = true; put(sel); }
+  render();
+  moveSelection(1);
+}
+function markUnreadSkip() {
+  // BazQux L: mark the selected article unread and move to the next.
+  const sel = selectedItem();
+  if (!sel) return;
+  if (sel.read) { sel.read = false; put(sel); }
+  render();
+  moveSelection(1);
+}
+function copyArticleUrl() {
+  const sel = selectedItem();
+  if (!sel) return;
+  const done = () => toast("Article link copied.");
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(sel.url).then(done, () => toast("Could not copy the link."));
+  else toast("Copy is not available in this browser.");
+}
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else document.documentElement.requestFullscreen().catch(() => toast("Full screen is not available."));
+}
+function jumpFirstArticle() { const list = visible(); if (list.length) openItem(list[0].id); }
+function jumpLastArticle() { const list = visible(); if (list.length) openItem(list[list.length - 1].id); }
+function scrollArticleTop() {
+  const reader = $("#reader");
+  if (reader.classList.contains("open")) reader.scrollTo({ top: 0 });
+  else $("#articleList")?.scrollTo({ top: 0 });
+}
+function unsubscribeCurrentFeed() {
+  const feedId = state.feed || selectedItem()?.feedId;
+  if (!feedId) { toast("Open a feed first."); return; }
+  requestUnsubscribe(feedId);
+}
+function openInCurrentTab() {
+  const sel = selectedItem();
+  if (sel) window.location.href = sel.url;
+}
+function oldestUnread() {
+  // NewsBlur m: the oldest unread article (the list is newest-first,
+  // so it is the last unread in it).
+  const unread = visible().filter(x => !x.read);
+  if (!unread.length) { toast("No unread articles in this view."); return; }
+  openItem(unread[unread.length - 1].id);
+}
+function selectParentFolder() {
+  // BazQux Shift+U: open the folder view for the current feed's folder.
+  const group = state.feed ? (state.feeds.find(f => f.id === state.feed)?.group || "") : (state.folder || "");
+  if (!group) { toast("This feed is not in a folder."); return; }
+  state.view = "folder"; state.folder = group; state.feed = null; state.tag = null; state.savedSearch = null; state.selected = null;
+  render();
+}
+function toggleReadNext() {
+  const sel = selectedItem();
+  if (!sel) return;
+  sel.read = !sel.read; put(sel); render(); renderReader(sel);
+  moveSelection(1);
+}
+function toggleReadPrev() {
+  const sel = selectedItem();
+  if (!sel) return;
+  sel.read = !sel.read; put(sel); render(); renderReader(sel);
+  moveSelection(-1);
+}
+function openBackgroundTab() {
+  // Inoreader b: open in a background tab. Browsers force a scripted
+  // window.open to the foreground, so this opens a normal new tab.
+  const sel = selectedItem();
+  if (sel) window.open(sel.url, "_blank", "noopener");
+}
+function editCurrentFeed() {
+  // Feedbin Shift+E: open the per-feed options menu (#183) for the
+  // current feed, anchored on its sidebar row.
+  const feedId = state.feed || selectedItem()?.feedId;
+  if (!feedId) { toast("Open a feed first."); return; }
+  const anchorEl = document.querySelector(`[data-feed="${CSS.escape(feedId)}"]`);
+  openFeedMenu(feedId, anchorEl || document.body);
+}
+/* Run one named action from the active preset's map. Returns true
+   when the action ran (so the handler can stop). */
+function runShortcutAction(name, e) {
+  const sel = selectedItem();
+  switch (name) {
+    case "nextOpen": moveSelection(1); return true;
+    case "prevOpen": moveSelection(-1); return true;
+    case "moveNext": moveHighlight(1); return true;
+    case "movePrev": moveHighlight(-1); return true;
+    case "nextUnread": moveUnread(1); return true;
+    case "prevUnread": moveUnread(-1); return true;
+    case "oldestUnread": oldestUnread(); return true;
+    case "openSelected":
+      if (state.selected) openItem(state.selected);
+      else { const list = visible(); if (list.length) openItem(list[0].id); }
+      return true;
+    case "openOriginal": if (sel) window.open(sel.url, "_blank", "noopener"); return true;
+    case "openBackground": openBackgroundTab(); return true;
+    case "openCurrentTab": openInCurrentTab(); return true;
+    case "toggleRead":
+      if (!sel) return false;
+      sel.read = !sel.read; put(sel); render(); renderReader(sel); return true;
+    case "toggleReadNext": toggleReadNext(); return true;
+    case "toggleReadPrev": toggleReadPrev(); return true;
+    case "markVisibleRead": markVisibleRead(); return true;
+    case "markAbove": markAboveBelow("above"); return true;
+    case "markBelow": markAboveBelow("below"); return true;
+    case "markReadAdvance": markReadAdvance(); return true;
+    case "markUnreadSkip": markUnreadSkip(); return true;
+    case "save":
+      if (!sel) return false;
+      sel.saved = !sel.saved; put(sel); render(); openItem(sel.id); return true;
+    case "tag":
+      if (!sel) return false;
+      e.preventDefault();
+      if (tagsExpandedId !== sel.id) { tagsExpandedId = sel.id; renderReader(sel); }
+      { const inp = $("#tagInput"); if (inp) { inp.focus(); inp.select(); } }
+      return true;
+    case "fullArticle": if (sel) toggleFullText(sel); return true;
+    case "share": if (sel) shareArticle(sel); return true;
+    case "addFeed": showFeed(); return true;
+    case "refresh": refresh(); return true;
+    case "search": $("#search").focus(); return true;
+    case "help": showHelp(); return true;
+    case "closeReader": closeReader(); return true;
+    case "sidebarToggle": toggleSidebar(); return true;
+    case "textBigger": changeTextSize(1); return true;
+    case "textSmaller": changeTextSize(-1); return true;
+    case "textReset": resetTextSize(); return true;
+    case "unreadView": goView("unread"); return true;
+    case "allView": goView("all"); return true;
+    case "folderToggle": toggleCurrentFolder(); return true;
+    case "nextFeed": moveFeedSelection(1); return true;
+    case "prevFeed": moveFeedSelection(-1); return true;
+    case "parentFolder": selectParentFolder(); return true;
+    case "firstArticle": jumpFirstArticle(); return true;
+    case "lastArticle": jumpLastArticle(); return true;
+    case "scrollTop": scrollArticleTop(); return true;
+    case "copyUrl": copyArticleUrl(); return true;
+    case "fullscreen": toggleFullscreen(); return true;
+    case "unsubscribe": unsubscribeCurrentFeed(); return true;
+    case "editFeed": editCurrentFeed(); return true;
+    case "goAll": goView("all"); return true;
+    case "goUnread": goView("unread"); return true;
+    case "goSaved": goView("saved"); return true;
+    case "goSnoozed": goView("snoozed"); return true;
+    case "goHighlights": goView("highlights"); return true;
+    case "goToday": goView("unread"); return true;
+    case "goIndex": goView("all"); return true;
+    case "goOrganize": showOrganize(); return true;
+    case "goPrefs": showSettings(); return true;
+    case "goStarred": goView("saved"); return true;
+    case "goFeeds": $("#sidebar")?.scrollIntoView(); return true;
+    case "goHome": goView("all"); return true;
+    default: return false;
+  }
+}
 
 /* ---------- keyboard shortcuts ---------- */
 /* Industry-standard set (Google Reader / Inoreader / Feedly / NewsBlur):
@@ -3909,13 +4181,6 @@ function bind() {
   document.onkeydown = e => {
     const tag = document.activeElement?.tagName;
     if (["INPUT", "SELECT", "TEXTAREA"].includes(tag) || $("dialog[open]")) return;
-    // Ctrl+M marks above read, Shift+M marks below (Inoreader's
-    // bindings). Checked before the modifier early-return below.
-    // The key is compared case-insensitively: some keyboards and
-    // automation send Shift+M as key "m" with shiftKey set.
-    if (e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "m") { e.preventDefault(); markAboveBelow("above"); return; }
-    if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "m") { e.preventDefault(); markAboveBelow("below"); return; }
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "Escape") {
       $("#sidebar").classList.remove("open");
       $("#scrim").classList.remove("show");
@@ -3931,66 +4196,54 @@ function bind() {
       closeReader();
       return;
     }
-    if (e.key === "/") { e.preventDefault(); $("#search").focus(); return; }
-    if (e.key === "?") { e.preventDefault(); showHelp(); return; }
     // A focused button keeps its normal Space/Enter behavior; the
     // shortcuts below must not hijack it (or double-activate it).
     // Letter shortcuts still work from button focus: no button
     // activates on a letter key, so there is nothing to double-fire.
     if (tag === "BUTTON" && (e.key === " " || e.key === "Enter")) return;
-    if (pendingG) {
-      // Clear the old timeout first: without this, pressing "gg" leaves
-      // the first timeout armed, and it clears the new pending state
-      // early.
-      clearTimeout(pendingG);
-      pendingG = null;
-      if (e.key === "a") goView("all");
-      else if (e.key === "u") goView("unread");
-      else if (e.key === "s") goView("saved");
-      else if (e.key === "g") pendingG = setTimeout(() => { pendingG = null; }, 1200);
-      return;
+    const desc = keyDesc(e);
+    const preset = PRESETS[shortcutPreset()] || PRESETS.inoreader;
+    // A two-key sequence (g, z, d) is pending: the second key
+    // completes it. An unmatched second key falls through to the
+    // normal dispatch below, so "/" still searches after a stray "g".
+    if (pendingSeq) {
+      const first = pendingSeq;
+      clearTimeout(pendingSeqTimer);
+      pendingSeq = null;
+      const seqAction = preset.keys[first + " " + desc];
+      if (seqAction) { e.preventDefault(); runShortcutAction(seqAction, e); return; }
     }
-    if (e.key === "g") { pendingG = setTimeout(() => { pendingG = null; }, 1200); return; }
-    if (e.key === " ") {
+    // Space scrolls the open reader; with no article open it runs
+    // the preset's Space binding (Inoreader: open next article).
+    if (desc === "Space" || desc === "Shift+Space") {
       const reader = $("#reader");
       if (reader.classList.contains("open")) {
         e.preventDefault();
-        reader.scrollBy({ top: (e.shiftKey ? -1 : 1) * reader.clientHeight * 0.9 });
+        reader.scrollBy({ top: (desc === "Shift+Space" ? -1 : 1) * reader.clientHeight * 0.9 });
+        return;
       }
+      const spaceAction = preset.keys[desc];
+      if (spaceAction) { e.preventDefault(); runShortcutAction(spaceAction, e); }
       return;
     }
-    if (e.repeat && ["r", "s", "a", "m", "w"].includes(e.key.toLowerCase())) return;
-    if (e.key === "r") { refresh(); return; }
-    if (e.key === "j") { moveSelection(1); return; }
-    if (e.key === "k") { moveSelection(-1); return; }
-    if (e.key === "n") { moveUnread(1); return; }
-    if (e.key === "p") { moveUnread(-1); return; }
-    if (e.key === "o" || e.key === "Enter") {
-      const a = visible();
-      if (state.selected) openItem(state.selected);
-      else if (a.length) openItem(a[0].id);
+    // A key that starts a two-key sequence (g, z, d) waits for the
+    // next key instead of running an action. A key is a prefix only
+    // when the active preset actually has a sequence starting with
+    // it, so "d" still toggles the sidebar in Inoreader (where it is
+    // a single key) and starts a sequence in BazQux (where it is not).
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && Object.keys(preset.keys).some(k => k.startsWith(desc + " "))) {
+      clearTimeout(pendingSeqTimer);
+      pendingSeq = desc;
+      pendingSeqTimer = setTimeout(() => { pendingSeq = null; }, 1200);
       return;
     }
-    if (e.key === "u") { closeReader(); return; }
-    if (e.key === "a") { markVisibleRead(); return; }
-    const sel = selectedItem();
-    if (e.key === "v" && sel) { window.open(sel.url, "_blank", "noopener"); return; }
-    if (e.key === "m" && sel) {
-      sel.read = !sel.read;
-      put(sel);
-      render();
-      renderReader(sel);
-      return;
-    }
-    if (e.key === "s" && sel) { sel.saved = !sel.saved; put(sel); render(); openItem(sel.id); return; }
-    if (e.key.toLowerCase() === "t" && sel) {
-      e.preventDefault(); // otherwise the "t" is typed into the input
-      if (tagsExpandedId !== sel.id) { tagsExpandedId = sel.id; renderReader(sel); }
-      const inp = $("#tagInput");
-      if (inp) { inp.focus(); inp.select(); }
-      return;
-    }
-    if (e.key.toLowerCase() === "w" && sel) { toggleFullText(sel); return; }
+    const action = preset.keys[desc];
+    if (!action) return;
+    // Toggles and one-shot actions do not auto-repeat when the key
+    // is held down; navigation does.
+    if (e.repeat && ["toggleRead", "toggleReadNext", "toggleReadPrev", "save", "fullArticle", "markVisibleRead", "markAbove", "markBelow", "markReadAdvance", "markUnreadSkip", "refresh", "addFeed", "share", "tag", "copyUrl", "unsubscribe", "editFeed", "fullscreen", "textBigger", "textSmaller", "textReset", "sidebarToggle", "folderToggle", "closeReader", "help", "search"].includes(action)) return;
+    e.preventDefault();
+    runShortcutAction(action, e);
   };
   // Sidebar drag and drop (#182).
   setupFeedDrag();

@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder, nextFeedSort } = require("../utils.js");
+const { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder, nextFeedSort, keyDesc, PRESETS, ACTION_LABELS } = require("../utils.js");
 
 test("normalizeFeedUrl adds https to a bare address and upgrades http", () => {
   assert.equal(normalizeFeedUrl("example.com/feed"), "https://example.com/feed");
@@ -154,4 +154,67 @@ test("nextFeedSort cycles global to newest to oldest and back", () => {
   assert.equal(nextFeedSort("global"), "newest");
   assert.equal(nextFeedSort("newest"), "oldest");
   assert.equal(nextFeedSort("oldest"), "global");
+});
+
+test("keyDesc normalizes a keyboard event to a preset descriptor", () => {
+  // keyDesc reads e.code, so Shift+1 still reads as "1" (not "!").
+  const ev = (code, mods = {}) => ({ code, key: mods.key || "", shiftKey: !!mods.shift, ctrlKey: !!mods.ctrl, altKey: !!mods.alt, metaKey: !!mods.meta });
+  assert.equal(keyDesc(ev("KeyJ")), "j");
+  assert.equal(keyDesc(ev("KeyA", { shift: true })), "Shift+a");
+  assert.equal(keyDesc(ev("Digit1", { shift: true })), "Shift+1");
+  assert.equal(keyDesc(ev("Digit0")), "0");
+  assert.equal(keyDesc(ev("Slash", { shift: true })), "Shift+/");
+  assert.equal(keyDesc(ev("Space")), "Space");
+  assert.equal(keyDesc(ev("Space", { shift: true })), "Shift+Space");
+  assert.equal(keyDesc(ev("KeyM", { ctrl: true })), "Ctrl+m");
+  assert.equal(keyDesc(ev("Equal")), "=");
+  assert.equal(keyDesc(ev("BracketLeft")), "[");
+});
+
+test("every preset action has a help label, and no preset binds a browser-reserved key", () => {
+  const reserved = new Set(["Ctrl+w", "Ctrl+t", "Ctrl+n", "Ctrl+l", "Ctrl+d", "Ctrl+h", "Ctrl+j", "Ctrl+s", "Ctrl+p", "Ctrl+f", "Ctrl+u", "Ctrl+a", "Ctrl+c", "Ctrl+v", "Ctrl+x", "Ctrl+z", "Ctrl+r", "Ctrl+g", "Ctrl+b", "Ctrl+e", "Ctrl+k", "Ctrl+0", "Ctrl+=", "Ctrl+-"]);
+  for (const [name, preset] of Object.entries(PRESETS)) {
+    assert.ok(preset.name, `${name} has a display name`);
+    for (const [desc, action] of Object.entries(preset.keys)) {
+      assert.ok(ACTION_LABELS[action], `${name}: action "${action}" (${desc}) has no help label`);
+      assert.ok(!reserved.has(desc), `${name}: "${desc}" is a browser-reserved key`);
+    }
+  }
+});
+
+test("the Inoreader default opens with j/k, moves with n/p, and adds a feed with a", () => {
+  const keys = PRESETS.inoreader.keys;
+  assert.equal(keys["j"], "nextOpen");
+  assert.equal(keys["k"], "prevOpen");
+  assert.equal(keys["n"], "moveNext");
+  assert.equal(keys["p"], "movePrev");
+  assert.equal(keys["a"], "addFeed");
+  assert.equal(keys["Shift+a"], "markVisibleRead");
+  assert.equal(keys["w"], "fullArticle");
+  assert.equal(keys["h"], "help");
+  assert.equal(keys["Shift+/"], "help");
+  assert.equal(keys["d"], "sidebarToggle");
+  assert.equal(keys["="], "textBigger");
+  assert.equal(keys["-"], "textSmaller");
+  assert.equal(keys["0"], "textReset");
+});
+
+test("every preset keeps the shared spine (open, original, save, refresh, search, help)", () => {
+  for (const [name, preset] of Object.entries(PRESETS)) {
+    const k = preset.keys;
+    assert.equal(k["o"], "openSelected", `${name}: o opens the selected article`);
+    assert.equal(k["v"], "openOriginal", `${name}: v opens the original`);
+    // Miniflux is the one exception: s saves to a service (share) and
+    // f stars (save), per its own docs.
+    if (name === "miniflux") {
+      assert.equal(k["s"], "share", `${name}: s shares`);
+      assert.equal(k["f"], "save", `${name}: f saves`);
+    } else {
+      assert.equal(k["s"], "save", `${name}: s saves`);
+    }
+    assert.equal(k["r"], "refresh", `${name}: r refreshes`);
+    assert.equal(k["/"], "search", `${name}: / searches`);
+    assert.ok(k["Shift+/"] === "help" || k["h"] === "help", `${name}: help is reachable`);
+    assert.equal(k["g a"], "goAll", `${name}: g a goes to All`);
+  }
 });
