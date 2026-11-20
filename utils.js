@@ -114,7 +114,17 @@ function moveFeedInList(feeds, draggedId, target) {
   }
   return feed;
 }
+/* The named folders a set of feeds belongs to, sorted; ungrouped ("")
+   is not a folder and is left out. */
+function namedFolderNames(feeds) {
+  return [...new Set(feeds.map(f => f.group).filter(g => typeof g === "string" && g))].sort((a, b) => a.localeCompare(b));
+}
+/* Whether every named folder is collapsed, so the collapse/expand-all
+   toggle should offer "expand all". False when there are no folders. */
+function allFoldersCollapsed(names, collapsed) {
+  return names.length > 0 && names.every(n => collapsed.has(n));
+}
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList };
+  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed };
 }
