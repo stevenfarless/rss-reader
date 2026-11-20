@@ -8,7 +8,7 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - One Add a feed box: type a feed or website address to add it directly (conventional locations and WordPress are probed for bare sites), or type a publication, podcast, or topic to search Apple Podcasts and public RSS directories (RSS.mobi and RSSAmp, plus Feedsearch for website addresses) in one deduplicated result list
 - Discover feed links from publisher pages
 - Feed refresh, unread and saved article views, and per-feed navigation
-- Feed folders: create, rename, delete, and move feeds between folders (OPML folders are kept on import). Click a folder name in the sidebar to read all of its feeds as one merged newest-first list
+- Feed folders: create, rename, delete, and move feeds between folders (OPML folders are kept on import). Click a folder name in the sidebar to read all of its feeds as one merged newest-first list; collapse a folder with the chevron beside its name (the collapsed state is remembered)
 - Unsubscribe from a feed with the × beside it in the sidebar, or from the Folders &amp; tags dialog; the feed's articles are removed, except ones you saved
 - Article tags: create, rename, and delete tags; apply them from the reader (t); filter by tag from the sidebar; search covers tags
 - Full-text search: the search box matches article bodies (loaded full text, then feed content) as well as titles, summaries, authors, and tags
@@ -23,7 +23,7 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Share an article: the system share sheet, or a copy-link fallback where the sheet is unavailable
 - Mark everything above or below the open one read (in the Mark read menu, Ctrl+M / Shift+M)
 - Snooze an article (later today, tomorrow, next week) with a Snoozed view and unsnooze
-- Duplicate articles (the same address in more than one feed) shown once, with a toggle in the list filters and Settings
+- Duplicate articles (the same address in more than one feed) shown once, with a toggle in Settings
 - Mute a feed: hide its articles from All and Unread without unsubscribing
 - Search, date filters, and newest/oldest sorting
 - OPML subscription import and export
