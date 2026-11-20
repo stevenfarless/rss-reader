@@ -20,7 +20,13 @@ const KS = "rss-reader.savedSearches.v1", KR = "rss-reader.rules.v1";
 const PROXY_API = "https://api.rss2json.com/v1/api.json?rss_url=";
 const ALLORIGINS = "https://api.allorigins.win/raw?url=";
 const JINA = "https://r.jina.ai/";
-const FETCH_TIMEOUT_MS = 15000;
+/* 30 s, not 15: a feed fetch can be a redirect chain (one slow hop
+   each), and a single 15 s budget for the whole chain times out
+   feeds that are alive but slow — e.g. NASA's Image of the Day
+   feed, whose 301 to a second slow fetch exceeded 15 s in the
+   cloud browser and fell through to the site's main feed (#163).
+   Matches the proxy timeout below. */
+const FETCH_TIMEOUT_MS = 30000;
 const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
