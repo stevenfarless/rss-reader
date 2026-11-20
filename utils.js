@@ -102,10 +102,10 @@ function moveFeedInList(feeds, draggedId, target) {
   if (target.kind === "row") {
     const to = feeds.findIndex(f => f.id === target.feedId);
     if (to < 0) { feeds.splice(from, 0, feed); return feed; }
-    feed.group = feeds[to].group || "";
+    feed.group = typeof feeds[to].group === "string" ? feeds[to].group : "";
     feeds.splice(target.before ? to : to + 1, 0, feed);
   } else {
-    feed.group = target.group || "";
+    feed.group = typeof target.group === "string" ? target.group : "";
     let at = feeds.length;
     for (let i = feeds.length - 1; i >= 0; i--) {
       if ((feeds[i].group || "") === feed.group) { at = i + 1; break; }

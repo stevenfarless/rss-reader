@@ -90,3 +90,13 @@ test("moveFeedInList is a no-op for an unknown feed or a drop on itself", () => 
   assert.equal(moved.id, "a");
   assert.deepEqual(feeds.map(f => f.id), ["a", "b"]);
 });
+
+test("moveFeedInList never stores a non-string group", () => {
+  const feeds = [{ id: "a", group: "Space" }, { id: "b", group: { name: "Space" } }, { id: "c", group: "" }];
+  const moved = moveFeedInList(feeds, "a", { kind: "row", feedId: "b", before: true });
+  assert.equal(moved.group, "");
+  assert.equal(typeof moved.group, "string");
+  const moved2 = moveFeedInList(feeds, "c", { kind: "folder", group: { name: "Space" } });
+  assert.equal(moved2.group, "");
+  assert.equal(typeof moved2.group, "string");
+});
