@@ -2036,7 +2036,7 @@ function renderReader(x) {
   if (moreBtn && moreMenu) {
     moreBtn.onclick = e => { e.stopPropagation(); const open = moreMenu.hidden; moreMenu.hidden = !open; moreBtn.setAttribute("aria-expanded", String(open)); };
     moreMenu.addEventListener("click", e => { if (e.target.closest("button")) { moreMenu.hidden = true; moreBtn.setAttribute("aria-expanded", "false"); } });
-    moreMenu.addEventListener("keydown", e => { if (e.key === "Escape") { moreMenu.hidden = true; moreBtn.setAttribute("aria-expanded", "false"); moreBtn.focus(); } });
+    moreMenu.addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); moreMenu.hidden = true; moreBtn.setAttribute("aria-expanded", "false"); moreBtn.focus(); } });
   }
   const bodyEl = $("#body");
   // Append the cleaned body's children, not the <body> element itself.
@@ -3382,7 +3382,6 @@ function bind() {
       markBtn.setAttribute("aria-expanded", String(open));
     };
     markMenu.addEventListener("click", e => { if (e.target.closest("button")) closeMarkMenu(); });
-    document.addEventListener("keydown", e => { if (e.key === "Escape") closeMarkMenu(); });
   }
   $("#saveSearchBtn").onclick = showSaveSearch;
   $("#saveSearchDialog").addEventListener("click", e => {
@@ -3474,6 +3473,14 @@ function bind() {
     if (e.key === "Escape") {
       $("#sidebar").classList.remove("open");
       $("#scrim").classList.remove("show");
+      // An open menu closes first; only a bare Escape closes the
+      // reader (#173: Escape used to close both at once).
+      const mm = $("#moreMenu");
+      if (mm && !mm.hidden) { mm.hidden = true; $("#moreMenuBtn")?.setAttribute("aria-expanded", "false"); $("#moreMenuBtn")?.focus(); return; }
+      const mr = $("#markReadMenu");
+      if (mr && !mr.hidden) { closeMarkMenu(); return; }
+      const sm = $("#snoozeMenu");
+      if (sm && !sm.hidden) { sm.hidden = true; return; }
       closeReader();
       return;
     }
@@ -3481,7 +3488,9 @@ function bind() {
     if (e.key === "?") { e.preventDefault(); showHelp(); return; }
     // A focused button keeps its normal Space/Enter behavior; the
     // shortcuts below must not hijack it (or double-activate it).
-    if (tag === "BUTTON") return;
+    // Letter shortcuts still work from button focus: no button
+    // activates on a letter key, so there is nothing to double-fire.
+    if (tag === "BUTTON" && (e.key === " " || e.key === "Enter")) return;
     if (pendingG) {
       // Clear the old timeout first: without this, pressing "gg" leaves
       // the first timeout armed, and it clears the new pending state
