@@ -28,14 +28,13 @@
 <div class="layout">
 <aside class="sidebar" id="sidebar">
 <div class="side-head"><button id="sideToggle" aria-label="Collapse sidebar" aria-expanded="true" aria-controls="sidebar" title="Collapse sidebar"><svg class="ic" aria-hidden="true"><use href="#i-collapse"/></svg></button><button class="brand" id="home" aria-label="RSS Reader home"><span class="mark">R</span><span>RSS Reader</span></button></div>
+<div class="side-tools"><button id="add" class="quiet">+ Add feed</button><button id="theme" title="Toggle theme" aria-label="Toggle theme"><svg class="ic" aria-hidden="true"><use href="#i-theme"/></svg></button><button id="settings" title="Settings" aria-label="Settings"><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg></button></div>
 <div class="search" role="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><input id="search" type="search" placeholder="Search articles" aria-label="Search articles"><button type="button" id="searchClear" aria-label="Clear search" hidden><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button><kbd>/</kbd></div>
-<div class="side-tools"><button id="add" class="primary">+ Add feed</button><button id="theme" title="Toggle theme" aria-label="Toggle theme"><svg class="ic" aria-hidden="true"><use href="#i-theme"/></svg></button><button id="settings" title="Settings" aria-label="Settings"><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg></button></div>
 <div class="side-label">LIBRARY</div>
 <button class="nav active" data-view="all">All articles <span id="allCount">0</span></button><button class="nav" data-view="unread">Unread <span id="unreadCount">0</span></button><button class="nav" data-view="saved">Saved <span id="savedCount">0</span></button><button class="nav" data-view="snoozed">Snoozed <span id="snoozedCount">0</span></button><button class="nav" data-view="highlights">Highlights <span id="highlightsCount">0</span></button>
 <div class="feed-head"><span class="side-label">YOUR FEEDS</span></div><div id="feeds" class="feeds"><p class="muted">Your feeds will appear here.</p></div>
-<div class="feed-head"><span class="side-label">TAGS</span></div><div id="tags" class="tag-list"><p class="muted">Tag articles from the reader to find them here.</p></div>
-<div class="feed-head"><span class="side-label">SAVED SEARCHES</span></div><div id="savedSearches" class="tag-list"><p class="muted">Save a search to keep it here.</p></div>
-<p class="local-note">Your subscriptions and preferences stay in this browser.</p>
+<div class="feed-head" id="tagsHead"><span class="side-label">TAGS</span></div><div id="tags" class="tag-list"><p class="muted">Tag articles from the reader to find them here.</p></div>
+<div class="feed-head" id="savedSearchesHead"><span class="side-label">SAVED SEARCHES</span></div><div id="savedSearches" class="tag-list"><p class="muted">Save a search to keep it here.</p></div>
 </aside>
 <div class="splitter" id="splitSide" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" aria-valuemin="180" aria-valuemax="420" aria-valuenow="230" tabindex="0"></div>
 <div id="scrim" class="scrim" aria-hidden="true"></div>
