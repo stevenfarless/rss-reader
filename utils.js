@@ -128,6 +128,12 @@ function authorIsFeedTitle(author, feedTitle) {
 function namedFolderNames(feeds) {
   return [...new Set(feeds.map(f => f.group).filter(g => typeof g === "string" && g))].sort((a, b) => a.localeCompare(b));
 }
+/* Cycle a feed's own sort (#183): use global, then newest, then
+   oldest, then back to global. */
+function nextFeedSort(current) {
+  return !current || current === "global" ? "newest" : current === "newest" ? "oldest" : "global";
+}
+
 /* Normalize a stored reader-toolbar button order (#197): keep known
    keys in their stored order, drop unknown keys, and append any keys
    the stored order is missing (so a new button still appears). */
@@ -145,5 +151,5 @@ function allFoldersCollapsed(names, collapsed) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder };
+  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder, nextFeedSort };
 }

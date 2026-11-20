@@ -203,8 +203,8 @@ mark.hl.hl-flash{outline:2px solid var(--accent);outline-offset:2px}
    muted feed, an armed unsubscribe, a saved article — stays visible
    so its state is never hidden. */
 @media (hover:hover) {
-  .feed-row-wrap .feed-mute, .feed-row-wrap .feed-unsub { opacity: 0; transition: opacity .12s; }
-  .feed-row-wrap:hover .feed-mute, .feed-row-wrap:focus-within .feed-mute, .feed-row-wrap:hover .feed-unsub, .feed-row-wrap:focus-within .feed-unsub,
+  .feed-row-wrap .feed-mute, .feed-row-wrap .feed-unsub, .feed-row-wrap .feed-opts { opacity: 0; transition: opacity .12s; }
+  .feed-row-wrap:hover .feed-mute, .feed-row-wrap:focus-within .feed-mute, .feed-row-wrap:hover .feed-unsub, .feed-row-wrap:focus-within .feed-unsub, .feed-row-wrap:hover .feed-opts, .feed-row-wrap:focus-within .feed-opts,
   .feed-row-wrap .feed-mute.on, .feed-row-wrap .feed-unsub.armed, .article-actions button[data-action="save"][aria-pressed="true"] { opacity: 1; }
 }
 /* Mark read dropdown (#146): one button in the list header holding
@@ -265,3 +265,11 @@ body:not(.mobile-bar-top) #readProgress.bottom{bottom:calc(56px + env(safe-area-
 .toolbar-order-btns{display:inline-flex;gap:2px}
 .toolbar-order-btns .quiet{min-width:28px;min-height:28px;padding:2px 6px}
 .toolbar-order-btns .quiet:disabled{opacity:.35;cursor:default}
+
+/* Per-feed options button (#183): small and quiet, like mute/unsub. */
+.feed-opts{flex:none;background:none;border:0;color:var(--soft);font-size:14px;line-height:1;padding:6px 6px;border-radius:4px;cursor:pointer}
+.feed-opts:hover{color:var(--text);background:var(--panel2)}
+/* The per-feed menu is one shared fixed-position popup (#183), placed
+   next to the row by JS, so it is never clipped by the sidebar. */
+#feedMenu{position:fixed;right:auto}
+#feedMenu button[aria-pressed="true"]{color:var(--accent)}
