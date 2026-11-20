@@ -31,7 +31,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.5";
+const APP_VERSION = "1.8.6";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -1292,6 +1292,14 @@ async function refreshFeed(f) {
     return false;
   }
 }
+/* A failed feed shows its full error with Retry and Unsubscribe (#162). */
+function showFeedError(id) {
+  const f = state.feeds.find(v => v.id === id);
+  if (!f) return;
+  $("#feedErrorText").textContent = f.error || "This feed failed to load.";
+  $("#feedErrorDialog").dataset.feed = id;
+  $("#feedErrorDialog").showModal();
+}
 async function refresh() {
   if (!state.feeds.length) { toast("Add a feed first."); return; }
   const now = Date.now();
@@ -1472,7 +1480,7 @@ function renderNav() {
         : `<span class="feed-dot"></span>`;
       const countBtn = unreadCount ? `<button type="button" class="feed-count" data-mark-read="${esc(f.id)}" title="Mark ${esc(f.title)} read" aria-label="Mark ${esc(f.title)} read">${unreadCount}</button>` : "";
       const muteBtn = `<button type="button" class="feed-mute${f.muted ? " on" : ""}" data-mute="${esc(f.id)}" title="${f.muted ? "Unmute" : "Mute"} ${esc(f.title)}" aria-label="${f.muted ? "Unmute" : "Mute"} ${esc(f.title)}" aria-pressed="${!!f.muted}">${f.muted ? "Muted" : "Mute"}</button>`;
-      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span>${f.error ? '<span class="feed-err" aria-hidden="true">!</span>' : ""}</button>${countBtn}${muteBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">×</button></div>`;
+      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(f.title)}">!</button>` : ""}${countBtn}${muteBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">${armed ? "Sure?" : "×"}</button></div>`;
     }).join("");
   }).join("") : '<p class="muted">Your feeds will appear here.</p>';
   const tagCounts = {};
@@ -1532,6 +1540,8 @@ function renderList() {
   // The All view has no description to show — the subtitle is just the
   // last refresh time (#146), not filler.
   $("#subtitle").textContent = [base, upd].filter(Boolean).join(" · ");
+  // A search in progress says what it is and how many it found (#162).
+  if (state.query) $("#subtitle").textContent = `Searching for "${state.query}" — ${a.length} article${a.length === 1 ? "" : "s"}`;
   $("#articleList").innerHTML = a.length ? a.map(x => {
     const d = date(x.published);
     // Card options: how much preview text, and whether to show the thumbnail.
@@ -1541,16 +1551,18 @@ function renderList() {
     const rt = readingTimeText(x);
     const snoozeNote = state.view === "snoozed" && x.snoozedUntil ? `<span>·</span><span>Snoozed until ${esc(fmtDateTime(new Date(x.snoozedUntil)))}</span>` : "";
     return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}"><div class="article-main"><div class="article-meta"><span>${esc(feedTitleFor(x))}</span><span>·</span><time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? `<span>·</span><span>${rt}</span>` : ""}${snoozeNote}</div><h2>${esc(x.title)}</h2>${excerpt}<div class="article-bottom"><span>${esc(x.author)}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button>${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div>${thumb}</article>`;
-  }).join("") : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>';
+  }).join("") : (state.query || state.filter !== "all" ? `<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>No articles match${state.query ? " &quot;" + esc(state.query) + "&quot;" : ""}.</p><button class="primary" id="emptyClear">Clear search</button></div>` : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>');
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
+  const c = $("#emptyClear");
+  if (c) c.onclick = () => { $("#search").value = ""; state.query = ""; state.filter = "all"; $("#searchClear").hidden = true; renderList(); $("#search").focus(); };
   // Mark above/below act on the selected article in this list: without
   // a selection there is nothing above or below to mark. Mark visible
   // read is disabled when nothing visible is unread (#136 follow-up).
   const hasSel = a.some(x => x.id === state.selected);
   const ma = $("#markAbove"), mb = $("#markBelow"), mr = $("#markRead");
-  if (ma) ma.disabled = !hasSel;
-  if (mb) mb.disabled = !hasSel;
+  if (ma) { ma.disabled = !hasSel; ma.title = hasSel ? "Marks every article above the open one read (Ctrl+M)" : "Open an article first — this acts on the articles around it."; }
+  if (mb) { mb.disabled = !hasSel; mb.title = hasSel ? "Marks every article below the open one read (Shift+M)" : "Open an article first — this acts on the articles around it."; }
   if (mr) mr.disabled = !a.some(x => !x.read);
   // Save search only appears when there is an active search to save (#146).
   const ss = $("#saveSearchBtn");
@@ -1900,7 +1912,9 @@ function renderReader(x) {
   const isAudio = !!x.enclosure?.type?.startsWith("audio/");
   const canListen = "speechSynthesis" in window;
   const audioHTML = isAudio ? `<div class="audio-player"><audio id="audioPlayer" controls preload="metadata" src="${esc(x.enclosure.url)}"></audio><div class="audio-controls"><label>Speed <select id="audioSpeed" aria-label="Playback speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><a href="${esc(x.enclosure.url)}" target="_blank" rel="noopener">Open audio ↗</a></div></div>` : "";
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="false" ${canListen ? "" : "disabled"}>${icon("speak")}</button><button data-reader="share" title="Share article" aria-label="Share article">${icon("share")}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">${icon("clock")}</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${icon("doc")}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${esc(x.author)} · ${esc(d ? fmtDateTime(d) : "No date")}${rt ? " · " + rt : ""}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><datalist id="tagList">${state.tags.map(t => `<option value="${esc(t)}">`).join("")}</datalist></div>${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="false" ${canListen ? "" : "disabled"}>${icon("speak")}</button><button data-reader="share" title="Share article" aria-label="Share article">${icon("share")}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">${icon("clock")}</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${icon("doc")}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></div>${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
+  const tagAdd = $("#tagAddBtn");
+  if (tagAdd) tagAdd.onclick = () => { const x = selectedItem(); const inp = $("#tagInput"); if (x && inp) addTagToItem(x, inp.value); };
   const bodyEl = $("#body");
   // Append the cleaned body's children, not the <body> element itself.
   // cleanHTML drops the page chrome (header/nav/footer); the leading-nav
@@ -2270,7 +2284,7 @@ async function saveHlFromDialog() {
    and a way to jump to the passage or delete it. */
 function highlightsSectionHTML(x) {
   const list = highlightsFor(x.id);
-  if (!list.length) return `<div class="hl-section"><h3>Highlights</h3><p class="muted">Select text in the article to highlight it, with an optional note.</p></div>`;
+  if (!list.length) return "";
   return `<div class="hl-section"><h3>Highlights (${list.length})</h3>` + list.map(h =>
     `<div class="hl-item" data-hl-id="${esc(h.id)}"><blockquote>${esc(h.text)}</blockquote>` +
     (h.note ? `<p class="hl-note">${esc(h.note)}</p>` : "") +
@@ -2324,8 +2338,8 @@ function openItem(itemId) {
   // Mark above/below act on the selected article in this list: with a
   // selection in the list, they are enabled.
   const ma = $("#markAbove"), mb = $("#markBelow");
-  if (ma) ma.disabled = !row;
-  if (mb) mb.disabled = !row;
+  if (ma) { ma.disabled = !row; ma.title = row ? "Marks every article above the open one read (Ctrl+M)" : "Open an article first — this acts on the articles around it."; }
+  if (mb) { mb.disabled = !row; mb.title = row ? "Marks every article below the open one read (Shift+M)" : "Open an article first — this acts on the articles around it."; }
   renderReader(x);
 }
 function closeReader() {
@@ -2342,7 +2356,11 @@ function closeReader() {
 function render() {
   renderNav();
   renderList();
-  if (!state.selected) $("#reader").innerHTML = '<div class="reader-empty">' + icon("rss", "big") + '<h2>Nothing open yet</h2><p>Pick an article from the list to read it here.</p><small>Use j and k to move, o to open, ? for all shortcuts.</small></div>';
+  // The tag suggestions live in one static datalist (#162), kept in step
+  // here so the reader and the rule editor always offer current tags.
+  const tl = $("#tagList");
+  if (tl) tl.innerHTML = state.tags.map(t => `<option value="${esc(t)}">`).join("");
+  if (!state.selected) $("#reader").innerHTML = '<div class="reader-empty">' + icon("rss", "big") + '<h2>Nothing open yet</h2><p>Pick an article from the list to read it here.</p><small>Tip: press ? any time to see keyboard shortcuts.</small></div>';
 }
 
 /* ---------- folders & tags ---------- */
@@ -2689,12 +2707,18 @@ function renderRules() {
   // when adding a new rule; otherwise the list ends with an Add button.
   const body = state.rules.length ? state.rules.map(row).join("") : '<p class="muted">No rules yet. Rules tag, save, or mark read new articles as they arrive.</p>';
   $("#rulesBody").innerHTML = (ruleEdit === "new" ? editorHTML({ name: "", scope: "all", keyword: "", author: "", tag: "", save: false, markRead: false }) : "") + body + (ruleEdit ? "" : `<div class="org-new"><button type="button" class="primary" data-rule-add>Add a rule</button></div>`);
+  syncRuleSave();
 }
 function showRules() {
   ruleEdit = null;
   pendingDelete = null;
   renderRules();
   $("#rulesDialog").showModal();
+}
+function syncRuleSave() {
+  const btn = document.querySelector("[data-rule-save]");
+  if (!btn) return;
+  btn.disabled = !($("#ruleTag")?.value.trim() || $("#ruleSave")?.checked || $("#ruleMarkRead")?.checked);
 }
 function saveRuleFromDialog() {
   const name = $("#ruleName")?.value.trim();
@@ -2708,6 +2732,7 @@ function saveRuleFromDialog() {
     save: $("#ruleSave")?.checked || false,
     markRead: $("#ruleMarkRead")?.checked || false
   };
+  if (!data.tag && !data.save && !data.markRead) { toast("Pick at least one thing for the rule to do — add a tag, save the article, or mark it read."); return; }
   if (ruleEdit === "new") {
     state.rules.push({ id: id(), enabled: true, ...data });
     toast(`Rule “${name}” added. It runs on new articles at refresh.`);
@@ -2981,6 +3006,8 @@ function bind() {
     if (muteBtn) { toggleMute(muteBtn.dataset.mute); return; }
     const folderBtn = e.target.closest("[data-folder]");
     if (folderBtn) { goFolder(folderBtn.dataset.folder); $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show"); return; }
+    const feedErr = e.target.closest("[data-feed-err]");
+    if (feedErr) { showFeedError(feedErr.dataset.feedErr); return; }
     const feed = e.target.closest("[data-feed]");
     if (feed) {
       state.view = "feed"; state.feed = feed.dataset.feed; state.folder = null; state.tag = null; state.savedSearch = null; state.selected = null;
@@ -3105,6 +3132,24 @@ function bind() {
     if (del) { deleteRule(del.dataset.ruleDelete); return; }
     if (e.target.closest("#rulesDone") || e.target.closest("#rulesClose")) $("#rulesDialog").close();
   });
+  // Feed-error dialog (#162): Retry reloads that feed; Unsubscribe uses
+  // the same two-step arming as the sidebar ×.
+  $("#feedErrorRetry").onclick = async () => {
+    const id = $("#feedErrorDialog").dataset.feed;
+    const f = state.feeds.find(v => v.id === id);
+    $("#feedErrorDialog").close();
+    if (!f) return;
+    const ok = await refreshFeed(f);
+    saveFeeds();
+    render();
+    toast(ok ? `“${f.title}” loaded.` : `“${f.title}” still failing: ${f.error || "unknown error"}`);
+  };
+  $("#feedErrorUnsub").onclick = () => { const id = $("#feedErrorDialog").dataset.feed; $("#feedErrorDialog").close(); if (id) requestUnsubscribe(id); };
+  $("#feedErrorClose").onclick = () => $("#feedErrorDialog").close();
+  // A rule must do something: Save stays disabled until a tag is typed
+  // or Save / Mark read is checked (#162).
+  $("#rulesDialog").addEventListener("input", syncRuleSave);
+  $("#rulesDialog").addEventListener("change", syncRuleSave);
   $("#organizeDialog").addEventListener("close", () => { pendingDelete = null; orgEdit = null; });
   $("#organizeDialog").addEventListener("click", async e => {
     const addFolder = e.target.closest("[data-org-add-folder]");

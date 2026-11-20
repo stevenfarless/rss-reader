@@ -21,7 +21,7 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Estimated reading time on cards and in the reader
 - Reader font (serif, sans-serif, Nunito, Ubuntu) and line height (compact/comfortable/roomy) in Settings
 - Share an article: the system share sheet, or a copy-link fallback where the sheet is unavailable
-- Mark articles above or below the selected one read (buttons in the list heading, Ctrl+M / Shift+M)
+- Mark everything above or below the open one read (in the Mark read menu, Ctrl+M / Shift+M)
 - Snooze an article (later today, tomorrow, next week) with a Snoozed view and unsnooze
 - Duplicate articles (the same address in more than one feed) shown once, with a toggle in the list filters and Settings
 - Mute a feed: hide its articles from All and Unread without unsubscribing
@@ -33,11 +33,11 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Responsive desktop and mobile layout
 - Collapsible sidebar: the ‹/› toggle in the top left folds the sidebar to a narrow rail, remembered across visits
 - Refresh on launch when the newest article is stale, with a last-updated time under the heading
-- Undo for bulk actions (mark visible read, unsubscribe)
+- Undo for bulk actions (mark all in this list read, unsubscribe)
 - Article thumbnails, per-feed favicons, and relative dates ("5m ago")
 - Dark mode by default, with light and system options
 - Adjustable reading width and text size
-- Keyboard shortcuts: / search, j/k navigate, n/p next/previous unread, o or Enter open, v open original, m toggle read, s save, t add a tag, a mark visible read, Ctrl+M / Shift+M mark above/below read, u back to list, g then a/u/s go to All/Unread/Saved, r refresh, Space scroll, ? help, Esc close
+- Keyboard shortcuts: / search, j/k navigate, n/p next/previous unread, o or Enter open, v open original, m toggle read, s save, t add a tag, a mark all in this list read, Ctrl+M / Shift+M mark everything above/below read, u back to list, g then a/u/s go to All/Unread/Saved, r refresh, Space scroll, ? help, Esc close
 - Gentium Book Plus typography
 
 ## Hosting
