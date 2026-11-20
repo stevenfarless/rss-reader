@@ -150,6 +150,152 @@ function allFoldersCollapsed(names, collapsed) {
   return names.length > 0 && names.every(n => collapsed.has(n));
 }
 
+/* ---------- keyboard shortcut presets (#185) ----------
+   The default is Inoreader (the user's choice). Each preset is a map
+   from a normalized key descriptor to an action name; the keydown
+   handler dispatches through the active preset's map. A descriptor is
+   built from e.code (so Shift+1 still reads as "1", not "!") with
+   Ctrl+/Alt+/Shift+ prefixes. Only keys verified in the research
+   (SHORTCUTS-RESEARCH-2026-11-20.md) are bound; the quick-access
+   jump palette ("." and the g/d sequences that need it) is deferred,
+   so "." is left unassigned in every preset. */
+function keyDesc(e) {
+  let base = "";
+  const c = e.code || "";
+  if (c.startsWith("Key")) base = c.slice(3).toLowerCase();
+  else if (c.startsWith("Digit")) base = c.slice(5);
+  else if (c === "Space") base = "Space";
+  else if (c === "Escape") base = "Esc";
+  else if (c === "Enter") base = "Enter";
+  else if (c === "Tab") base = "Tab";
+  else if (c === "Equal") base = "=";
+  else if (c === "Minus") base = "-";
+  else if (c === "BracketLeft") base = "[";
+  else if (c === "BracketRight") base = "]";
+  else if (c === "Slash") base = "/";
+  else if (c === "Period") base = ".";
+  else if (c === "Comma") base = ",";
+  else if (c === "Quote") base = "'";
+  else if (c === "Semicolon") base = ";";
+  else if (c === "Backquote") base = "`";
+  else if (c === "Backslash") base = "\\";
+  else if (c === "ArrowUp") base = "ArrowUp";
+  else if (c === "ArrowDown") base = "ArrowDown";
+  else if (c === "ArrowLeft") base = "ArrowLeft";
+  else if (c === "ArrowRight") base = "ArrowRight";
+  else if (c === "PageUp") base = "PageUp";
+  else if (c === "PageDown") base = "PageDown";
+  else if (c === "Home") base = "Home";
+  else if (c === "End") base = "End";
+  else base = e.key || "";
+  let d = "";
+  if (e.ctrlKey) d += "Ctrl+";
+  if (e.altKey) d += "Alt+";
+  if (e.metaKey) d += "Meta+";
+  if (e.shiftKey) d += "Shift+";
+  return d + base;
+}
+/* Human-readable labels for the help dialog, per action. */
+const ACTION_LABELS = {
+  nextOpen: "Next article", prevOpen: "Previous article",
+  moveNext: "Move to next article (without opening)", movePrev: "Move to previous article (without opening)",
+  nextUnread: "Next unread article", prevUnread: "Previous unread article", oldestUnread: "Oldest unread article",
+  openSelected: "Open selected article", openOriginal: "Open original article in a new tab",
+  openBackground: "Open original in a new tab", openCurrentTab: "Open original in the current tab",
+  toggleRead: "Toggle read / unread", toggleReadNext: "Toggle read, move to next", toggleReadPrev: "Toggle read, move to previous",
+  markVisibleRead: "Mark all articles in this list read", markAbove: "Mark articles above the selected one read",
+  markBelow: "Mark articles below the selected one read", markReadAdvance: "Mark as read and move to next",
+  markUnreadSkip: "Mark as unread and move to next",
+  save: "Save / unsave article", tag: "Add a tag to the open article", fullArticle: "Toggle full article / feed excerpt",
+  share: "Share article", addFeed: "Add a feed", refresh: "Refresh all feeds", search: "Search articles",
+  help: "Show this help", closeReader: "Back to the article list", sidebarToggle: "Show / hide the sidebar",
+  textBigger: "Larger article text", textSmaller: "Smaller article text", textReset: "Reset article text size",
+  unreadView: "Show unread only", allView: "Show all articles", folderToggle: "Expand / collapse the folder",
+  nextFeed: "Next feed", prevFeed: "Previous feed", parentFolder: "Select the parent folder",
+  firstArticle: "First article in the list", lastArticle: "Last article in the list",
+  scrollTop: "Scroll article to the top", copyUrl: "Copy article link", fullscreen: "Toggle full screen",
+  unsubscribe: "Unsubscribe from this feed", editFeed: "Edit this feed's options",
+  goAll: "Go to All articles", goUnread: "Go to Unread", goSaved: "Go to Saved", goSnoozed: "Go to Snoozed",
+  goHighlights: "Go to Highlights", goToday: "Go to Today (Unread)", goIndex: "Go to All (Index)",
+  goOrganize: "Open Folders & tags", goPrefs: "Open Settings", goStarred: "Go to Saved (Starred)",
+  goFeeds: "Go to the feeds list", goHome: "Go to All (Home)"
+};
+/* The shared spine: these bindings are the same in nearly every
+   reader, so each preset starts from them and overrides the keys
+   that differ. */
+const PRESET_SPINE = {
+  "o": "openSelected", "Enter": "openSelected", "v": "openOriginal", "m": "toggleRead",
+  "s": "save", "t": "tag", "w": "fullArticle", "r": "refresh", "/": "search",
+  "Shift+/": "help", "h": "help", "Esc": "closeReader",
+  "g a": "goAll", "g u": "goUnread", "g s": "goSaved", "g z": "goSnoozed", "g h": "goHighlights",
+  "g g": "firstArticle", "Ctrl+m": "markAbove", "Shift+m": "markBelow"
+};
+const PRESETS = {
+  inoreader: { name: "Inoreader", keys: { ...PRESET_SPINE,
+    "j": "nextOpen", "k": "prevOpen", "Space": "nextOpen", "Shift+Space": "prevOpen",
+    "n": "moveNext", "p": "movePrev", "Shift+j": "nextUnread", "Shift+k": "prevUnread",
+    "Shift+n": "moveNext", "Shift+p": "movePrev", "Shift+o": "openSelected",
+    "a": "addFeed", "Shift+a": "markVisibleRead", "e": "share", "b": "openBackground",
+    "=": "textBigger", "-": "textSmaller", "0": "textReset",
+    "Shift+1": "unreadView", "Shift+2": "allView", "Shift+x": "folderToggle", "d": "sidebarToggle",
+    "u": "closeReader"
+  } },
+  feedly: { name: "Feedly", keys: { ...PRESET_SPINE,
+    "j": "nextOpen", "k": "prevOpen", "n": "moveNext", "p": "movePrev",
+    "Shift+j": "nextFeed", "Shift+k": "prevFeed", "Shift+a": "markVisibleRead",
+    "x": "markReadAdvance", "t": "save", "s": "save", "[": "sidebarToggle",
+    "g t": "goToday", "g a": "goAll", "g l": "goSaved", "g i": "goIndex",
+    "g o": "goOrganize", "g p": "goPrefs", "g f": "goStarred", "g g": "firstArticle",
+    "u": "closeReader"
+  } },
+  newsblur: { name: "NewsBlur", keys: { ...PRESET_SPINE,
+    "j": "moveNext", "k": "movePrev", "n": "nextUnread", "m": "oldestUnread", "u": "toggleRead",
+    "s": "save", "Shift+a": "markVisibleRead", "Shift+j": "nextFeed", "Shift+k": "prevFeed",
+    "Shift+Enter": "fullArticle", "Enter": "openSelected", "Space": "nextUnread", "Shift+Space": "prevUnread"
+  } },
+  feedbin: { name: "Feedbin", keys: { ...PRESET_SPINE,
+    "j": "moveNext", "k": "movePrev", "ArrowDown": "moveNext", "ArrowUp": "movePrev",
+    "Space": "nextUnread", "c": "fullArticle", "f": "share", "a": "addFeed",
+    "e": "folderToggle", "Shift+e": "editFeed", "Shift+c": "copyUrl", "Shift+f": "fullscreen",
+    "Shift+a": "markVisibleRead", "g u": "goUnread", "g s": "goSaved", "g a": "goAll",
+    "u": "closeReader"
+  } },
+  freshrss: { name: "FreshRSS", keys: { ...PRESET_SPINE,
+    "j": "nextOpen", "k": "prevOpen", "n": "moveNext", "p": "movePrev",
+    "m": "toggleRead", "s": "save", "f": "fullscreen", "Shift+a": "markVisibleRead",
+    "Shift+j": "nextFeed", "Shift+k": "prevFeed", "Alt+j": "nextFeed", "Alt+k": "prevFeed",
+    "u": "closeReader"
+  } },
+  miniflux: { name: "Miniflux", keys: { ...PRESET_SPINE,
+    "n": "moveNext", "j": "moveNext", "p": "movePrev", "k": "movePrev",
+    "m": "toggleReadNext", "Shift+m": "toggleReadPrev", "Shift+a": "markVisibleRead",
+    "f": "save", "s": "share", "d": "fullArticle", "g g": "firstArticle", "Shift+g": "lastArticle",
+    "z t": "scrollTop", "Shift+r": "refresh", "#": "unsubscribe", "Shift+v": "openCurrentTab",
+    "g u": "goUnread", "g b": "goStarred", "g f": "goFeeds", "g s": "goPrefs",
+    "+": "addFeed", "u": "closeReader"
+  } },
+  oldreader: { name: "The Old Reader / Google Reader", keys: { ...PRESET_SPINE,
+    "j": "nextOpen", "k": "prevOpen", "n": "moveNext", "p": "movePrev",
+    "Shift+n": "nextFeed", "Shift+p": "prevFeed", "Shift+x": "folderToggle",
+    "s": "save", "t": "tag", "Shift+s": "share", "e": "share", "Shift+a": "markVisibleRead",
+    "f": "fullscreen", "u": "sidebarToggle", "a": "addFeed", "b": "openBackground", "x": "openSelected",
+    "g h": "goHome", "g a": "goAll", "g s": "goSaved", "g u": "goUnread"
+  } },
+  bazqux: { name: "BazQux", keys: { ...PRESET_SPINE,
+    "j": "nextOpen", "k": "prevOpen", "Shift+j": "nextFeed", "Shift+k": "prevFeed",
+    "Shift+x": "folderToggle", "Shift+u": "parentFolder", "Shift+q": "markAbove", "Shift+z": "markBelow",
+    "-": "textSmaller", "=": "textBigger", "Shift+-": "textSmaller", "Shift+=": "textBigger",
+    "Shift+l": "markUnreadSkip", "u": "scrollTop", "Shift+a": "markVisibleRead", "s": "save", "m": "toggleRead",
+    "d a": "goAll", "d s": "goSaved"
+  } },
+  commafeed: { name: "CommaFeed", keys: { ...PRESET_SPINE,
+    "j": "nextOpen", "k": "prevOpen", "n": "moveNext", "p": "movePrev",
+    "Space": "nextOpen", "m": "toggleRead", "s": "save", "Shift+j": "nextFeed", "Shift+k": "prevFeed",
+    "Shift+a": "markVisibleRead", "v": "openOriginal", "u": "closeReader"
+  } }
+};
+
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder, nextFeedSort };
+  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder, nextFeedSort, keyDesc, PRESETS, ACTION_LABELS };
 }
