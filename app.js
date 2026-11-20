@@ -31,13 +31,13 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.13";
+const APP_VERSION = "1.8.14";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null, savedSearch: null,
   folders: [], tags: [], savedSearches: [], rules: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false }
+  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom" }
 };
 let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null;
 /* Text-to-speech state (#105): the article being read, its sentence
@@ -271,6 +271,7 @@ function validateSettings(d) {
   const lh = pick("#lineHeightSelect", d.lineHeight); if (lh) next.lineHeight = lh;
   if (typeof d.ttsRate === "number" && d.ttsRate >= 0.5 && d.ttsRate <= 2) next.ttsRate = d.ttsRate;
   const prog = pick("#progressSelect", d.progressPosition); if (prog) next.progressPosition = prog;
+  const mbar = pick("#mobileBarSelect", d.mobileReaderBar); if (mbar) next.mobileReaderBar = mbar;
   const exc = pick("#cardExcerptSelect", d.cardExcerpt); if (exc) next.cardExcerpt = exc;
   if (typeof d.cardImage === "boolean") next.cardImage = d.cardImage;
   if (typeof d.hideDuplicates === "boolean") next.hideDuplicates = d.hideDuplicates;
@@ -481,6 +482,7 @@ function readSettingsFromDialog() {
     ttsRate: state.settings.ttsRate || 1,
     hideDuplicates: $("#hideDuplicatesToggle").checked,
     progressPosition: $("#progressSelect").value,
+    mobileReaderBar: $("#mobileBarSelect").value,
     cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
     sidebarCollapsed: state.settings.sidebarCollapsed || false,
@@ -550,6 +552,9 @@ function applySettings() {
   // the existing look is unchanged until the user picks otherwise.
   document.documentElement.dataset.readerFont = state.settings.readerFont || "serif";
   document.documentElement.dataset.lineHeight = state.settings.lineHeight || "comfortable";
+  // Mobile article actions (#179): bottom bar by default, top bar when
+  // the user picks it in Settings. The CSS keys off this class.
+  document.body.classList.toggle("mobile-bar-top", state.settings.mobileReaderBar === "top");
   applySidebarCollapsed();
   applyPaneWidths();
 }
@@ -2049,7 +2054,7 @@ function renderReader(x) {
   const tagsOpen = tagsExpandedId === x.id;
   const fullLabel = showingFull ? "Show feed excerpt" : x.fullContent ? "Show full article" : alreadyFull ? "Full article included in feed" : "Load full article";
   const tagsRowHTML = `<div class="tags-row" id="tagsRow"><button type="button" class="quiet" id="tagToggleBtn" aria-expanded="${tagsOpen}" aria-label="Tag article">${icon("tag")}<span>Tag</span></button>${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<span id="tagInputWrap" ${tagsOpen ? "" : "hidden"}><input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></span></div>`;
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" class="reader-btn" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}<span>${x.saved ? "Saved" : "Save"}</span></button><button data-reader="open" class="reader-btn" title="Open original (v)" aria-label="Open original">↗<span>Open original</span></button><div class="menu-wrap"><button id="moreMenuBtn" class="reader-btn" aria-haspopup="true" aria-expanded="false">···<span>More</span></button><div class="menu" id="moreMenu" hidden><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="${tts?.itemId === x.id}" ${canListen ? "" : "disabled"}>${tts?.itemId === x.id ? "Stop listening" : "Listen to article"}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">Snooze article</button><button data-reader="fulltext" title="${fullLabel}${alreadyFull ? "" : " (w)"}" aria-label="${fullLabel}" ${canFull ? "" : "disabled"}>${fullLabel}</button><button data-reader="share" title="Share article" aria-label="Share article">Share article</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "○ Mark unread" : "● Mark read"}</button></div></div><button data-reader="close" class="reader-btn" title="Close (u / Esc)" aria-label="Close article">${icon("close")}<span>Close</span></button></div>${tagsRowHTML}</div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="back" class="reader-btn reader-back" title="Back to list" aria-label="Back to list">‹<span>Back</span></button><button data-reader="save" class="reader-btn" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}<span>${x.saved ? "Saved" : "Save"}</span></button><button data-reader="open" class="reader-btn" title="Open original (v)" aria-label="Open original">↗<span>Open original</span></button><div class="menu-wrap"><button id="moreMenuBtn" class="reader-btn" aria-haspopup="true" aria-expanded="false">···<span>More</span></button><div class="menu" id="moreMenu" hidden><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="${tts?.itemId === x.id}" ${canListen ? "" : "disabled"}>${tts?.itemId === x.id ? "Stop listening" : "Listen to article"}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">Snooze article</button><button data-reader="fulltext" title="${fullLabel}${alreadyFull ? "" : " (w)"}" aria-label="${fullLabel}" ${canFull ? "" : "disabled"}>${fullLabel}</button><button data-reader="share" title="Share article" aria-label="Share article">Share article</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "○ Mark unread" : "● Mark read"}</button></div></div><button data-reader="close" class="reader-btn" title="Close (u / Esc)" aria-label="Close article">${icon("close")}<span>Close</span></button></div>${tagsRowHTML}</div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
   const tagAdd = $("#tagAddBtn");
   if (tagAdd) tagAdd.onclick = () => { const x = selectedItem(); const inp = $("#tagInput"); if (x && inp) addTagToItem(x, inp.value); };
   // Tag button toggles the collapsed input (#171): expanding focuses it.
@@ -3004,6 +3009,7 @@ function showSettings() {
   $("#fontSelect").value = state.settings.readerFont || "serif";
   $("#lineHeightSelect").value = state.settings.lineHeight || "comfortable";
   $("#progressSelect").value = state.settings.progressPosition || "bottom";
+  $("#mobileBarSelect").value = state.settings.mobileReaderBar || "bottom";
   $("#cardExcerptSelect").value = state.settings.cardExcerpt || "full";
   $("#cardImageToggle").checked = state.settings.cardImage !== false;
   $("#hideDuplicatesToggle").checked = state.settings.hideDuplicates !== false;
@@ -3246,10 +3252,10 @@ function bind() {
       if (ra.dataset.reader === "read") { x.read = !x.read; await put(x); renderNav(); renderList(); renderReader(x); toast(x.read ? "Article marked read." : "Article marked unread."); return; }
       if (ra.dataset.reader === "listen") { if (tts?.itemId === x.id) stopTTS(); else startTTS(x); return; }
       if (ra.dataset.reader === "share") { shareArticle(x); return; }
-      if (ra.dataset.reader === "snooze") { const m = $("#snoozeMenu"); if (m) { m.hidden = snoozeMenuWasOpen; ra.setAttribute("aria-expanded", String(!m.hidden)); } return; }
+      if (ra.dataset.reader === "snooze") { const m = $("#snoozeMenu"); if (m) { m.hidden = snoozeMenuWasOpen; ra.setAttribute("aria-expanded", String(!m.hidden)); if (!m.hidden) m.scrollIntoView({ block: "nearest" }); } return; }
       if (ra.dataset.reader === "open") { window.open(x.url, "_blank", "noopener"); return; }
       if (ra.dataset.reader === "fulltext") { toggleFullText(x); return; }
-      if (ra.dataset.reader === "close") { closeReader(); return; }
+      if (ra.dataset.reader === "close" || ra.dataset.reader === "back") { closeReader(); return; }
     }
     const row = e.target.closest("[data-item]");
     if (row) { openItem(row.dataset.item); return; }
