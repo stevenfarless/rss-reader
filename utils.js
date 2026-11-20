@@ -88,6 +88,33 @@ const cleanSummary = s => {
   return s;
 };
 
+/* Move a feed within the sidebar list (#182): reorder it, or move it
+   into another folder (or out to Ungrouped). `target` is either
+   { kind: "row", feedId, before } (drop on a feed row, joining that
+   feed's folder) or { kind: "folder", group } (drop on a folder head
+   or container: append at the end of that folder; "" is Ungrouped).
+   Mutates the array in place and returns the moved feed, or null when
+   the dragged feed is unknown. Dropping a feed on itself is a no-op. */
+function moveFeedInList(feeds, draggedId, target) {
+  const from = feeds.findIndex(f => f.id === draggedId);
+  if (from < 0) return null;
+  const [feed] = feeds.splice(from, 1);
+  if (target.kind === "row") {
+    const to = feeds.findIndex(f => f.id === target.feedId);
+    if (to < 0) { feeds.splice(from, 0, feed); return feed; }
+    feed.group = typeof feeds[to].group === "string" ? feeds[to].group : "";
+    feeds.splice(target.before ? to : to + 1, 0, feed);
+  } else {
+    feed.group = typeof target.group === "string" ? target.group : "";
+    let at = feeds.length;
+    for (let i = feeds.length - 1; i >= 0; i--) {
+      if ((feeds[i].group || "") === feed.group) { at = i + 1; break; }
+    }
+    feeds.splice(at, 0, feed);
+  }
+  return feed;
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary };
+  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList };
 }
