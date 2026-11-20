@@ -25,7 +25,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.7.0";
+const APP_VERSION = "1.8.0";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -1447,8 +1447,6 @@ function renderNav() {
 function renderHighlightsList() {
   const list = [...state.highlights].sort((a, b) => (b.created || 0) - (a.created || 0));
   $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
-  const dup = $("#dupToggle");
-  if (dup) dup.textContent = state.settings.hideDuplicates !== false ? "Duplicates hidden" : "Duplicates shown";
   $$(".filter").forEach(x => x.classList.toggle("active", x.dataset.filter === state.filter));
   const upd = state.lastRefresh ? " · Updated " + new Date(state.lastRefresh).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
   $("#subtitle").textContent = "Passages you highlighted, with your notes." + upd;
@@ -1470,11 +1468,9 @@ function renderList() {
   // first, with the article each came from; clicking one opens it.
   if (state.view === "highlights") { renderHighlightsList(); return; }
   $("#mobileTitle").textContent = titles[state.view];
-  // Keep the sort button, the duplicates toggle, and the filter pills
-  // in step with the persisted sort/filter, so a reload restores them.
+  // Keep the sort button and the filter pills in step with the
+  // persisted sort/filter, so a reload restores them.
   $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
-  const dup = $("#dupToggle");
-  if (dup) dup.textContent = state.settings.hideDuplicates !== false ? "Duplicates hidden" : "Duplicates shown";
   $$(".filter").forEach(x => x.classList.toggle("active", x.dataset.filter === state.filter));
   const base = state.view === "saved" ? "Articles you have kept for later."
     : state.view === "snoozed" ? "Articles waiting to come back."
@@ -1483,9 +1479,11 @@ function renderList() {
     : state.view === "folder" ? `Every feed in “${state.folder}”, newest first.`
     : state.view === "savedSearch" ? "A saved filter, run over your library."
     : state.view === "tag" ? `Articles tagged “${state.tag}”.`
-    : "Your subscriptions, gathered in one place.";
-  const upd = state.lastRefresh ? " · Updated " + new Date(state.lastRefresh).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
-  $("#subtitle").textContent = base + upd;
+    : "";
+  const upd = state.lastRefresh ? "Updated " + new Date(state.lastRefresh).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  // The All view has no description to show — the subtitle is just the
+  // last refresh time (#146), not filler.
+  $("#subtitle").textContent = [base, upd].filter(Boolean).join(" · ");
   $("#articleList").innerHTML = a.length ? a.map(x => {
     const d = date(x.published);
     // Card options: how much preview text, and whether to show the thumbnail.
@@ -1506,6 +1504,9 @@ function renderList() {
   if (ma) ma.disabled = !hasSel;
   if (mb) mb.disabled = !hasSel;
   if (mr) mr.disabled = !a.some(x => !x.read);
+  // Save search only appears when there is an active search to save (#146).
+  const ss = $("#saveSearchBtn");
+  if (ss) ss.hidden = !state.query;
 }
 
 /* ---------- sanitising ---------- */
@@ -1561,9 +1562,41 @@ function cleanHTML(html, base) {
   return doc.body;
 }
 
-/* Lightweight full-article extraction (no library): prefer <article>/<main>,
-   otherwise the block with the most paragraph text; drop nav/chrome. */
+/* Full-article extraction (#146): Mozilla Readability first — the same
+   library Firefox Reader View and FriRSS use. It scores paragraphs and
+   strips the page chrome (nav, sidebars, footers) that the hand-rolled
+   heuristic below can leave behind (e.g. the NASA footer on APOD
+   pages). Readability needs a document whose base URL resolves
+   relative links, so a <base> tag is inserted first, as FriRSS does.
+   Its cost grows with the page's nesting, so it is bounded
+   (maxElemsToParse) and any failure — or a too-short result — falls
+   back to the hand-rolled heuristic, which never throws. */
 function extractArticle(html, base) {
+  if (typeof Readability === "function") {
+    try {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      // A relative URL in the page means nothing to a document parsed
+      // from a string; <base> resolves it here.
+      const b = doc.createElement("base");
+      b.setAttribute("href", base);
+      if (doc.head) doc.head.prepend(b);
+      // Resolve lazy images before Readability scores the page, so an
+      // image-heavy article is not scored as empty.
+      doc.querySelectorAll("img").forEach(n => {
+        const ds = n.getAttribute("data-src") || n.getAttribute("data-lazy-src") || n.getAttribute("data-original");
+        if (ds && !n.getAttribute("src")) n.setAttribute("src", ds);
+      });
+      const parsed = new Readability(doc, { maxElemsToParse: 8000 }).parse();
+      if (parsed?.content && (parsed.textContent || "").trim().length >= 200) {
+        return cleanHTML(parsed.content, base);
+      }
+    } catch {}
+  }
+  return extractArticleHeuristic(html, base);
+}
+/* The hand-rolled fallback: prefer <article>/<main>, otherwise the
+   block with the most paragraph text; drop nav/chrome. */
+function extractArticleHeuristic(html, base) {
   const doc = new DOMParser().parseFromString(html, "text/html");
   // Drop page chrome before choosing the article root, or the
   // largest-text scoring picks a page wrapper that contains it.
@@ -2870,6 +2903,12 @@ function bind() {
     const snoozeMenu = $("#snoozeMenu");
     const snoozeMenuWasOpen = !!(snoozeMenu && !snoozeMenu.hidden);
     if (snoozeMenuWasOpen && !e.target.closest("#snoozeMenu") && !e.target.closest('[data-reader="snooze"]')) snoozeMenu.hidden = true;
+    // The mark-read menu (#146) closes on any click outside it or its button.
+    const markMenu = $("#markReadMenu");
+    if (markMenu && !markMenu.hidden && !e.target.closest("#markReadMenu") && !e.target.closest("#markReadMenuBtn")) {
+      markMenu.hidden = true;
+      $("#markReadMenuBtn")?.setAttribute("aria-expanded", "false");
+    }
     const scrim = e.target.closest("#scrim");
     if (scrim) { $("#sidebar").classList.remove("open"); scrim.classList.remove("show"); return; }
     const nav = e.target.closest("[data-view]");
@@ -3092,12 +3131,6 @@ function bind() {
     $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
     renderList();
   };
-  $("#dupToggle").onclick = () => {
-    state.settings.hideDuplicates = !(state.settings.hideDuplicates !== false);
-    local(S, state.settings);
-    render();
-    toast(state.settings.hideDuplicates !== false ? "Duplicate articles hidden." : "Duplicate articles shown.");
-  };
   $$(".filter").forEach(b => b.onclick = () => {
     $$(".filter").forEach(x => x.classList.toggle("active", x === b));
     state.filter = b.dataset.filter;
@@ -3108,6 +3141,23 @@ function bind() {
   $("#markRead").onclick = markVisibleRead;
   $("#markAbove").onclick = () => markAboveBelow("above");
   $("#markBelow").onclick = () => markAboveBelow("below");
+  // Mark read dropdown (#146): one button holds the three actions.
+  // The menu closes after an action, on an outside click, or on Esc.
+  const markMenu = $("#markReadMenu"), markBtn = $("#markReadMenuBtn");
+  const closeMarkMenu = () => {
+    if (markMenu) markMenu.hidden = true;
+    if (markBtn) markBtn.setAttribute("aria-expanded", "false");
+  };
+  if (markBtn && markMenu) {
+    markBtn.onclick = e => {
+      e.stopPropagation();
+      const open = markMenu.hidden;
+      markMenu.hidden = !open;
+      markBtn.setAttribute("aria-expanded", String(open));
+    };
+    markMenu.addEventListener("click", e => { if (e.target.closest("button")) closeMarkMenu(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closeMarkMenu(); });
+  }
   $("#saveSearchBtn").onclick = showSaveSearch;
   $("#saveSearchDialog").addEventListener("click", e => {
     if (e.target.closest('button[value="cancel"]')) $("#saveSearchDialog").close();
