@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle } = require("../utils.js");
+const { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder } = require("../utils.js");
 
 test("normalizeFeedUrl adds https to a bare address and upgrades http", () => {
   assert.equal(normalizeFeedUrl("example.com/feed"), "https://example.com/feed");
@@ -139,4 +139,12 @@ test("authorIsFeedTitle matches the author to the feed title, ignoring case and 
   assert.equal(authorIsFeedTitle("", "Bart D. Ehrman"), false);
   assert.equal(authorIsFeedTitle(null, "Bart D. Ehrman"), false);
   assert.equal(authorIsFeedTitle("Bart D. Ehrman", ""), false);
+});
+
+test("normalizeToolbarOrder keeps stored order, drops unknown keys, appends missing ones", () => {
+  const keys = ["a", "b", "c", "d"];
+  assert.deepEqual(normalizeToolbarOrder(["c", "a", "zzz"], keys, keys), ["c", "a", "b", "d"]);
+  assert.deepEqual(normalizeToolbarOrder(null, keys, keys), ["a", "b", "c", "d"]);
+  assert.deepEqual(normalizeToolbarOrder([], keys, keys), ["a", "b", "c", "d"]);
+  assert.deepEqual(normalizeToolbarOrder(["d", "b"], keys, keys), ["d", "b", "a", "c"]);
 });

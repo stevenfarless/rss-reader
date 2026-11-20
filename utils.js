@@ -128,6 +128,16 @@ function authorIsFeedTitle(author, feedTitle) {
 function namedFolderNames(feeds) {
   return [...new Set(feeds.map(f => f.group).filter(g => typeof g === "string" && g))].sort((a, b) => a.localeCompare(b));
 }
+/* Normalize a stored reader-toolbar button order (#197): keep known
+   keys in their stored order, drop unknown keys, and append any keys
+   the stored order is missing (so a new button still appears). */
+function normalizeToolbarOrder(stored, keys, fallback) {
+  const list = Array.isArray(stored) ? stored.filter(k => keys.includes(k)) : [];
+  const base = list.length ? list : [...fallback];
+  const missing = keys.filter(k => !base.includes(k));
+  return [...base, ...missing];
+}
+
 /* Whether every named folder is collapsed, so the collapse/expand-all
    toggle should offer "expand all". False when there are no folders. */
 function allFoldersCollapsed(names, collapsed) {
@@ -135,5 +145,5 @@ function allFoldersCollapsed(names, collapsed) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle };
+  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder };
 }
