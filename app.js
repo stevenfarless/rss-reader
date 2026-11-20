@@ -31,7 +31,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.21";
+const APP_VERSION = "1.8.22";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -118,6 +118,99 @@ function saveArticleNoteFromDialog() {
   if (x && x.id === noteArticleId) renderReader(x);
   noteArticleId = null;
   toast("Note saved.");
+}
+
+/* Per-feed options menu (#183): a small popup on each feed row, like
+   FriRSS. One shared fixed-position menu; the feed it belongs to is
+   tracked in feedMenuFeedId. */
+let feedMenuFeedId = null;
+function feedMenuHTML(f) {
+  const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id;
+  const orderLabel = !f.sort || f.sort === "global" ? "Use global" : f.sort === "newest" ? "Newest" : "Oldest";
+  return `<button type="button" data-feed-opt="rename">Rename</button>` +
+    `<button type="button" data-feed-opt="open">Open site</button>` +
+    `<button type="button" data-feed-opt="autofull" aria-pressed="${!!f.autoFull}">${f.autoFull ? "✓ " : ""}Auto full article</button>` +
+    `<button type="button" data-feed-opt="layout">Layout for this feed</button>` +
+    `<button type="button" data-feed-opt="order">Order for this feed: ${orderLabel}</button>` +
+    `<button type="button" data-feed-opt="unsub">${armed ? "Click again to unsubscribe" : "Unsubscribe"}</button>`;
+}
+function renderFeedMenu() {
+  const m = $("#feedMenu");
+  if (!m || !feedMenuFeedId) return;
+  const f = state.feeds.find(fe => fe.id === feedMenuFeedId);
+  if (!f) { closeFeedMenu(); return; }
+  m.innerHTML = feedMenuHTML(f);
+}
+function openFeedMenu(feedId, anchor) {
+  const f = state.feeds.find(fe => fe.id === feedId);
+  if (!f) return;
+  if (feedMenuFeedId === feedId && !$("#feedMenu").hidden) { closeFeedMenu(); return; }
+  closeFeedMenu();
+  feedMenuFeedId = feedId;
+  renderFeedMenu();
+  const m = $("#feedMenu");
+  m.hidden = false;
+  // Position below the button, clamped to the viewport; flip above it
+  // when there is not enough room below.
+  const r = anchor.getBoundingClientRect();
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  let left = Math.min(r.right - mw, window.innerWidth - mw - 8);
+  left = Math.max(8, left);
+  let top = r.bottom + 4;
+  if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 4);
+  m.style.left = left + "px";
+  m.style.top = top + "px";
+  anchor.setAttribute("aria-expanded", "true");
+}
+function closeFeedMenu() {
+  const m = $("#feedMenu");
+  if (m) m.hidden = true;
+  const prev = feedMenuFeedId ? document.querySelector(`[data-feed-opts="${CSS.escape(feedMenuFeedId)}"]`) : null;
+  prev?.setAttribute("aria-expanded", "false");
+  feedMenuFeedId = null;
+}
+let renameFeedId = null;
+function showFeedRenameDialog(f) {
+  renameFeedId = f.id;
+  const inp = $("#feedRenameInput");
+  if (inp) inp.value = f.customTitle || "";
+  $("#feedRenameDialog").showModal();
+  if (inp) { inp.focus(); inp.select(); }
+}
+function saveFeedRenameFromDialog() {
+  if (!renameFeedId) return;
+  const f = state.feeds.find(fe => fe.id === renameFeedId);
+  if (f) {
+    const v = ($("#feedRenameInput")?.value || "").trim();
+    if (v) f.customTitle = v; else delete f.customTitle;
+    saveFeeds();
+    renderNav(); renderList();
+    const x = selectedItem();
+    if (x && x.feedId === f.id) renderReader(x);
+    toast(v ? `Feed renamed to “${v}”.` : "Custom title cleared.");
+  }
+  $("#feedRenameDialog").close();
+  renameFeedId = null;
+}
+let layoutFeedId = null;
+function showFeedLayoutDialog(f) {
+  layoutFeedId = f.id;
+  $("#feedLayoutExcerpt").value = f.cardExcerpt || "global";
+  $("#feedLayoutImage").value = f.cardImage || "global";
+  $("#feedLayoutDialog").showModal();
+}
+function saveFeedLayoutFromDialog() {
+  if (!layoutFeedId) return;
+  const f = state.feeds.find(fe => fe.id === layoutFeedId);
+  if (f) {
+    f.cardExcerpt = $("#feedLayoutExcerpt").value;
+    f.cardImage = $("#feedLayoutImage").value;
+    saveFeeds();
+    renderList();
+    toast(`Layout saved for ${feedDisplayTitle(f)}.`);
+  }
+  $("#feedLayoutDialog").close();
+  layoutFeedId = null;
 }
 /* Relative dates for list cards ("5m ago", "Yesterday"), with the full
    date kept in the title attribute. */
@@ -278,16 +371,35 @@ function cutBeforeTitleEl(body, title) {
    matching the article's host against the feeds' sites and feed URLs.
    The host match ignores scheme and www, since older saved links can
    be http: while the feed is now https:. */
+/* Per-feed display title (#183): a custom title set in the feed's
+   options menu wins over the feed's own title. */
+const feedDisplayTitle = f => (f?.customTitle || "").trim() ? f.customTitle.trim() : (f?.title || "");
+/* Per-feed card layout (#183): an override wins, otherwise the global
+   setting. "global" means no override. */
+const feedCardExcerpt = f => (f?.cardExcerpt && f.cardExcerpt !== "global") ? f.cardExcerpt : (state.settings.cardExcerpt || "full");
+const feedCardImage = f => f?.cardImage === "hide" ? false : f?.cardImage === "show" ? true : (state.settings.cardImage !== false);
+/* The sort for the current view (#183): a feed's own sort wins when
+   viewing that feed, otherwise the global sort. */
+function effectiveSort() {
+  if (state.feed) {
+    const f = state.feeds.find(fe => fe.id === state.feed);
+    if (f?.sort && f.sort !== "global") return f.sort;
+  }
+  return state.sort;
+}
 const feedTitleFor = x => {
-  if (x.feedTitle) return x.feedTitle;
+  // Resolve the feed's CURRENT title at render time (#183), so a rename
+  // updates every card at once; the stored title is only a fallback
+  // for feeds that are gone.
   const byId = state.feeds.find(f => f.id === x.feedId);
-  if (byId?.title) return byId.title;
+  if (byId) return feedDisplayTitle(byId);
+  if (x.feedTitle) return x.feedTitle;
   try {
     const host = new URL(x.url).hostname.replace(/^www\./, "");
     const byHost = state.feeds.find(f => [f.site, f.url].some(u => {
       try { return u && new URL(u).hostname.replace(/^www\./, "") === host; } catch { return false; }
     }));
-    if (byHost?.title) return byHost.title;
+    if (byHost) return feedDisplayTitle(byHost);
   } catch {}
   return "";
 };
@@ -1555,7 +1667,7 @@ function visible() {
   if (state.query) {
     a = a.filter(x => matchesQuery(x, state.query));
   }
-  const newest = state.sort === "newest";
+  const newest = effectiveSort() === "newest";
   // Precompute the date keys once: the old comparator re-parsed each
   // article's date O(log N) times during the sort.
   const keyed = a.map(x => [dateSortKey(x), x]);
@@ -1646,9 +1758,11 @@ function renderNav() {
       const mark = fav
         ? `<img class="feed-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><span class="feed-dot" style="display:none"></span>`
         : `<span class="feed-dot"></span>`;
-      const countBtn = unreadCount ? `<button type="button" class="feed-count" data-mark-read="${esc(f.id)}" title="Mark ${esc(f.title)} read" aria-label="Mark ${esc(f.title)} read">${fmtCount(unreadCount)}</button>` : "";
-      const muteBtn = `<button type="button" class="feed-mute${f.muted ? " on" : ""}" data-mute="${esc(f.id)}" title="${f.muted ? "Unmute" : "Mute"} ${esc(f.title)}" aria-label="${f.muted ? "Unmute" : "Mute"} ${esc(f.title)}" aria-pressed="${!!f.muted}">${f.muted ? "Muted" : "Mute"}</button>`;
-      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" draggable="true" title="${esc(f.title)}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(f.title)}">!</button>` : ""}${countBtn}${muteBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">${armed ? "Sure?" : "×"}</button></div>`;
+      const displayTitle = feedDisplayTitle(f);
+      const countBtn = unreadCount ? `<button type="button" class="feed-count" data-mark-read="${esc(f.id)}" title="Mark ${esc(displayTitle)} read" aria-label="Mark ${esc(displayTitle)} read">${fmtCount(unreadCount)}</button>` : "";
+      const muteBtn = `<button type="button" class="feed-mute${f.muted ? " on" : ""}" data-mute="${esc(f.id)}" title="${f.muted ? "Unmute" : "Mute"} ${esc(displayTitle)}" aria-label="${f.muted ? "Unmute" : "Mute"} ${esc(displayTitle)}" aria-pressed="${!!f.muted}">${f.muted ? "Muted" : "Mute"}</button>`;
+      const optsBtn = `<button type="button" class="feed-opts" data-feed-opts="${esc(f.id)}" title="Options for ${esc(displayTitle)}" aria-label="Options for ${esc(displayTitle)}" aria-haspopup="true" aria-expanded="false">···</button>`;
+      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" draggable="true" title="${esc(displayTitle)}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(displayTitle)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(displayTitle)}">!</button>` : ""}${countBtn}${muteBtn}${optsBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(displayTitle)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(displayTitle)}` : `Unsubscribe from ${esc(displayTitle)}`}">${armed ? "Sure?" : "×"}</button></div>`;
     }).join("");
     return label + (g ? `<div class="folder-feeds" data-drop-folder="${esc(g)}"${collapsed ? " hidden" : ""}>${rows}</div>` : rows);
   }).join("") : '<p class="muted">Your feeds will appear here.</p>';
@@ -1774,8 +1888,9 @@ function moveFeedByDrag(draggedId, target) {
 function renderSortBtn() {
   const b = $("#sort");
   if (!b) return;
-  b.textContent = state.sort === "newest" ? "↓" : "↑";
-  b.title = state.sort === "newest" ? "Newest first — click for oldest first" : "Oldest first — click for newest first";
+  const s = effectiveSort();
+  b.textContent = s === "newest" ? "↓" : "↑";
+  b.title = s === "newest" ? "Newest first — click for oldest first" : "Oldest first — click for newest first";
 }
 
 /* The Highlights view (#116): every highlight, newest first, with the
@@ -1828,17 +1943,18 @@ function renderList() {
   $("#articleList").innerHTML = a.length ? a.map(x => {
     const d = date(x.published);
     // Card options: how much preview text, and whether to show the thumbnail.
-    const exc = state.settings.cardExcerpt || "full";
+    // A feed's own layout override (#183) wins over the global setting.
+    const srcFeed = state.feeds.find(f => f.id === x.feedId);
+    const exc = feedCardExcerpt(srcFeed);
     const excerpt = exc === "none" ? "" : `<p>${esc(snippet(cleanSummary(x.summary), exc === "short" ? 100 : 210))}</p>`;
     const feedTitle = feedTitleFor(x);
     // The author is shown in the bottom row only when it differs from the
     // feed title in the source line and is not empty (#189, #191).
     const showAuthor = !!(x.author && x.author.trim()) && !authorIsFeedTitle(x.author, feedTitle);
     // The feed favicon for the source line, from the feed site (#191).
-    const srcFeed = state.feeds.find(f => f.id === x.feedId);
     let fav = "";
     try { fav = new URL(srcFeed?.site || srcFeed?.url || x.url).origin + "/favicon.ico"; } catch {}
-    const thumb = state.settings.cardImage !== false && x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : "";
+    const thumb = feedCardImage(srcFeed) && x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : "";
     const rt = readingTimeText(x);
     const snoozeNote = state.view === "snoozed" && x.snoozedUntil ? ` · <span>Snoozed until ${esc(fmtDateTime(new Date(x.snoozedUntil)))}</span>` : "";
     return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}">${thumb}<div class="article-main"><h2>${esc(x.title)}</h2><div class="article-source">${fav ? `<img class="card-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span>${esc(feedTitle)}</span></div>${excerpt}<div class="article-bottom"><span>${showAuthor ? `${esc(x.author)} · ` : ""}<time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? ` · <span>${rt}</span>` : ""}${snoozeNote}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button>${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div></article>`;
@@ -2071,9 +2187,10 @@ function markdownToHTML(md) {
 }
 async function loadFullText(item) {
   const btn = $('[data-reader="fulltext"]');
-  // Loading is visible in the More menu: the item's label becomes
-  // "Loading…" while the fetch runs (#162, #12).
-  if (btn) { btn.disabled = true; btn.title = "Loading…"; btn.textContent = "Loading…"; }
+  // Loading is shown on the toolbar button itself: disabled with a
+  // "Loading…" tooltip. The button is icon-only (#197), so its content
+  // (the icon) is left alone.
+  if (btn) { btn.disabled = true; btn.title = "Loading full article…"; }
   try {
     // The site's own WordPress API first — but only for sites we know
     // are WordPress (their feed loaded via the WP API). Asking every
@@ -2096,10 +2213,10 @@ async function loadFullText(item) {
     // article if it is still the one on screen, or the completed load
     // would yank the reader back to a stale article.
     if (state.selected === item.id) openItem(item.id);
-    else if (btn) { btn.disabled = false; btn.title = "Load full article (w)"; btn.textContent = "Load full article"; }
+    else if (btn) { btn.disabled = false; btn.title = "Load full article (w)"; }
     toast("Full article loaded.");
   } catch (e) {
-    if (btn) { btn.disabled = false; btn.title = "Load full article (w)"; btn.textContent = "Load full article"; }
+    if (btn) { btn.disabled = false; btn.title = "Load full article (w)"; }
     toast("Full text unavailable — the publisher blocks direct access and the reader services could not fetch this page.");
   }
 }
@@ -2245,7 +2362,7 @@ function renderReader(x) {
   // tags or the input is open; the toolbar Tag button toggles it.
   const tagsRowHTML = ((x.tags || []).length || tagsOpen) ? `<div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<span id="tagInputWrap" ${tagsOpen ? "" : "hidden"}><input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></span></div>` : "";
   const hasNote = !!getArticleNote(x.id);
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions">${toolbarOrder().map(k => toolbarButtonHTML(k, x, {fullLabel, canListen, canFull, hasNote})).join("")}</div></div>${tagsRowHTML}${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${articleNoteHTML(x)}${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f ? feedDisplayTitle(f) : x.feedTitle)}</span><div class="reader-actions">${toolbarOrder().map(k => toolbarButtonHTML(k, x, {fullLabel, canListen, canFull, hasNote})).join("")}</div></div>${tagsRowHTML}${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${articleNoteHTML(x)}${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
   const tagAdd = $("#tagAddBtn");
   if (tagAdd) tagAdd.onclick = () => { const x = selectedItem(); const inp = $("#tagInput"); if (x && inp) addTagToItem(x, inp.value); };
   const bodyEl = $("#body");
@@ -2674,6 +2791,14 @@ function openItem(itemId) {
   if (ma) { ma.disabled = !row; ma.title = row ? "Marks every article above the open one read (Ctrl+M)" : "Open an article first — this acts on the articles around it."; }
   if (mb) { mb.disabled = !row; mb.title = row ? "Marks every article below the open one read (Shift+M)" : "Open an article first — this acts on the articles around it."; }
   renderReader(x);
+  // Auto full article (#183): this feed always loads the full article
+  // text when an article is opened, unless the feed already carries it
+  // or the full text is already fetched.
+  const feed = state.feeds.find(fe => fe.id === x.feedId);
+  if (feed?.autoFull) {
+    const { showingFull, alreadyFull } = fullTextState(x);
+    if (!showingFull && !alreadyFull && !x.fullContent) loadFullText(x);
+  }
 }
 function closeReader() {
   stopTTS();
@@ -3342,6 +3467,10 @@ function bind() {
       filterMenu.hidden = true;
       $("#filterMenuBtn")?.setAttribute("aria-expanded", "false");
     }
+    // The per-feed options menu (#183) closes on any click outside it
+    // or its button.
+    const feedMenu = $("#feedMenu");
+    if (feedMenu && !feedMenu.hidden && !e.target.closest("#feedMenu") && !e.target.closest("[data-feed-opts]")) closeFeedMenu();
     const scrim = e.target.closest("#scrim");
     if (scrim) { $("#sidebar").classList.remove("open"); scrim.classList.remove("show"); return; }
     const nav = e.target.closest("[data-view]");
@@ -3378,6 +3507,8 @@ function bind() {
     if (folderBtn) { goFolder(folderBtn.dataset.folder); $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show"); return; }
     const feedErr = e.target.closest("[data-feed-err]");
     if (feedErr) { showFeedError(feedErr.dataset.feedErr); return; }
+    const feedOpts = e.target.closest("[data-feed-opts]");
+    if (feedOpts) { openFeedMenu(feedOpts.dataset.feedOpts, feedOpts); return; }
     const feed = e.target.closest("[data-feed]");
     if (feed) {
       state.view = "feed"; state.feed = feed.dataset.feed; state.folder = null; state.tag = null; state.savedSearch = null; state.selected = null;
@@ -3576,6 +3707,36 @@ function bind() {
   $("#hlBtn").onclick = showHlDialog;
   $("#hlForm").onsubmit = e => { e.preventDefault(); saveHlFromDialog(); };
   $("#articleNoteForm").onsubmit = e => { e.preventDefault(); saveArticleNoteFromDialog(); };
+  $("#feedRenameForm").onsubmit = e => { e.preventDefault(); saveFeedRenameFromDialog(); };
+  $("#feedLayoutForm").onsubmit = e => { e.preventDefault(); saveFeedLayoutFromDialog(); };
+  $("#feedMenu")?.addEventListener("click", e => {
+    // Menu clicks are handled here only: if they bubbled to the
+    // document handler, the innerHTML replacement below would detach
+    // the clicked button and the outside-click check would close the
+    // menu after every toggle.
+    e.stopPropagation();
+    const b = e.target.closest("[data-feed-opt]");
+    if (!b || !feedMenuFeedId) return;
+    const f = state.feeds.find(fe => fe.id === feedMenuFeedId);
+    if (!f) { closeFeedMenu(); return; }
+    const opt = b.dataset.feedOpt;
+    if (opt === "rename") { closeFeedMenu(); showFeedRenameDialog(f); return; }
+    if (opt === "open") { closeFeedMenu(); window.open(f.site || f.url, "_blank", "noopener"); return; }
+    if (opt === "autofull") { f.autoFull = !f.autoFull; saveFeeds(); renderFeedMenu(); toast(`Auto full article ${f.autoFull ? "on" : "off"} for ${feedDisplayTitle(f)}.`); return; }
+    if (opt === "layout") { closeFeedMenu(); showFeedLayoutDialog(f); return; }
+    if (opt === "order") {
+      f.sort = nextFeedSort(f.sort);
+      saveFeeds(); renderFeedMenu(); renderSortBtn(); renderList();
+      toast(`Order for ${feedDisplayTitle(f)}: ${f.sort === "global" ? "use global" : f.sort}.`);
+      return;
+    }
+    if (opt === "unsub") {
+      const wasArmed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id;
+      requestUnsubscribe(f.id);
+      if (wasArmed) closeFeedMenu(); else renderFeedMenu();
+      return;
+    }
+  });
   $("#toolbarOrderList")?.addEventListener("click", e => {
     const b = e.target.closest("[data-tb-move]");
     if (!b || b.disabled) return;
@@ -3589,6 +3750,13 @@ function bind() {
   $("#hlDialog").addEventListener("click", e => {
     if (e.target.closest('button[value="cancel"]')) $("#hlDialog").close();
   });
+  // The same Cancel/X close for the note, rename, and layout dialogs
+  // (#197, #183): without it their Cancel buttons do nothing.
+  for (const d of ["#articleNoteDialog", "#feedRenameDialog", "#feedLayoutDialog"]) {
+    $(d)?.addEventListener("click", e => {
+      if (e.target.closest('button[value="cancel"]')) $(d).close();
+    });
+  }
   // The listening speed applies from the next spoken chunk and is
   // remembered with the other settings.
   document.addEventListener("change", e => {
@@ -3609,7 +3777,14 @@ function bind() {
   $("#search").oninput = e => { state.query = e.target.value.toLowerCase(); $("#searchClear").hidden = !e.target.value; clearTimeout(searchTimer); searchTimer = setTimeout(renderList, 150); };
   $("#searchClear").onclick = () => { $("#search").value = ""; state.query = ""; $("#searchClear").hidden = true; renderList(); $("#search").focus(); };
   $("#sort").onclick = () => {
-    state.sort = state.sort === "newest" ? "oldest" : "newest";
+    // The sort button toggles the sort for the view on screen (#183):
+    // a feed's own sort when viewing that feed, otherwise the global one.
+    const next = effectiveSort() === "newest" ? "oldest" : "newest";
+    if (state.feed) {
+      const f = state.feeds.find(fe => fe.id === state.feed);
+      if (f && f.sort && f.sort !== "global") { f.sort = next; saveFeeds(); renderSortBtn(); renderList(); return; }
+    }
+    state.sort = next;
     state.settings.sort = state.sort;
     local(S, state.settings);
     renderSortBtn();
@@ -3752,6 +3927,7 @@ function bind() {
       if (fm && !fm.hidden) { fm.hidden = true; $("#filterMenuBtn")?.setAttribute("aria-expanded", "false"); return; }
       const sm = $("#snoozeMenu");
       if (sm && !sm.hidden) { sm.hidden = true; return; }
+      if (feedMenuFeedId && !$("#feedMenu").hidden) { closeFeedMenu(); return; }
       closeReader();
       return;
     }
