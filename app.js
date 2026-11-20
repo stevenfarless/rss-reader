@@ -23,6 +23,9 @@ const JINA = "https://r.jina.ai/";
 const FETCH_TIMEOUT_MS = 15000;
 const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
+/* The version shown in Settings and in the update check (#144). Bump
+   it with every release, alongside package.json and the SW cache. */
+const APP_VERSION = "1.7.0";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -2740,6 +2743,12 @@ function showSettings() {
   $("#backgroundSyncToggle").checked = !!state.settings.backgroundSync;
   $("#notifyNewToggle").checked = !!state.settings.notifyNew;
   $("#proxyToggle").checked = !!state.settings.proxyFallback;
+  // App updates (#144): the running version, and the last check result
+  // (an update waiting shows here as well as in the banner).
+  const av = $("#appVersion");
+  if (av) av.textContent = "v" + APP_VERSION;
+  const st = $("#updateStatus");
+  if (st) st.textContent = updateBannerShown ? "A new version is available. Reload to update." : "";
   $("#settingsDialog").showModal();
 }
 function showHelp() { $("#helpDialog").showModal(); }
@@ -3170,6 +3179,7 @@ function bind() {
   };
   $("#exportSettings").onclick = exportSettings;
   $("#importSettings").onclick = () => $("#settingsFile").click();
+  $("#checkUpdates").onclick = checkForUpdates;
   $("#settingsFile").onchange = e => { if (e.target.files[0]) importSettings(e.target.files[0]); e.target.value = ""; };
   $("#menu").onclick = () => {
     const open = $("#sidebar").classList.toggle("open");
@@ -3267,6 +3277,90 @@ function bind() {
   };
 }
 
+/* ---------- app updates (#144) ----------
+   The service worker is the update mechanism: a new build ships a new
+   sw.js, the worker installs it and waits, and the page offers the
+   reload. The worker never activates on its own, so an update never
+   interrupts reading. Checks run on launch, every 30 minutes, and
+   whenever the tab becomes visible again, plus on demand from Settings. */
+let swReg = null, updateBannerShown = false, updateReloadPending = false;
+function showUpdateBanner() {
+  if (updateBannerShown) return;
+  updateBannerShown = true;
+  const b = $("#updateBanner");
+  if (b) b.hidden = false;
+  const st = $("#updateStatus");
+  if (st) st.textContent = "A new version is available. Reload to update.";
+}
+function hideUpdateBanner() {
+  updateBannerShown = false;
+  const b = $("#updateBanner");
+  if (b) b.hidden = true;
+}
+async function checkForUpdates() {
+  const st = $("#updateStatus");
+  if (st) st.textContent = "Checking for updates…";
+  if (!swReg) {
+    if (st) st.textContent = "Updates are not available in this browser.";
+    return;
+  }
+  try { await swReg.update(); } catch {
+    if (st) st.textContent = "Could not check for updates. Try again later.";
+    return;
+  }
+  // update() resolves when the check finishes, but a new worker may
+  // still be installing, so the updatefound handler reports the result
+  // when it lands. If nothing is waiting after a short pause, the app
+  // is current.
+  setTimeout(() => {
+    if (swReg.waiting) {
+      showUpdateBanner();
+      if (st) st.textContent = "A new version is available. Reload to update.";
+    } else if (st && !updateBannerShown) {
+      st.textContent = `You're up to date (v${APP_VERSION}).`;
+    }
+  }, 1500);
+}
+function initServiceWorker() {
+  navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" })
+    .then(reg => {
+      swReg = reg;
+      // A worker that finishes installing while this page is open
+      // means a new build is waiting.
+      reg.addEventListener("updatefound", () => {
+        const w = reg.installing;
+        if (!w) return;
+        w.addEventListener("statechange", () => {
+          if (w.state === "installed" && navigator.serviceWorker.controller) showUpdateBanner();
+        });
+      });
+      // A worker may already be waiting (installed while the page
+      // was closed); offer the update now.
+      if (reg.waiting && navigator.serviceWorker.controller) showUpdateBanner();
+      reg.update().catch(() => {});
+      setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) reg.update().catch(() => {});
+      });
+    })
+    .catch(() => {});
+  // The waiting worker takes over only when the user chooses Reload,
+  // so a reload here always lands on the new build.
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (updateReloadPending) { updateReloadPending = false; location.reload(); }
+  });
+  const reloadBtn = $("#updateReload");
+  if (reloadBtn) reloadBtn.onclick = () => {
+    updateReloadPending = true;
+    if (swReg?.waiting) swReg.waiting.postMessage({ type: "SKIP_WAITING" });
+    // Fallback: if the worker does not take over promptly, reload
+    // anyway rather than leaving the user stuck on the banner.
+    setTimeout(() => { if (updateReloadPending) location.reload(); }, 5000);
+  };
+  const dismissBtn = $("#updateDismiss");
+  if (dismissBtn) dismissBtn.onclick = hideUpdateBanner;
+}
+
 async function init() {
   loadLocal();
   // Open storage with one retry: a transient failure must not leave a
@@ -3303,7 +3397,7 @@ async function init() {
     }
   }
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    initServiceWorker();
   }
   // Re-register the periodic sync if it was on: a browser restart or
   // a service worker update can drop the registration.
