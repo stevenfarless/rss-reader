@@ -31,7 +31,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.11";
+const APP_VERSION = "1.8.12";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -1506,6 +1506,13 @@ function countableItems() {
   if (state.settings.hideDuplicates !== false) a = dedupeItems(a);
   return a;
 }
+/* Collapsed feed folders (#175), persisted in localStorage so the
+   sidebar keeps its shape across reloads. */
+const COLLAPSED_FOLDERS_KEY = "rss-reader.collapsed-folders.v1";
+let collapsedFolders = new Set();
+try { collapsedFolders = new Set(JSON.parse(localStorage.getItem(COLLAPSED_FOLDERS_KEY) || "[]")); } catch { collapsedFolders = new Set(); }
+function saveCollapsedFolders() { try { localStorage.setItem(COLLAPSED_FOLDERS_KEY, JSON.stringify([...collapsedFolders])); } catch {} }
+
 function renderNav() {
   const shown = countableItems();
   $("#allCount").textContent = shown.length;
@@ -1533,10 +1540,13 @@ function renderNav() {
     // A folder name is a button (#118): it opens the folder's feeds as
     // one merged list, with its unread count beside it.
     const folderUnread = g ? groups[g].reduce((n, f) => n + (unreadByFeed.get(f.id) || 0), 0) : 0;
-    const label = g ? `<div class="folder-head"><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${folderUnread}</span>` : ""}</button><span class="folder-actions"><button type="button" data-folder-rename="${esc(g)}" title="Rename folder" aria-label="Rename folder ${esc(g)}">✎</button><button type="button" data-folder-delete="${esc(g)}" title="Delete folder" aria-label="Delete folder ${esc(g)}">×</button></span></div>` : (groupNames.length > 1 ? `<div class="feed-group">Ungrouped</div>` : "");
-    return label + groups[g].map(f => {
+    // A folder's chevron collapses its feeds (#175); the name still
+    // opens the folder's merged list, as before.
+    const collapsed = g ? collapsedFolders.has(g) : false;
+    const label = g ? `<div class="folder-head"><button type="button" class="folder-toggle" data-folder-toggle="${esc(g)}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Collapse"} folder ${esc(g)}">${collapsed ? "▸" : "▾"}</button><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${folderUnread}</span>` : ""}</button><span class="folder-actions"><button type="button" data-folder-rename="${esc(g)}" title="Rename folder" aria-label="Rename folder ${esc(g)}">✎</button><button type="button" data-folder-delete="${esc(g)}" title="Delete folder" aria-label="Delete folder ${esc(g)}">×</button></span></div>` : (groupNames.length > 1 ? `<div class="feed-group">Ungrouped</div>` : "");
+    const rows = groups[g].map(f => {
       const unreadCount = unreadByFeed.get(f.id) || 0;
-      const err = f.error ? ` feed-error" title="${esc(f.error)}` : "";
+      const err = f.error ? " feed-error" : "";
       const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id;
       // The site's own favicon marks the row; if it fails to load the
       // dot comes back (the img hides itself and unhides the dot).
@@ -1547,8 +1557,9 @@ function renderNav() {
         : `<span class="feed-dot"></span>`;
       const countBtn = unreadCount ? `<button type="button" class="feed-count" data-mark-read="${esc(f.id)}" title="Mark ${esc(f.title)} read" aria-label="Mark ${esc(f.title)} read">${unreadCount}</button>` : "";
       const muteBtn = `<button type="button" class="feed-mute${f.muted ? " on" : ""}" data-mute="${esc(f.id)}" title="${f.muted ? "Unmute" : "Mute"} ${esc(f.title)}" aria-label="${f.muted ? "Unmute" : "Mute"} ${esc(f.title)}" aria-pressed="${!!f.muted}">${f.muted ? "Muted" : "Mute"}</button>`;
-      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(f.title)}">!</button>` : ""}${countBtn}${muteBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">${armed ? "Sure?" : "×"}</button></div>`;
+      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" title="${esc(f.title)}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(f.title)}">!</button>` : ""}${countBtn}${muteBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">${armed ? "Sure?" : "×"}</button></div>`;
     }).join("");
+    return label + (g ? `<div class="folder-feeds"${collapsed ? " hidden" : ""}>${rows}</div>` : rows);
   }).join("") : '<p class="muted">Your feeds will appear here.</p>';
   const tagCounts = {};
   for (const x of state.items) for (const t of x.tags || []) tagCounts[t] = (tagCounts[t] || 0) + 1;
@@ -1565,11 +1576,20 @@ function renderNav() {
     return `<button class="nav tag-row${active ? " active" : ""}" data-saved-search="${esc(s.id)}" ${active ? 'aria-current="true"' : ""}>${icon("search")} ${esc(s.name)}<span>${n}</span></button>`;
   }).join("") : '<p class="muted">Save a search to keep it here.</p>';
 }
+/* The sort control is a compact arrow in the list header (#175):
+   ↓ newest first, ↑ oldest first. */
+function renderSortBtn() {
+  const b = $("#sort");
+  if (!b) return;
+  b.textContent = state.sort === "newest" ? "↓" : "↑";
+  b.title = state.sort === "newest" ? "Newest first — click for oldest first" : "Oldest first — click for newest first";
+}
+
 /* The Highlights view (#116): every highlight, newest first, with the
    article it came from. Clicking one opens the article at the passage. */
 function renderHighlightsList() {
   const list = [...state.highlights].sort((a, b) => (b.created || 0) - (a.created || 0));
-  $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
+  renderSortBtn();
   $$(".filter").forEach(x => x.classList.toggle("active", x.dataset.filter === state.filter));
   const upd = state.lastRefresh ? " · Updated " + new Date(state.lastRefresh).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
   $("#subtitle").textContent = "Passages you highlighted, with your notes." + upd;
@@ -1593,8 +1613,11 @@ function renderList() {
   $("#mobileTitle").textContent = titles[state.view];
   // Keep the sort button and the filter pills in step with the
   // persisted sort/filter, so a reload restores them.
-  $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
+  renderSortBtn();
   $$(".filter").forEach(x => x.classList.toggle("active", x.dataset.filter === state.filter));
+  // The filter menu button shows the active filter (#175).
+  const fb = $("#filterMenuBtn");
+  if (fb) fb.textContent = ({ all: "All", today: "Today", week: "This week" }[state.filter] || "All") + " ▾";
   const base = state.view === "saved" ? "Articles you have kept for later."
     : state.view === "snoozed" ? "Articles waiting to come back."
     : state.view === "unread" ? "Stories you have not read yet."
@@ -2548,6 +2571,7 @@ function renameFolder(oldName, rawName) {
   if (!name || name === oldName) return;
   if (state.folders.some(f => f.toLowerCase() === name.toLowerCase())) return toast("That folder already exists.");
   state.folders = state.folders.map(f => f === oldName ? name : f);
+  if (collapsedFolders.has(oldName)) { collapsedFolders.delete(oldName); collapsedFolders.add(name); saveCollapsedFolders(); }
   for (const f of state.feeds) if (f.group === oldName) f.group = name;
   saveFolders();
   saveFeeds();
@@ -2566,6 +2590,7 @@ function deleteFolder(name) {
   pendingDelete = null;
   for (const f of state.feeds) if (f.group === name) f.group = "";
   state.folders = state.folders.filter(f => f !== name);
+  if (collapsedFolders.has(name)) { collapsedFolders.delete(name); saveCollapsedFolders(); }
   saveFeeds();
   saveFolders();
   renderOrganize();
@@ -3109,6 +3134,12 @@ function bind() {
       markMenu.hidden = true;
       $("#markReadMenuBtn")?.setAttribute("aria-expanded", "false");
     }
+    // The date filter menu (#175) closes the same way.
+    const filterMenu = $("#filterMenu");
+    if (filterMenu && !filterMenu.hidden && !e.target.closest("#filterMenu") && !e.target.closest("#filterMenuBtn")) {
+      filterMenu.hidden = true;
+      $("#filterMenuBtn")?.setAttribute("aria-expanded", "false");
+    }
     // The reader's More menu (#162) closes the same way.
     const moreMenu = $("#moreMenu");
     if (moreMenu && !moreMenu.hidden && !e.target.closest("#moreMenu") && !e.target.closest("#moreMenuBtn")) {
@@ -3123,6 +3154,14 @@ function bind() {
     if (tagBtn) { goTag(tagBtn.dataset.tag); $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show"); return; }
     const ssBtn = e.target.closest("[data-saved-search]");
     if (ssBtn) { goSavedSearch(ssBtn.dataset.savedSearch); $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show"); return; }
+    const folderToggle = e.target.closest("[data-folder-toggle]");
+    if (folderToggle) {
+      const name = folderToggle.dataset.folderToggle;
+      if (collapsedFolders.has(name)) collapsedFolders.delete(name); else collapsedFolders.add(name);
+      saveCollapsedFolders();
+      renderNav();
+      return;
+    }
     const folderRename = e.target.closest("[data-folder-rename]");
     if (folderRename) { orgEdit = { kind: "folder", old: folderRename.dataset.folderRename }; showOrganize(); return; }
     const folderDelete = e.target.closest("[data-folder-delete]");
@@ -3354,7 +3393,7 @@ function bind() {
     state.sort = state.sort === "newest" ? "oldest" : "newest";
     state.settings.sort = state.sort;
     local(S, state.settings);
-    $("#sort").textContent = state.sort === "newest" ? "Newest first ↓" : "Oldest first ↑";
+    renderSortBtn();
     renderList();
   };
   $$(".filter").forEach(b => b.onclick = () => {
@@ -3382,6 +3421,19 @@ function bind() {
       markBtn.setAttribute("aria-expanded", String(open));
     };
     markMenu.addEventListener("click", e => { if (e.target.closest("button")) closeMarkMenu(); });
+  }
+  // Date filter dropdown (#175): the same pattern as Mark read — the
+  // full-width filters bar is gone, so the filter lives up in the
+  // list header as one compact button.
+  const filterMenu = $("#filterMenu"), filterBtn = $("#filterMenuBtn");
+  if (filterBtn && filterMenu) {
+    filterBtn.onclick = e => {
+      e.stopPropagation();
+      const open = filterMenu.hidden;
+      filterMenu.hidden = !open;
+      filterBtn.setAttribute("aria-expanded", String(open));
+    };
+    filterMenu.addEventListener("click", e => { if (e.target.closest("button")) { filterMenu.hidden = true; filterBtn.setAttribute("aria-expanded", "false"); } });
   }
   $("#saveSearchBtn").onclick = showSaveSearch;
   $("#saveSearchDialog").addEventListener("click", e => {
@@ -3479,6 +3531,8 @@ function bind() {
       if (mm && !mm.hidden) { mm.hidden = true; $("#moreMenuBtn")?.setAttribute("aria-expanded", "false"); $("#moreMenuBtn")?.focus(); return; }
       const mr = $("#markReadMenu");
       if (mr && !mr.hidden) { closeMarkMenu(); return; }
+      const fm = $("#filterMenu");
+      if (fm && !fm.hidden) { fm.hidden = true; $("#filterMenuBtn")?.setAttribute("aria-expanded", "false"); return; }
       const sm = $("#snoozeMenu");
       if (sm && !sm.hidden) { sm.hidden = true; return; }
       closeReader();
