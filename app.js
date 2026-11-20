@@ -1101,13 +1101,11 @@ async function addFeed(raw) {
   const loaded = await loadFeedFromUrl(url);
   // The check above only sees the address typed in. The same feed can
   // be reached another way (the bare site vs its /feed, or a probed
-  // /rss), so check the resolved feed too: same feed URL, or the same
-  // site under the same title.
-  const originOf = s => { try { return new URL(s).origin; } catch { return ""; } };
-  const dup = state.feeds.find(f =>
-    sameFeedUrl(f.url, loaded.url) ||
-    (f.site && loaded.parsed.site && originOf(f.site) && originOf(f.site) === originOf(loaded.parsed.site) &&
-      (f.title || "").trim().toLowerCase() === (loaded.parsed.title || "").trim().toLowerCase()));
+  // /rss), so check the resolved feed URL too. Title + site is NOT
+  // checked: one publisher can run several feeds under one title
+  // (NASA titles both its main feed and its Image of the Day feed
+  // "NASA", #159), and a different address is a different feed.
+  const dup = state.feeds.find(f => sameFeedUrl(f.url, loaded.url));
   if (dup) throw Error(`You already subscribe to this feed (“${dup.title}”).`);
   const feed = {
     id: id(), url: loaded.url, title: loaded.parsed.title, site: loaded.parsed.site,
