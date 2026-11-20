@@ -31,7 +31,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.15";
+const APP_VERSION = "1.8.16";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -1540,6 +1540,19 @@ function renderNav() {
   const groups = {};
   for (const f of state.feeds) (groups[f.group || ""] ||= []).push(f);
   const groupNames = Object.keys(groups).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
+  // The collapse/expand-all toggle at the YOUR FEEDS heading (#187):
+  // hidden with no named folders; otherwise it offers the opposite of
+  // the current state (collapse all unless every folder is collapsed).
+  const allBtn = $("#toggleAllFolders");
+  if (allBtn) {
+    const named = groupNames.filter(g => g);
+    const allCollapsed = allFoldersCollapsed(named, collapsedFolders);
+    allBtn.hidden = named.length === 0;
+    allBtn.textContent = allCollapsed ? "▾▾" : "▴▴";
+    const label = allCollapsed ? "Expand all folders" : "Collapse all folders";
+    allBtn.setAttribute("aria-label", label);
+    allBtn.title = label;
+  }
   // Unread counts, aggregated in one pass over the articles instead of
   // a full scan per feed (and per folder) on every render.
   const unreadByFeed = new Map();
@@ -3273,6 +3286,16 @@ function bind() {
     if (folderToggle) {
       const name = folderToggle.dataset.folderToggle;
       if (collapsedFolders.has(name)) collapsedFolders.delete(name); else collapsedFolders.add(name);
+      saveCollapsedFolders();
+      renderNav();
+      return;
+    }
+    // Collapse/expand all folders from the YOUR FEEDS heading (#187).
+    const allFoldersBtn = e.target.closest("[data-toggle-all-folders]");
+    if (allFoldersBtn) {
+      const named = namedFolderNames(state.feeds);
+      if (allFoldersCollapsed(named, collapsedFolders)) named.forEach(g => collapsedFolders.delete(g));
+      else named.forEach(g => collapsedFolders.add(g));
       saveCollapsedFolders();
       renderNav();
       return;

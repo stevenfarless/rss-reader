@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList } = require("../utils.js");
+const { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed } = require("../utils.js");
 
 test("normalizeFeedUrl adds https to a bare address and upgrades http", () => {
   assert.equal(normalizeFeedUrl("example.com/feed"), "https://example.com/feed");
@@ -117,4 +117,17 @@ test("no duplicate top-level function declarations in the app source", () => {
       seen.add(name);
     }
   }
+});
+
+test("namedFolderNames returns sorted unique named folders, skipping ungrouped", () => {
+  assert.deepEqual(namedFolderNames([{ group: "Tech" }, { group: "" }, { group: "News" }, { group: "Tech" }, { group: null }, {}]), ["News", "Tech"]);
+  assert.deepEqual(namedFolderNames([{ group: "" }]), []);
+  assert.deepEqual(namedFolderNames([]), []);
+});
+
+test("allFoldersCollapsed is true only when every named folder is collapsed", () => {
+  assert.equal(allFoldersCollapsed(["News", "Tech"], new Set(["News", "Tech"])), true);
+  assert.equal(allFoldersCollapsed(["News", "Tech"], new Set(["News"])), false);
+  assert.equal(allFoldersCollapsed(["News"], new Set()), false);
+  assert.equal(allFoldersCollapsed([], new Set()), false);
 });
