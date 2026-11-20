@@ -31,7 +31,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.6";
+const APP_VERSION = "1.8.7";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -468,6 +468,71 @@ async function applyBackgroundSync(quiet) {
 }
 
 /* ---------- settings ---------- */
+/* Read the settings dialog's controls into a settings object. Shared by
+   Done and by live-apply (#162): changing a control applies at once, so
+   closing with × no longer silently discards the change. */
+function readSettingsFromDialog() {
+  return {
+    theme: $("#themeSelect").value, width: $("#widthSelect").value, size: $("#sizeSelect").value,
+    readerFont: $("#fontSelect").value, lineHeight: $("#lineHeightSelect").value,
+    ttsRate: state.settings.ttsRate || 1,
+    hideDuplicates: $("#hideDuplicatesToggle").checked,
+    proxyFallback: $("#proxyToggle").checked, progressPosition: $("#progressSelect").value,
+    cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
+    backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
+    sidebarCollapsed: state.settings.sidebarCollapsed || false,
+    sidebarWidth: state.settings.sidebarWidth, listWidth: state.settings.listWidth,
+    // Sort and filter are set elsewhere (the sort button, the filter
+    // pills) and must survive a settings save, or a trip through
+    // Settings silently resets them.
+    sort: state.settings.sort || "newest",
+    filter: state.settings.filter || "all"
+  };
+}
+function applySettingsFromDialog(runSync) {
+  state.settings = readSettingsFromDialog();
+  local(S, state.settings);
+  applySettings();
+  mirrorSync();
+  if (runSync) applyBackgroundSync();
+  // Card options apply to the list; the progress bar's place is set
+  // when an article opens, so re-render both at once.
+  renderList();
+  // The progress bar's place in the reader is set when an article opens;
+  // re-render the open article so a changed position applies at once,
+  // keeping the reader's scroll position (renderReader resets it).
+  if (state.selected) {
+    const x = selectedItem();
+    if (x) {
+      const sc = $("#reader").scrollTop;
+      renderReader(x);
+      $("#reader").scrollTop = sc;
+      updateReadProgress();
+    }
+  }
+}
+/* Background refresh and notifications cannot work everywhere (#162):
+   when the dialog opens, disable the toggles that cannot work here and
+   say why, instead of letting them be switched on to no effect. */
+async function refreshSyncCapability() {
+  const b = $("#backgroundSyncToggle"), n = $("#notifyNewToggle"), note = $("#syncNote");
+  const disable = msg => {
+    if (b) { b.disabled = true; b.checked = false; }
+    if (n) { n.disabled = true; n.checked = false; }
+    if (note) note.textContent = msg;
+  };
+  if (!("serviceWorker" in navigator)) { disable("Background refresh is not available in this browser."); return; }
+  let reg = null;
+  try { reg = await navigator.serviceWorker.ready; } catch {}
+  if (!reg || !("periodicSync" in reg)) { disable("Background refresh needs Chrome on Android with the app installed."); return; }
+  if (b) b.disabled = false;
+  if (n) {
+    const blocked = !("Notification" in window) || Notification.permission === "denied";
+    n.disabled = blocked;
+    if (blocked) n.checked = false;
+  }
+  if (note) note.textContent = n?.disabled ? "Notifications are blocked in this browser." : "";
+}
 function applySettings() {
   let t = state.settings.theme;
   if (t === "system") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
@@ -1384,7 +1449,7 @@ function visible() {
   let a = state.items.filter(x => {
     if (state.view === "snoozed") return isSnoozed(x);
     if (isSnoozed(x)) return false;
-    if (state.view === "unread") return !x.read;
+    if (state.view === "unread") return !x.read && !mutedIds.has(x.feedId);
     if (state.view === "saved") return x.saved;
     // The Highlights view (#116) lists the highlights themselves, not
     // articles, so renderList renders it separately; visible returns
@@ -1781,8 +1846,9 @@ function markdownToHTML(md) {
 }
 async function loadFullText(item) {
   const btn = $('[data-reader="fulltext"]');
-  // The button is an icon: change only its state and label, never its content.
-  if (btn) { btn.disabled = true; btn.title = "Loading…"; }
+  // Loading is visible in the More menu: the item's label becomes
+  // "Loading…" while the fetch runs (#162, #12).
+  if (btn) { btn.disabled = true; btn.title = "Loading…"; btn.textContent = "Loading…"; }
   try {
     // The site's own WordPress API first — but only for sites we know
     // are WordPress (their feed loaded via the WP API). Asking every
@@ -1805,10 +1871,10 @@ async function loadFullText(item) {
     // article if it is still the one on screen, or the completed load
     // would yank the reader back to a stale article.
     if (state.selected === item.id) openItem(item.id);
-    else if (btn) { btn.disabled = false; btn.title = "Load full article"; }
+    else if (btn) { btn.disabled = false; btn.title = "Load full article"; btn.textContent = "Load full article"; }
     toast("Full article loaded.");
   } catch (e) {
-    if (btn) { btn.disabled = false; btn.title = "Load full article"; }
+    if (btn) { btn.disabled = false; btn.title = "Load full article"; btn.textContent = "Load full article"; }
     toast(state.settings.proxyFallback
       ? "Full text unavailable — the publisher blocks direct access and the reader services could not fetch this page."
       : "Full text unavailable — showing the feed excerpt. Turn on the proxy fallback in Settings to try reader services.");
@@ -1912,9 +1978,18 @@ function renderReader(x) {
   const isAudio = !!x.enclosure?.type?.startsWith("audio/");
   const canListen = "speechSynthesis" in window;
   const audioHTML = isAudio ? `<div class="audio-player"><audio id="audioPlayer" controls preload="metadata" src="${esc(x.enclosure.url)}"></audio><div class="audio-controls"><label>Speed <select id="audioSpeed" aria-label="Playback speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><a href="${esc(x.enclosure.url)}" target="_blank" rel="noopener">Open audio ↗</a></div></div>` : "";
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "◉" : "○"}</button><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="false" ${canListen ? "" : "disabled"}>${icon("speak")}</button><button data-reader="share" title="Share article" aria-label="Share article">${icon("share")}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">${icon("clock")}</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${icon("doc")}</button><button data-reader="open" title="Open original (v)" aria-label="Open original">↗</button><button data-reader="close" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button></div></div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></div>${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" class="reader-btn" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}<span>${x.saved ? "Saved" : "Save"}</span></button><button data-reader="open" class="reader-btn" title="Open original (v)" aria-label="Open original">↗<span>Open original</span></button><div class="menu-wrap"><button id="moreMenuBtn" class="reader-btn" aria-haspopup="true" aria-expanded="false">···<span>More</span></button><div class="menu" id="moreMenu" hidden><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="${tts?.itemId === x.id}" ${canListen ? "" : "disabled"}>${tts?.itemId === x.id ? "Stop listening" : "Listen to article"}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">Snooze article</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}</button><button data-reader="share" title="Share article" aria-label="Share article">Share article</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "○ Mark unread" : "● Mark read"}</button></div></div><button data-reader="close" class="reader-btn" title="Close (u / Esc)" aria-label="Close article">${icon("close")}<span>Close</span></button></div></div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div><div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></div>${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
   const tagAdd = $("#tagAddBtn");
   if (tagAdd) tagAdd.onclick = () => { const x = selectedItem(); const inp = $("#tagInput"); if (x && inp) addTagToItem(x, inp.value); };
+  // The More menu is rebuilt with the reader, so its wiring lives here
+  // (#162): toggle on the button, close on an item or Escape, and the
+  // document handler below closes it on an outside click.
+  const moreBtn = $("#moreMenuBtn"), moreMenu = $("#moreMenu");
+  if (moreBtn && moreMenu) {
+    moreBtn.onclick = e => { e.stopPropagation(); const open = moreMenu.hidden; moreMenu.hidden = !open; moreBtn.setAttribute("aria-expanded", String(open)); };
+    moreMenu.addEventListener("click", e => { if (e.target.closest("button")) { moreMenu.hidden = true; moreBtn.setAttribute("aria-expanded", "false"); } });
+    moreMenu.addEventListener("keydown", e => { if (e.key === "Escape") { moreMenu.hidden = true; moreBtn.setAttribute("aria-expanded", "false"); moreBtn.focus(); } });
+  }
   const bodyEl = $("#body");
   // Append the cleaned body's children, not the <body> element itself.
   // cleanHTML drops the page chrome (header/nav/footer); the leading-nav
@@ -2859,6 +2934,7 @@ function showSettings() {
   if (av) av.textContent = "v" + APP_VERSION;
   const st = $("#updateStatus");
   if (st) st.textContent = updateBannerShown ? "A new version is available. Reload to update." : "";
+  refreshSyncCapability();
   $("#settingsDialog").showModal();
 }
 function showHelp() { $("#helpDialog").showModal(); }
@@ -2985,6 +3061,12 @@ function bind() {
     if (markMenu && !markMenu.hidden && !e.target.closest("#markReadMenu") && !e.target.closest("#markReadMenuBtn")) {
       markMenu.hidden = true;
       $("#markReadMenuBtn")?.setAttribute("aria-expanded", "false");
+    }
+    // The reader's More menu (#162) closes the same way.
+    const moreMenu = $("#moreMenu");
+    if (moreMenu && !moreMenu.hidden && !e.target.closest("#moreMenu") && !e.target.closest("#moreMenuBtn")) {
+      moreMenu.hidden = true;
+      $("#moreMenuBtn")?.setAttribute("aria-expanded", "false");
     }
     const scrim = e.target.closest("#scrim");
     if (scrim) { $("#sidebar").classList.remove("open"); scrim.classList.remove("show"); return; }
@@ -3299,43 +3381,14 @@ function bind() {
       if (!/already subscribe/i.test(err.message || "")) searchFeeds(q);
     } finally { b.disabled = false; }
   };
-  $("#saveSettings").onclick = () => {
-    state.settings = {
-      theme: $("#themeSelect").value, width: $("#widthSelect").value, size: $("#sizeSelect").value,
-      readerFont: $("#fontSelect").value, lineHeight: $("#lineHeightSelect").value,
-      ttsRate: state.settings.ttsRate || 1,
-      hideDuplicates: $("#hideDuplicatesToggle").checked,
-      proxyFallback: $("#proxyToggle").checked, progressPosition: $("#progressSelect").value,
-      cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
-      backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
-      sidebarCollapsed: state.settings.sidebarCollapsed || false,
-      sidebarWidth: state.settings.sidebarWidth, listWidth: state.settings.listWidth,
-      // Sort and filter are set elsewhere (the sort button, the filter
-      // pills) and must survive a settings save, or a trip through
-      // Settings silently resets them.
-      sort: state.settings.sort || "newest",
-      filter: state.settings.filter || "all"
-    };
-    local(S, state.settings);
-    applySettings();
-    mirrorSync();
-    applyBackgroundSync();
-    // Card options apply to the list; the progress bar's place is set
-    // when an article opens, so re-render both at once.
-    renderList();
-    // The progress bar's place in the reader is set when an article opens;
-    // re-render the open article so a changed position applies at once,
-    // keeping the reader's scroll position (renderReader resets it).
-    if (state.selected) {
-      const x = selectedItem();
-      if (x) {
-        const sc = $("#reader").scrollTop;
-        renderReader(x);
-        $("#reader").scrollTop = sc;
-        updateReadProgress();
-      }
-    }
-  };
+  $("#saveSettings").onclick = () => applySettingsFromDialog(true);
+  // Settings apply live (#162): a change to any control saves and applies
+  // at once, so closing with × keeps the change. The background-sync
+  // registration only runs when its own toggles change.
+  $("#settingsDialog").addEventListener("change", e => {
+    if (e.target.type === "file") return;
+    applySettingsFromDialog(e.target.id === "backgroundSyncToggle" || e.target.id === "notifyNewToggle");
+  });
   $("#exportSettings").onclick = exportSettings;
   $("#importSettings").onclick = () => $("#settingsFile").click();
   $("#checkUpdates").onclick = checkForUpdates;
