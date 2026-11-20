@@ -19,7 +19,7 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Full-article view: "Load full article" extracts the article text from the original page with Mozilla Readability (the library behind Firefox Reader View), with a hand-rolled fallback
 - Listen to an article in the reader (text-to-speech, with pause/resume, stop, and speed)
 - Estimated reading time on cards and in the reader
-- Reader font (serif/sans-serif) and line height (compact/comfortable/roomy) in Settings
+- Reader font (serif, sans-serif, Nunito, Ubuntu) and line height (compact/comfortable/roomy) in Settings
 - Share an article: the system share sheet, or a copy-link fallback where the sheet is unavailable
 - Mark articles above or below the selected one read (buttons in the list heading, Ctrl+M / Shift+M)
 - Snooze an article (later today, tomorrow, next week) with a Snoozed view and unsnooze
@@ -72,7 +72,12 @@ Subscriptions and preferences belong to the current browser profile and site ori
 
 ## Fonts
 
-Gentium Book Plus is bundled locally in `fonts/`. All four WOFF2 styles are served by this repository, with no font CDN or cross-repository dependency.
+All fonts are bundled locally in `fonts/` and served by this repository, with no font CDN or cross-repository dependency:
+
+- Gentium Book Plus (serif, the reader default): Regular, Bold, Italic, BoldItalic.
+- Inter (sans, the UI font and the Sans-serif reader option): variable Regular and Italic, weight 100-900. License: `fonts/inter-font-license.txt` (OFL 1.1).
+- Nunito (reader option): variable Regular and Italic, weight 200-1000, latin subset. License: `fonts/nunito-font-license.txt` (OFL 1.1).
+- Ubuntu (reader option): Regular, Bold, Italic, BoldItalic, latin subset. License: `fonts/ubuntu-font-license.txt` (Ubuntu Font Licence 1.0).
 
 ## License
 
