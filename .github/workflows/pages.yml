@@ -31,17 +31,29 @@ jobs:
           node --check app.js
           node --check sw.js
           node --check markdown.js
+          node --check utils.js
       - name: Run tests
         run: npm test
       - name: Configure Pages
         uses: actions/configure-pages@v5
       # Only the site files ship: tests, package.json, and the workflow
-      # definitions are not part of the public site.
+      # definitions are not part of the public site. Every script the
+      # page loads must be listed here, or the live site 404s on it.
       - name: Stage site files
         run: |
           mkdir -p dist
-          cp index.html app.js styles.css sw.js manifest.webmanifest markdown.js purify.min.js .nojekyll dist/
+          cp index.html app.js styles.css sw.js manifest.webmanifest markdown.js purify.min.js utils.js .nojekyll dist/
           cp -r assets fonts licenses dist/
+      # Guard against a missing staged file: every local script and
+      # stylesheet index.html loads must exist in dist/, or the build
+      # fails here instead of shipping a broken site.
+      - name: Verify staged files
+        run: |
+          for f in $(grep -oE '(src|href)="[^"]+"' index.html | cut -d'"' -f2 | grep -v '^#' | grep -v '^https\?://'); do
+            f="${f#./}"
+            if [ ! -e "dist/$f" ]; then echo "MISSING from dist: $f"; exit 1; fi
+          done
+          echo "All referenced files are staged."
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
