@@ -68,7 +68,7 @@ body.dragging-splitter,body.dragging-splitter *{user-select:none!important;-webk
 .splitter:hover::after,.splitter.dragging::after,.splitter:focus-visible::after{background:var(--accent);width:3px;left:3px}
 body.sidebar-collapsed #splitSide{display:none}
 /* List actions (#91): Refresh sits with Mark visible read in the list heading. */
-.list-actions{display:flex;gap:6px;align-items:center;flex:none;flex-wrap:wrap}
+.list-actions{display:flex;gap:6px;align-items:center;flex:none;flex-wrap:wrap;max-width:100%}
 /* Snooze menu (#113): choices under the reader top bar. */
 .snooze-menu{display:flex;flex-direction:column;gap:2px;margin:12px 0 0;padding:6px;background:var(--panel2);border:1px solid var(--line);border-radius:6px}
 .snooze-menu[hidden]{display:none}
