@@ -869,21 +869,36 @@ async function loadFeedFromUrl(rawUrl) {
       if (a.status === "fulfilled") return a.value;
     }
   }
-  try {
-    const parsed = await loadWordPressFeed(origin);
-    // The feed URL is the site's canonical /feed/, not the typed
-    // address: the API returns the same main-posts feed, and using
-    // /feed/ lets the duplicate check catch an already-subscribed
-    // main feed added by its feed URL (#160). Refresh loads through
-    // wpRoot, not this URL.
-    if (parsed.items.length) return { parsed, via: "wp", url: origin + "/feed/", wpRoot: origin };
-  } catch {}
-  if (state.settings.proxyFallback) {
+  // Fallbacks, in an order that never substitutes a different feed
+  // for the one asked for. WordPress always returns the site's main
+  // posts feed, and the proxy fetches the exact address typed.
+  // A specific feed address names one feed, so the exact fetch goes
+  // first there (#163): with WordPress first, a slow or blocked
+  // Image of the Day feed was replaced by the main feed and then
+  // refused as its duplicate. For a bare site the main feed IS the
+  // answer, so WordPress goes first there.
+  const tryWP = async () => {
+    try {
+      const parsed = await loadWordPressFeed(origin);
+      // The feed URL is the site's canonical /feed/, not the typed
+      // address: the API returns the same main-posts feed, and using
+      // /feed/ lets the duplicate check catch an already-subscribed
+      // main feed added by its feed URL (#160). Refresh loads through
+      // wpRoot, not this URL.
+      if (parsed.items.length) return { parsed, via: "wp", url: origin + "/feed/", wpRoot: origin };
+    } catch {}
+    return null;
+  };
+  const tryProxy = async () => {
+    if (!state.settings.proxyFallback) return null;
     try {
       const parsed = await loadViaProxy(url);
       return { parsed, via: "proxy", url, wpRoot: "" };
     } catch {}
-  }
+    return null;
+  };
+  const loaded = (!bare && !noLink ? (await tryProxy()) || (await tryWP()) : (await tryWP()) || (await tryProxy()));
+  if (loaded) return loaded;
   throw directError || Error("Could not load this feed.");
 }
 
