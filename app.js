@@ -3493,7 +3493,7 @@ function bind() {
       return;
     }
     if (e.key === "s" && sel) { sel.saved = !sel.saved; put(sel); render(); openItem(sel.id); return; }
-    if (e.key === "t" && sel) {
+    if (e.key.toLowerCase() === "t" && sel) {
       e.preventDefault(); // otherwise the "t" is typed into the input
       if (tagsExpandedId !== sel.id) { tagsExpandedId = sel.id; renderReader(sel); }
       const inp = $("#tagInput");
