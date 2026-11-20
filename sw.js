@@ -1,18 +1,24 @@
-const CACHE = "rss-reader-shell-v33";
+const CACHE = "rss-reader-shell-v34";
 const RUNTIME_CACHE = "rss-reader-runtime-v7";
 const RUNTIME_MAX = 50;
 const FILES = ["./", "./index.html", "./styles.css", "./markdown.js", "./purify.min.js", "./utils.js", "./app.js", "./manifest.webmanifest", "./assets/icon.svg", "./assets/icon-192.png", "./assets/icon-512.png", "./assets/icon-maskable-512.png", "./assets/apple-touch-icon.png", "./fonts/GentiumBookPlus-Regular.woff2", "./fonts/GentiumBookPlus-Bold.woff2", "./fonts/GentiumBookPlus-Italic.woff2", "./fonts/GentiumBookPlus-BoldItalic.woff2"];
 /* Install is per-file, not all-or-nothing: one missing file (a font,
    an icon) must not reject the whole install and leave the worker
    unregistered, with no offline and no background sync. A failed file
-   is skipped; the shell is network-first, so it is fetched on demand. */
+   is skipped; the shell is network-first, so it is fetched on demand.
+   The worker does NOT skip waiting here: a new build waits until the
+   user chooses Reload (#144), so an update never interrupts reading. */
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(async c => {
     await Promise.all(FILES.map(async f => {
       try { await c.add(f); } catch {}
     }));
-    await self.skipWaiting();
   }));
+});
+/* The page asks a waiting worker to take over only when the user
+   chooses Reload in the update banner (#144). */
+self.addEventListener("message", e => {
+  if (e.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 self.addEventListener("activate", e => {
   e.waitUntil(
