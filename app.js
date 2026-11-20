@@ -1107,10 +1107,18 @@ async function addFeed(raw) {
   // The check above only sees the address typed in. The same feed can
   // be reached another way (the bare site vs its /feed, or a probed
   // /rss), so check the resolved feed URL too. Title + site is NOT
-  // checked: one publisher can run several feeds under one title
-  // (NASA titles both its main feed and its Image of the Day feed
-  // "NASA", #159), and a different address is a different feed.
-  const dup = state.feeds.find(f => sameFeedUrl(f.url, loaded.url));
+  // checked on the feed path: one publisher can run several feeds
+  // under one title (NASA titles both its main feed and its Image of
+  // the Day feed "NASA", #159), and a different address is a different
+  // feed. The WordPress path is the exception (#160): the API only
+  // ever serves the site's main posts feed, so the same WordPress
+  // root + the same title is the same feed, whichever load path
+  // produced it (direct fetch, probe, or API fallback).
+  const originKey = s => { try { const u = new URL(s); return u.hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; } };
+  const dup = state.feeds.find(f =>
+    sameFeedUrl(f.url, loaded.url) ||
+    (loaded.via === "wp" && loaded.wpRoot && originKey(f.wpRoot || f.site) === originKey(loaded.wpRoot) &&
+      (f.title || "").trim().toLowerCase() === (loaded.parsed.title || "").trim().toLowerCase()));
   if (dup) throw Error(`You already subscribe to this feed (“${dup.title}”).`);
   const feed = {
     id: id(), url: loaded.url, title: loaded.parsed.title, site: loaded.parsed.site,
