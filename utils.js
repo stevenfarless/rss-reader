@@ -114,6 +114,15 @@ function moveFeedInList(feeds, draggedId, target) {
   }
   return feed;
 }
+
+/* Whether the article author is already shown as the feed title, so
+   the card should not repeat it in the bottom row. */
+function authorIsFeedTitle(author, feedTitle) {
+  const a = (author || "").trim().toLowerCase();
+  const t = (feedTitle || "").trim().toLowerCase();
+  return !!a && a === t;
+}
+
 /* The named folders a set of feeds belongs to, sorted; ungrouped ("")
    is not a folder and is left out. */
 function namedFolderNames(feeds) {
@@ -126,5 +135,5 @@ function allFoldersCollapsed(names, collapsed) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed };
+  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle };
 }
