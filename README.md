@@ -16,7 +16,7 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Rules: automatically tag, save, or mark read new articles that match (feed/folder scope, title keyword, author). Rules run on new arrivals at refresh and never delete anything; manage them in Settings with an on/off toggle per rule
 - Highlights and notes: select text in the reader to save a highlight with an optional note; passages are marked back into the article when it opens, listed under the article and in a Highlights view, with edit-note, show-in-article, and delete
 - Markdown article rendering for plain-text RSS, Atom, and JSON Feed content, including headings, links, lists, tables, and code blocks
-- Full-article view: "Load full article" extracts the article text from the original page
+- Full-article view: "Load full article" extracts the article text from the original page with Mozilla Readability (the library behind Firefox Reader View), with a hand-rolled fallback
 - Listen to an article in the reader (text-to-speech, with pause/resume, stop, and speed)
 - Estimated reading time on cards and in the reader
 - Reader font (serif/sans-serif) and line height (compact/comfortable/roomy) in Settings
@@ -54,7 +54,7 @@ Browsers enforce cross-origin resource sharing (CORS). This reader loads feeds e
 
 Feeds that block cross-origin requests and offer none of the above still cannot load from a browser page; that is a browser security rule, not a bug in this reader.
 
-"Load full article" fetches the article the same way: directly, then the site's own WordPress API looked up by the article's slug (no third party involved), then — with the proxy fallback on — public reader services (a Markdown reader, then a generic proxy). Those services are free and rate-limited, and some publishers block them, so full text is not guaranteed for every site.
+"Load full article" fetches the article the same way: directly, then the site's own WordPress API looked up by the article's slug (no third party involved), then — with the proxy fallback on — public reader services (a Markdown reader, then a generic proxy). The fetched page is reduced to the article itself with Mozilla Readability (the library behind Firefox Reader View), falling back to a hand-rolled extractor when Readability returns nothing. Those services are free and rate-limited, and some publishers block them, so full text is not guaranteed for every site.
 
 ## Feed discovery
 
@@ -67,6 +67,7 @@ Subscriptions and preferences belong to the current browser profile and site ori
 ## Bundled libraries
 
 - [DOMPurify](https://github.com/cure53/DOMPurify) 3.4.18 sanitizes converted feed content before it enters the page. Its license is included in `licenses/DOMPurify-LICENSE.txt`.
+- [Mozilla Readability](https://github.com/mozilla/readability) 0.6.0 extracts the article body from a fetched page for "Load full article". Its license is included in `licenses/Readability-LICENSE.txt`.
 - `markdown.js` is a small local Markdown renderer maintained in this repository.
 
 ## Fonts
