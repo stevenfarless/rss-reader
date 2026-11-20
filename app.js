@@ -31,7 +31,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.14";
+const APP_VERSION = "1.8.15";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -1551,7 +1551,7 @@ function renderNav() {
     // A folder's chevron collapses its feeds (#175); the name still
     // opens the folder's merged list, as before.
     const collapsed = g ? collapsedFolders.has(g) : false;
-    const label = g ? `<div class="folder-head"><button type="button" class="folder-toggle" data-folder-toggle="${esc(g)}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Collapse"} folder ${esc(g)}">${collapsed ? "▸" : "▾"}</button><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${fmtCount(folderUnread)}</span>` : ""}</button></div>` : (groupNames.length > 1 ? `<div class="feed-group">Ungrouped</div>` : "");
+    const label = g ? `<div class="folder-head" data-drop-folder="${esc(g)}"><button type="button" class="folder-toggle" data-folder-toggle="${esc(g)}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Collapse"} folder ${esc(g)}">${collapsed ? "▸" : "▾"}</button><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${fmtCount(folderUnread)}</span>` : ""}</button></div>` : (groupNames.length > 1 ? `<div class="feed-group" data-drop-folder="">Ungrouped</div>` : "");
     const rows = groups[g].map(f => {
       const unreadCount = unreadByFeed.get(f.id) || 0;
       const err = f.error ? " feed-error" : "";
@@ -1565,9 +1565,9 @@ function renderNav() {
         : `<span class="feed-dot"></span>`;
       const countBtn = unreadCount ? `<button type="button" class="feed-count" data-mark-read="${esc(f.id)}" title="Mark ${esc(f.title)} read" aria-label="Mark ${esc(f.title)} read">${fmtCount(unreadCount)}</button>` : "";
       const muteBtn = `<button type="button" class="feed-mute${f.muted ? " on" : ""}" data-mute="${esc(f.id)}" title="${f.muted ? "Unmute" : "Mute"} ${esc(f.title)}" aria-label="${f.muted ? "Unmute" : "Mute"} ${esc(f.title)}" aria-pressed="${!!f.muted}">${f.muted ? "Muted" : "Mute"}</button>`;
-      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" title="${esc(f.title)}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(f.title)}">!</button>` : ""}${countBtn}${muteBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">${armed ? "Sure?" : "×"}</button></div>`;
+      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" draggable="true" title="${esc(f.title)}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(f.title)}">!</button>` : ""}${countBtn}${muteBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">${armed ? "Sure?" : "×"}</button></div>`;
     }).join("");
-    return label + (g ? `<div class="folder-feeds"${collapsed ? " hidden" : ""}>${rows}</div>` : rows);
+    return label + (g ? `<div class="folder-feeds" data-drop-folder="${esc(g)}"${collapsed ? " hidden" : ""}>${rows}</div>` : rows);
   }).join("") : '<p class="muted">Your feeds will appear here.</p>';
   const tagCounts = {};
   for (const x of state.items) for (const t of x.tags || []) tagCounts[t] = (tagCounts[t] || 0) + 1;
@@ -1589,6 +1589,79 @@ function renderNav() {
   }).join("") : "";
   $("#savedSearchesHead").hidden = !state.savedSearches.length;
   $("#savedSearches").hidden = !state.savedSearches.length;
+}
+/* Sidebar drag and drop (#182): reorder feeds and move them between
+   folders. The feed rows are draggable; dropping on a row reorders
+   (joining that row's folder), dropping on a folder head or container
+   moves the feed to the end of that folder, and dropping on Ungrouped
+   moves it out. Delegated on #feeds, which outlives renderNav's
+   innerHTML. The Folders & tags dialog's per-feed folder select stays
+   as the touch and keyboard path: HTML5 drag does not work on touch. */
+let draggedFeedId = null, dropTarget = null;
+function clearDropIndicators() {
+  $$("#feeds .drop-before, #feeds .drop-after, #feeds .drop-target").forEach(el => el.classList.remove("drop-before", "drop-after", "drop-target"));
+  dropTarget = null;
+}
+function setupFeedDrag() {
+  const nav = $("#feeds");
+  nav.addEventListener("dragstart", e => {
+    const row = e.target.closest(".feed-row");
+    if (!row) return;
+    draggedFeedId = row.dataset.feed;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", draggedFeedId);
+    row.closest(".feed-row-wrap")?.classList.add("dragging");
+  });
+  nav.addEventListener("dragover", e => {
+    if (!draggedFeedId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    clearDropIndicators();
+    const wrap = e.target.closest(".feed-row-wrap");
+    if (wrap) {
+      const row = wrap.querySelector(".feed-row");
+      if (row && row.dataset.feed !== draggedFeedId) {
+        const r = wrap.getBoundingClientRect();
+        const before = e.clientY < r.top + r.height / 2;
+        wrap.classList.add(before ? "drop-before" : "drop-after");
+        dropTarget = { kind: "row", feedId: row.dataset.feed, before };
+      }
+      return;
+    }
+    const folder = e.target.closest("[data-drop-folder]");
+    if (folder) {
+      folder.classList.add("drop-target");
+      dropTarget = { kind: "folder", group: folder.dataset.dropFolder || "" };
+    }
+  });
+  nav.addEventListener("dragleave", e => {
+    if (!nav.contains(e.relatedTarget)) clearDropIndicators();
+  });
+  nav.addEventListener("drop", e => {
+    if (!draggedFeedId) return;
+    e.preventDefault();
+    const target = dropTarget;
+    clearDropIndicators();
+    if (target) moveFeed(draggedFeedId, target);
+  });
+  nav.addEventListener("dragend", () => {
+    draggedFeedId = null;
+    clearDropIndicators();
+    $$("#feeds .dragging").forEach(el => el.classList.remove("dragging"));
+  });
+}
+function moveFeed(draggedId, target) {
+  const feed = moveFeedInList(state.feeds, draggedId, target);
+  if (!feed) return;
+  // Dropping on a collapsed folder expands it, so the feed is visible
+  // where it landed.
+  if (target.kind === "folder" && target.group && collapsedFolders.has(target.group)) {
+    collapsedFolders.delete(target.group);
+    saveCollapsedFolders();
+  }
+  saveFeeds();
+  renderNav();
+  toast(`Moved “${feed.title}”${feed.group ? ` to ${feed.group}` : " out of its folder"}.`);
 }
 /* The sort control is a compact arrow in the list header (#175):
    ↓ newest first, ↑ oldest first. */
@@ -3610,6 +3683,8 @@ function bind() {
     }
     if (e.key.toLowerCase() === "w" && sel) { toggleFullText(sel); return; }
   };
+  // Sidebar drag and drop (#182).
+  setupFeedDrag();
 }
 
 /* ---------- app updates (#144) ----------
