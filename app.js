@@ -31,7 +31,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.20";
+const APP_VERSION = "1.8.21";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -62,6 +62,63 @@ const decodeHtml = s => {
 const plainText = s => decodeHtml(stripTags(s));
 /* Inline SVG icons from the <symbol> sprite in index.html. */
 const icon = (name, cls) => `<svg class="ic${cls ? " " + cls : ""}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+/* Reader toolbar (#197): icon-only buttons, in an order the user can
+   rearrange in Settings (stored in settings.toolbarOrder). */
+const TOOLBAR_KEYS = ["back", "save", "tags", "read", "fulltext", "listen", "note", "share", "snooze", "open", "close"];
+const TOOLBAR_DEFAULT = [...TOOLBAR_KEYS];
+const TOOLBAR_LABELS = { back: "Back", save: "Save", tags: "Add tags", read: "Mark read", fulltext: "Full article", listen: "Listen", note: "Add note", share: "Share", snooze: "Snooze", open: "Open original", close: "Close" };
+function toolbarOrder() {
+  return normalizeToolbarOrder(state.settings.toolbarOrder, TOOLBAR_KEYS, TOOLBAR_DEFAULT);
+}
+function toolbarButtonHTML(key, x, ctx) {
+  const { fullLabel, canListen, canFull, hasNote } = ctx;
+  switch (key) {
+    case "back": return `<button data-reader="back" class="reader-btn reader-back" title="Back to list" aria-label="Back to list">‹</button>`;
+    case "save": return `<button data-reader="save" class="reader-btn" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button>`;
+    case "tags": return `<button data-reader="tags" class="reader-btn" title="Add tags (T)" aria-label="Add tags" aria-expanded="${tagsExpandedId === x.id}">${icon("tag")}</button>`;
+    case "read": return `<button data-reader="read" class="reader-btn" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "○" : "●"}</button>`;
+    case "fulltext": return `<button data-reader="fulltext" class="reader-btn" title="${fullLabel}${canFull ? " (w)" : ""}" aria-label="${fullLabel}" ${canFull ? "" : "disabled"}>${icon("expand")}</button>`;
+    case "listen": return `<button data-reader="listen" class="reader-btn" title="${tts?.itemId === x.id ? "Stop listening" : canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="${tts?.itemId === x.id}" ${canListen ? "" : "disabled"}>${icon("speak")}</button>`;
+    case "note": return `<button data-reader="note" class="reader-btn${hasNote ? " on" : ""}" title="Add note" aria-label="Add note" aria-pressed="${hasNote}">${icon("note")}</button>`;
+    case "share": return `<button data-reader="share" class="reader-btn" title="Share article" aria-label="Share article">${icon("share")}</button>`;
+    case "snooze": return `<button data-reader="snooze" class="reader-btn" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">${icon("clock")}</button>`;
+    case "open": return `<button data-reader="open" class="reader-btn" title="Open original (v)" aria-label="Open original">↗</button>`;
+    case "close": return `<button data-reader="close" class="reader-btn" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button>`;
+    default: return "";
+  }
+}
+/* Article notes (#197): a freeform note attached to one article, kept
+   in localStorage (not the feed item, which refreshes overwrite). */
+const NK = "rss-reader.notes.v1";
+let articleNotes = {};
+try { articleNotes = JSON.parse(localStorage.getItem(NK) || "{}"); if (!articleNotes || typeof articleNotes !== "object") articleNotes = {}; } catch { articleNotes = {}; }
+function getArticleNote(id) { return articleNotes[id] || ""; }
+function setArticleNote(id, text) {
+  if (text && text.trim()) articleNotes[id] = text.trim(); else delete articleNotes[id];
+  try { localStorage.setItem(NK, JSON.stringify(articleNotes)); } catch {}
+}
+function articleNoteHTML(x) {
+  const note = getArticleNote(x.id);
+  if (!note) return "";
+  return `<div class="article-note"><strong>Note</strong><p>${esc(note)}</p><div class="hl-actions"><button type="button" class="quiet" data-note-edit="${esc(x.id)}">Edit note</button><button type="button" class="quiet" data-note-delete="${esc(x.id)}">Delete</button></div></div>`;
+}
+let noteArticleId = null;
+function showArticleNoteDialog(x) {
+  noteArticleId = x.id;
+  const ta = $("#articleNoteText");
+  if (ta) ta.value = getArticleNote(x.id);
+  $("#articleNoteDialog").showModal();
+  if (ta) ta.focus();
+}
+function saveArticleNoteFromDialog() {
+  if (!noteArticleId) return;
+  setArticleNote(noteArticleId, $("#articleNoteText")?.value || "");
+  $("#articleNoteDialog").close();
+  const x = selectedItem();
+  if (x && x.id === noteArticleId) renderReader(x);
+  noteArticleId = null;
+  toast("Note saved.");
+}
 /* Relative dates for list cards ("5m ago", "Yesterday"), with the full
    date kept in the title attribute. */
 const relDate = d => {
@@ -282,6 +339,11 @@ function validateSettings(d) {
   if (typeof d.listWidth === "number" && d.listWidth >= 320 && d.listWidth <= 640) next.listWidth = d.listWidth;
   if (d.sort === "newest" || d.sort === "oldest") next.sort = d.sort;
   if (["all", "today", "week"].includes(d.filter)) next.filter = d.filter;
+  if (Array.isArray(d.toolbarOrder)) {
+    const clean = d.toolbarOrder.filter(k => TOOLBAR_KEYS.includes(k));
+    const missing = TOOLBAR_KEYS.filter(k => !clean.includes(k));
+    if (clean.length) next.toolbarOrder = [...clean, ...missing];
+  }
   return next;
 }
 function loadLocal() {
@@ -495,7 +557,11 @@ function readSettingsFromDialog() {
     // pills) and must survive a settings save, or a trip through
     // Settings silently resets them.
     sort: state.settings.sort || "newest",
-    filter: state.settings.filter || "all"
+    filter: state.settings.filter || "all",
+    // The toolbar order comes from the reorder list in the dialog; if
+    // the list is not populated (dialog never opened), keep the stored
+    // order instead of wiping it.
+    toolbarOrder: toolbarOrderFromDialog() || state.settings.toolbarOrder || [...TOOLBAR_DEFAULT]
   };
 }
 function applySettingsFromDialog(runSync) {
@@ -2174,28 +2240,14 @@ function renderReader(x) {
   // collapses it again.
   const tagsOpen = tagsExpandedId === x.id;
   const fullLabel = showingFull ? "Show feed excerpt" : x.fullContent ? "Show full article" : alreadyFull ? "Full article included in feed" : "Load full article";
-  const tagsRowHTML = `<div class="tags-row" id="tagsRow"><button type="button" class="quiet" id="tagToggleBtn" aria-expanded="${tagsOpen}" aria-label="Tag article">${icon("tag")}<span>Tag</span></button>${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<span id="tagInputWrap" ${tagsOpen ? "" : "hidden"}><input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></span></div>`;
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="back" class="reader-btn reader-back" title="Back to list" aria-label="Back to list">‹<span>Back</span></button><button data-reader="save" class="reader-btn" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}<span>${x.saved ? "Saved" : "Save"}</span></button><button data-reader="open" class="reader-btn" title="Open original (v)" aria-label="Open original">↗<span>Open original</span></button><div class="menu-wrap"><button id="moreMenuBtn" class="reader-btn" aria-haspopup="true" aria-expanded="false">···<span>More</span></button><div class="menu" id="moreMenu" hidden><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="${tts?.itemId === x.id}" ${canListen ? "" : "disabled"}>${tts?.itemId === x.id ? "Stop listening" : "Listen to article"}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">Snooze article</button><button data-reader="fulltext" title="${fullLabel}${alreadyFull ? "" : " (w)"}" aria-label="${fullLabel}" ${canFull ? "" : "disabled"}>${fullLabel}</button><button data-reader="share" title="Share article" aria-label="Share article">Share article</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "○ Mark unread" : "● Mark read"}</button></div></div><button data-reader="close" class="reader-btn" title="Close (u / Esc)" aria-label="Close article">${icon("close")}<span>Close</span></button></div>${tagsRowHTML}</div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
+  // The tags row lives below the header (#197), not inside it, so the
+  // header stays one short row. It renders only when the article has
+  // tags or the input is open; the toolbar Tag button toggles it.
+  const tagsRowHTML = ((x.tags || []).length || tagsOpen) ? `<div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<span id="tagInputWrap" ${tagsOpen ? "" : "hidden"}><input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></span></div>` : "";
+  const hasNote = !!getArticleNote(x.id);
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions">${toolbarOrder().map(k => toolbarButtonHTML(k, x, {fullLabel, canListen, canFull, hasNote})).join("")}</div></div>${tagsRowHTML}${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${articleNoteHTML(x)}${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
   const tagAdd = $("#tagAddBtn");
   if (tagAdd) tagAdd.onclick = () => { const x = selectedItem(); const inp = $("#tagInput"); if (x && inp) addTagToItem(x, inp.value); };
-  // Tag button toggles the collapsed input (#171): expanding focuses it.
-  const tagToggle = $("#tagToggleBtn");
-  if (tagToggle) tagToggle.onclick = () => {
-    const sel = selectedItem();
-    if (!sel) return;
-    tagsExpandedId = tagsExpandedId === sel.id ? null : sel.id;
-    renderReader(sel);
-    if (tagsExpandedId === sel.id) { const inp = $("#tagInput"); if (inp) { inp.focus(); inp.select(); } }
-  };
-  // The More menu is rebuilt with the reader, so its wiring lives here
-  // (#162): toggle on the button, close on an item or Escape, and the
-  // document handler below closes it on an outside click.
-  const moreBtn = $("#moreMenuBtn"), moreMenu = $("#moreMenu");
-  if (moreBtn && moreMenu) {
-    moreBtn.onclick = e => { e.stopPropagation(); const open = moreMenu.hidden; moreMenu.hidden = !open; moreBtn.setAttribute("aria-expanded", String(open)); };
-    moreMenu.addEventListener("click", e => { if (e.target.closest("button")) { moreMenu.hidden = true; moreBtn.setAttribute("aria-expanded", "false"); } });
-    moreMenu.addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); moreMenu.hidden = true; moreBtn.setAttribute("aria-expanded", "false"); moreBtn.focus(); } });
-  }
   const bodyEl = $("#body");
   // Append the cleaned body's children, not the <body> element itself.
   // cleanHTML drops the page chrome (header/nav/footer); the leading-nav
@@ -3123,6 +3175,19 @@ async function importSettings(file) {
     toast("Settings imported.");
   } catch (e) { toast(e.message); }
 }
+function toolbarOrderFromDialog() {
+  const items = [...document.querySelectorAll("#toolbarOrderList [data-tb-key]")];
+  if (!items.length) return null;
+  return items.map(el => el.dataset.tbKey);
+}
+/* The Settings reorder list (#197): each toolbar button with up/down
+   arrows. The order is read from the DOM when the user saves Settings. */
+function renderToolbarOrderList(order) {
+  const list = $("#toolbarOrderList");
+  if (!list) return;
+  order = order || toolbarOrder();
+  list.innerHTML = order.map((k, i) => `<div class="toolbar-order-row" data-tb-key="${esc(k)}"><span>${esc(TOOLBAR_LABELS[k] || k)}</span><span class="toolbar-order-btns"><button type="button" class="quiet" data-tb-move="${i}:-1" aria-label="Move ${esc(TOOLBAR_LABELS[k] || k)} up" ${i === 0 ? "disabled" : ""}>↑</button><button type="button" class="quiet" data-tb-move="${i}:1" aria-label="Move ${esc(TOOLBAR_LABELS[k] || k)} down" ${i === order.length - 1 ? "disabled" : ""}>↓</button></span></div>`).join("");
+}
 function showSettings() {
   $("#themeSelect").value = state.settings.theme;
   $("#widthSelect").value = state.settings.width;
@@ -3143,6 +3208,7 @@ function showSettings() {
   const st = $("#updateStatus");
   if (st) st.textContent = updateBannerShown ? "A new version is available. Reload to update." : "";
   refreshSyncCapability();
+  renderToolbarOrderList();
   $("#settingsDialog").showModal();
 }
 function showHelp() { $("#helpDialog").showModal(); }
@@ -3276,12 +3342,6 @@ function bind() {
       filterMenu.hidden = true;
       $("#filterMenuBtn")?.setAttribute("aria-expanded", "false");
     }
-    // The reader's More menu (#162) closes the same way.
-    const moreMenu = $("#moreMenu");
-    if (moreMenu && !moreMenu.hidden && !e.target.closest("#moreMenu") && !e.target.closest("#moreMenuBtn")) {
-      moreMenu.hidden = true;
-      $("#moreMenuBtn")?.setAttribute("aria-expanded", "false");
-    }
     const scrim = e.target.closest("#scrim");
     if (scrim) { $("#sidebar").classList.remove("open"); scrim.classList.remove("show"); return; }
     const nav = e.target.closest("[data-view]");
@@ -3386,8 +3446,14 @@ function bind() {
       if (ra.dataset.reader === "snooze") { const m = $("#snoozeMenu"); if (m) { m.hidden = snoozeMenuWasOpen; ra.setAttribute("aria-expanded", String(!m.hidden)); if (!m.hidden) m.scrollIntoView({ block: "nearest" }); } return; }
       if (ra.dataset.reader === "open") { window.open(x.url, "_blank", "noopener"); return; }
       if (ra.dataset.reader === "fulltext") { toggleFullText(x); return; }
+      if (ra.dataset.reader === "tags") { tagsExpandedId = tagsExpandedId === x.id ? null : x.id; renderReader(x); if (tagsExpandedId === x.id) { const inp = $("#tagInput"); if (inp) { inp.focus(); inp.select(); } } return; }
+      if (ra.dataset.reader === "note") { showArticleNoteDialog(x); return; }
       if (ra.dataset.reader === "close" || ra.dataset.reader === "back") { closeReader(); return; }
     }
+    const noteEdit = e.target.closest("[data-note-edit]");
+    if (noteEdit) { const x2 = selectedItem(); if (x2) showArticleNoteDialog(x2); return; }
+    const noteDel = e.target.closest("[data-note-delete]");
+    if (noteDel) { const x2 = selectedItem(); if (x2) { setArticleNote(x2.id, ""); renderReader(x2); toast("Note deleted."); } return; }
     const row = e.target.closest("[data-item]");
     if (row) { openItem(row.dataset.item); return; }
   });
@@ -3509,6 +3575,17 @@ function bind() {
   document.addEventListener("selectionchange", () => { if (state.selected) updateHlBtn(); });
   $("#hlBtn").onclick = showHlDialog;
   $("#hlForm").onsubmit = e => { e.preventDefault(); saveHlFromDialog(); };
+  $("#articleNoteForm").onsubmit = e => { e.preventDefault(); saveArticleNoteFromDialog(); };
+  $("#toolbarOrderList")?.addEventListener("click", e => {
+    const b = e.target.closest("[data-tb-move]");
+    if (!b || b.disabled) return;
+    const [idx, delta] = b.dataset.tbMove.split(":").map(Number);
+    const order = toolbarOrderFromDialog() || toolbarOrder();
+    const j = idx + delta;
+    if (j < 0 || j >= order.length) return;
+    [order[idx], order[j]] = [order[j], order[idx]];
+    renderToolbarOrderList(order);
+  });
   $("#hlDialog").addEventListener("click", e => {
     if (e.target.closest('button[value="cancel"]')) $("#hlDialog").close();
   });
@@ -3669,8 +3746,6 @@ function bind() {
       $("#scrim").classList.remove("show");
       // An open menu closes first; only a bare Escape closes the
       // reader (#173: Escape used to close both at once).
-      const mm = $("#moreMenu");
-      if (mm && !mm.hidden) { mm.hidden = true; $("#moreMenuBtn")?.setAttribute("aria-expanded", "false"); $("#moreMenuBtn")?.focus(); return; }
       const mr = $("#markReadMenu");
       if (mr && !mr.hidden) { closeMarkMenu(); return; }
       const fm = $("#filterMenu");
