@@ -88,7 +88,7 @@ body.sidebar-collapsed #sideToggle svg{transform:rotate(180deg)}
 .folder-head{display:flex;align-items:center;justify-content:space-between;padding:12px 10px 4px}.folder-head .feed-group{padding:0}
 .folder-toggle{flex:none;background:none;border:0;color:var(--muted);font-size:14px;padding:4px 6px;border-radius:4px;cursor:pointer}
 .folder-toggle:hover{color:var(--text);background:var(--panel2)}
-.all-folders-toggle:not([hidden]){display:inline-flex;align-items:center;background:none;border:0;color:var(--muted);font-size:12px;padding:4px 6px;border-radius:4px;cursor:pointer}
+.all-folders-toggle:not([hidden]){display:inline-flex;align-items:center;background:none;border:0;color:var(--muted);font-size:12px;padding:4px 6px;border-radius:4px;cursor:pointer;white-space:nowrap}
 .all-folders-toggle:hover{color:var(--text);background:var(--panel2)}
 .tag-list{padding-bottom:6px}.tag-list .muted{padding:0 10px}.tag-row{font-size:13px}
 

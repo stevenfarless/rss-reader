@@ -31,7 +31,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.18";
+const APP_VERSION = "1.8.19";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -1548,7 +1548,7 @@ function renderNav() {
     const named = groupNames.filter(g => g);
     const allCollapsed = allFoldersCollapsed(named, collapsedFolders);
     allBtn.hidden = named.length === 0;
-    allBtn.textContent = allCollapsed ? "▾▾" : "▴▴";
+    allBtn.textContent = allCollapsed ? "▾▾ Expand all" : "▴▴ Collapse all";
     const label = allCollapsed ? "Expand all folders" : "Collapse all folders";
     allBtn.setAttribute("aria-label", label);
     allBtn.title = label;
