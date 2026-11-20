@@ -31,7 +31,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.12";
+const APP_VERSION = "1.8.13";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -1513,13 +1513,16 @@ let collapsedFolders = new Set();
 try { collapsedFolders = new Set(JSON.parse(localStorage.getItem(COLLAPSED_FOLDERS_KEY) || "[]")); } catch { collapsedFolders = new Set(); }
 function saveCollapsedFolders() { try { localStorage.setItem(COLLAPSED_FOLDERS_KEY, JSON.stringify([...collapsedFolders])); } catch {} }
 
+/* Counts in the sidebar cap at 999+, like Inoreader and Orpington (#177). */
+function fmtCount(n) { return n > 999 ? "999+" : String(n); }
+
 function renderNav() {
   const shown = countableItems();
-  $("#allCount").textContent = shown.length;
-  $("#unreadCount").textContent = shown.filter(x => !x.read).length;
-  $("#savedCount").textContent = state.items.filter(x => x.saved && !isSnoozed(x)).length;
-  $("#snoozedCount").textContent = state.items.filter(isSnoozed).length;
-  $("#highlightsCount").textContent = state.highlights.length;
+  $("#allCount").textContent = fmtCount(shown.length);
+  $("#unreadCount").textContent = fmtCount(shown.filter(x => !x.read).length);
+  $("#savedCount").textContent = fmtCount(state.items.filter(x => x.saved && !isSnoozed(x)).length);
+  $("#snoozedCount").textContent = fmtCount(state.items.filter(isSnoozed).length);
+  $("#highlightsCount").textContent = fmtCount(state.highlights.length);
   $$(".nav").forEach(b => {
     b.classList.toggle("active", b.dataset.view === state.view && state.view !== "feed");
     if (b.dataset.view === state.view && state.view !== "feed") b.setAttribute("aria-current", "true");
@@ -1543,7 +1546,7 @@ function renderNav() {
     // A folder's chevron collapses its feeds (#175); the name still
     // opens the folder's merged list, as before.
     const collapsed = g ? collapsedFolders.has(g) : false;
-    const label = g ? `<div class="folder-head"><button type="button" class="folder-toggle" data-folder-toggle="${esc(g)}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Collapse"} folder ${esc(g)}">${collapsed ? "▸" : "▾"}</button><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${folderUnread}</span>` : ""}</button><span class="folder-actions"><button type="button" data-folder-rename="${esc(g)}" title="Rename folder" aria-label="Rename folder ${esc(g)}">✎</button><button type="button" data-folder-delete="${esc(g)}" title="Delete folder" aria-label="Delete folder ${esc(g)}">×</button></span></div>` : (groupNames.length > 1 ? `<div class="feed-group">Ungrouped</div>` : "");
+    const label = g ? `<div class="folder-head"><button type="button" class="folder-toggle" data-folder-toggle="${esc(g)}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Collapse"} folder ${esc(g)}">${collapsed ? "▸" : "▾"}</button><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${fmtCount(folderUnread)}</span>` : ""}</button></div>` : (groupNames.length > 1 ? `<div class="feed-group">Ungrouped</div>` : "");
     const rows = groups[g].map(f => {
       const unreadCount = unreadByFeed.get(f.id) || 0;
       const err = f.error ? " feed-error" : "";
@@ -1555,7 +1558,7 @@ function renderNav() {
       const mark = fav
         ? `<img class="feed-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><span class="feed-dot" style="display:none"></span>`
         : `<span class="feed-dot"></span>`;
-      const countBtn = unreadCount ? `<button type="button" class="feed-count" data-mark-read="${esc(f.id)}" title="Mark ${esc(f.title)} read" aria-label="Mark ${esc(f.title)} read">${unreadCount}</button>` : "";
+      const countBtn = unreadCount ? `<button type="button" class="feed-count" data-mark-read="${esc(f.id)}" title="Mark ${esc(f.title)} read" aria-label="Mark ${esc(f.title)} read">${fmtCount(unreadCount)}</button>` : "";
       const muteBtn = `<button type="button" class="feed-mute${f.muted ? " on" : ""}" data-mute="${esc(f.id)}" title="${f.muted ? "Unmute" : "Mute"} ${esc(f.title)}" aria-label="${f.muted ? "Unmute" : "Mute"} ${esc(f.title)}" aria-pressed="${!!f.muted}">${f.muted ? "Muted" : "Mute"}</button>`;
       return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" title="${esc(f.title)}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(f.title)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(f.title)}">!</button>` : ""}${countBtn}${muteBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(f.title)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(f.title)}` : `Unsubscribe from ${esc(f.title)}`}">${armed ? "Sure?" : "×"}</button></div>`;
     }).join("");
@@ -1564,8 +1567,12 @@ function renderNav() {
   const tagCounts = {};
   for (const x of state.items) for (const t of x.tags || []) tagCounts[t] = (tagCounts[t] || 0) + 1;
   $("#tags").innerHTML = state.tags.length ? state.tags.map(t =>
-    `<button class="nav tag-row${state.view === "tag" && state.tag === t ? " active" : ""}" data-tag="${esc(t)}" ${state.view === "tag" && state.tag === t ? 'aria-current="true"' : ""}>${icon("tag")} ${esc(t)}<span>${tagCounts[t] || 0}</span></button>`
-  ).join("") : '<p class="muted">Tag articles from the reader to find them here.</p>';
+    `<button class="nav tag-row${state.view === "tag" && state.tag === t ? " active" : ""}" data-tag="${esc(t)}" ${state.view === "tag" && state.tag === t ? 'aria-current="true"' : ""}>${icon("tag")} ${esc(t)}<span>${fmtCount(tagCounts[t] || 0)}</span></button>`
+  ).join("") : "";
+  // Empty sections do not render at all (#177): no heading, no
+  // placeholder prose. They appear the moment they have content.
+  $("#tagsHead").hidden = !state.tags.length;
+  $("#tags").hidden = !state.tags.length;
   // Saved searches (#108): a stored filter as a sidebar view, with its
   // matching count. The feed map is built once for all searches.
   const ssFeedById = new Map(state.feeds.map(f => [f.id, f]));
@@ -1573,8 +1580,10 @@ function renderNav() {
   $("#savedSearches").innerHTML = state.savedSearches.length ? state.savedSearches.map(s => {
     const n = state.items.filter(x => !isSnoozed(x) && !ssMuted.has(x.feedId) && savedSearchMatches(s, x, ssFeedById)).length;
     const active = state.view === "savedSearch" && state.savedSearch === s.id;
-    return `<button class="nav tag-row${active ? " active" : ""}" data-saved-search="${esc(s.id)}" ${active ? 'aria-current="true"' : ""}>${icon("search")} ${esc(s.name)}<span>${n}</span></button>`;
-  }).join("") : '<p class="muted">Save a search to keep it here.</p>';
+    return `<button class="nav tag-row${active ? " active" : ""}" data-saved-search="${esc(s.id)}" ${active ? 'aria-current="true"' : ""}>${icon("search")} ${esc(s.name)}<span>${fmtCount(n)}</span></button>`;
+  }).join("") : "";
+  $("#savedSearchesHead").hidden = !state.savedSearches.length;
+  $("#savedSearches").hidden = !state.savedSearches.length;
 }
 /* The sort control is a compact arrow in the list header (#175):
    ↓ newest first, ↑ oldest first. */
@@ -3162,10 +3171,6 @@ function bind() {
       renderNav();
       return;
     }
-    const folderRename = e.target.closest("[data-folder-rename]");
-    if (folderRename) { orgEdit = { kind: "folder", old: folderRename.dataset.folderRename }; showOrganize(); return; }
-    const folderDelete = e.target.closest("[data-folder-delete]");
-    if (folderDelete) { pendingDelete = { kind: "folder", name: folderDelete.dataset.folderDelete }; showOrganize(); return; }
     const unsub = e.target.closest("[data-unsub]");
     if (unsub) { requestUnsubscribe(unsub.dataset.unsub); return; }
     const markReadBtn = e.target.closest("[data-mark-read]");
