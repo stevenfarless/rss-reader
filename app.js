@@ -31,7 +31,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.23";
+const APP_VERSION = "1.8.24";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -1082,6 +1082,30 @@ async function loadViaProxy(feedUrl) {
   };
 }
 
+/* Fetch the raw feed XML through AllOrigins and parse it with the
+   app's own parser (#181). AllOrigins returns the feed as-is, so
+   this is the exact feed asked for (unlike WordPress, which returns
+   the site's main posts feed). The original feed URL is the parse
+   base, not the AllOrigins address, so relative links resolve. */
+async function loadViaAllOrigins(feedUrl) {
+  const { text } = await fetchText(ALLORIGINS + encodeURIComponent(feedUrl));
+  return parseFeed(text, feedUrl);
+}
+/* Try the two always-on helpers in order (#181): rss2json first, then
+   AllOrigins — or the reverse when the feed was last loaded through
+   AllOrigins. Returns { parsed, via } for the first one that works,
+   or throws when both fail. */
+async function loadViaHelpers(feedUrl, preferAllOrigins) {
+  const first = preferAllOrigins ? loadViaAllOrigins : loadViaProxy;
+  const second = preferAllOrigins ? loadViaProxy : loadViaAllOrigins;
+  const firstVia = preferAllOrigins ? "allorigins" : "proxy";
+  const secondVia = preferAllOrigins ? "proxy" : "allorigins";
+  try {
+    return { parsed: await first(feedUrl), via: firstVia };
+  } catch {}
+  return { parsed: await second(feedUrl), via: secondVia };
+}
+
 async function discover(url) {
   const { text, finalUrl } = await fetchText(url);
   if (looksLikeFeed(text)) return { url: finalUrl, text };
@@ -1153,7 +1177,18 @@ async function loadFeedFromUrl(rawUrl) {
     } catch {}
     return null;
   };
-  const loaded = (!bare && !noLink ? (await tryProxy()) || (await tryWP()) : (await tryWP()) || (await tryProxy()));
+  // AllOrigins fetches the exact address (#181), so it goes before
+  // WordPress for a specific feed URL (WordPress returns the site's
+  // main feed, which is a different feed). For a bare site the main
+  // feed IS the answer, so it stays last there.
+  const tryAllOrigins = async () => {
+    try {
+      const parsed = await loadViaAllOrigins(url);
+      return { parsed, via: "allorigins", url, wpRoot: "" };
+    } catch {}
+    return null;
+  };
+  const loaded = (!bare && !noLink ? (await tryProxy()) || (await tryAllOrigins()) || (await tryWP()) : (await tryWP()) || (await tryProxy()) || (await tryAllOrigins()));
   if (loaded) return loaded;
   throw directError || Error("Could not load this feed.");
 }
@@ -1397,7 +1432,7 @@ async function addFeed(raw) {
   const loadedOrigin = originKey(loaded.wpRoot || loaded.parsed.site || "");
   const dup = state.feeds.find(f =>
     sameFeedUrl(f.url, loaded.url) ||
-    ((loaded.via === "wp" || loaded.via === "proxy") && loadedOrigin && originKey(f.wpRoot || f.site) === loadedOrigin &&
+    ((loaded.via === "wp" || loaded.via === "proxy" || loaded.via === "allorigins") && loadedOrigin && originKey(f.wpRoot || f.site) === loadedOrigin &&
       (f.title || "").trim().toLowerCase() === (loaded.parsed.title || "").trim().toLowerCase()));
   if (dup) throw Error(`You already subscribe to this feed (“${dup.title}”).`);
   const feed = {
@@ -1531,8 +1566,12 @@ async function refreshFeed(f) {
     let loaded;
     if (f.via === "wp" && f.wpRoot) {
       loaded = { parsed: await loadWordPressFeed(f.wpRoot, f.title), via: "wp", url: f.url, wpRoot: f.wpRoot };
-    } else if (f.via === "proxy") {
-      loaded = { parsed: await loadViaProxy(f.url), via: "proxy", url: f.url, wpRoot: "" };
+    } else if (f.via === "proxy" || f.via === "allorigins") {
+      // A helper-fed feed tries both helpers on refresh (#181): the
+      // one that loaded it last time first, then the other, so a
+      // rate-limited or failing helper no longer stops the feed.
+      const viaHelpers = await loadViaHelpers(f.url, f.via === "allorigins");
+      loaded = { parsed: viaHelpers.parsed, via: viaHelpers.via, url: f.url, wpRoot: "" };
     } else {
       loaded = await loadFeedFromUrl(f.url);
     }
@@ -1565,7 +1604,20 @@ async function refresh() {
   btn.disabled = true;
   btn.setAttribute("aria-busy", "true");
   try {
-    const results = await Promise.all(state.feeds.map(f => refreshFeed(f)));
+    // Refresh feeds through a small worker pool (#181) instead of
+    // firing them all at once: a ~100-feed profile used to send ~100
+    // concurrent requests, and the burst is what gets the shared
+    // helper (rss2json) rate-limited by publishers. Five at a time
+    // is far gentler and still fast enough.
+    const results = new Array(state.feeds.length);
+    let next = 0;
+    const REFRESH_CONCURRENCY = 5;
+    await Promise.all(Array.from({ length: Math.min(REFRESH_CONCURRENCY, state.feeds.length) }, async () => {
+      while (next < state.feeds.length) {
+        const i = next++;
+        results[i] = await refreshFeed(state.feeds[i]);
+      }
+    }));
     const ok = results.filter(Boolean).length;
     const failed = state.feeds.filter((f, i) => !results[i]).map(f => f.title);
     saveFeeds();
