@@ -20,12 +20,18 @@ const KS = "rss-reader.savedSearches.v1", KR = "rss-reader.rules.v1";
 const PROXY_API = "https://api.rss2json.com/v1/api.json?rss_url=";
 const ALLORIGINS = "https://api.allorigins.win/raw?url=";
 const JINA = "https://r.jina.ai/";
-const FETCH_TIMEOUT_MS = 15000;
+/* 30 s, not 15: a feed fetch can be a redirect chain (one slow hop
+   each), and a single 15 s budget for the whole chain times out
+   feeds that are alive but slow — e.g. NASA's Image of the Day
+   feed, whose 301 to a second slow fetch exceeded 15 s in the
+   cloud browser and fell through to the site's main feed (#163).
+   Matches the proxy timeout below. */
+const FETCH_TIMEOUT_MS = 30000;
 const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.3";
+const APP_VERSION = "1.8.4";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -863,16 +869,36 @@ async function loadFeedFromUrl(rawUrl) {
       if (a.status === "fulfilled") return a.value;
     }
   }
-  try {
-    const parsed = await loadWordPressFeed(origin);
-    if (parsed.items.length) return { parsed, via: "wp", url, wpRoot: origin };
-  } catch {}
-  if (state.settings.proxyFallback) {
+  // Fallbacks, in an order that never substitutes a different feed
+  // for the one asked for. WordPress always returns the site's main
+  // posts feed, and the proxy fetches the exact address typed.
+  // A specific feed address names one feed, so the exact fetch goes
+  // first there (#163): with WordPress first, a slow or blocked
+  // Image of the Day feed was replaced by the main feed and then
+  // refused as its duplicate. For a bare site the main feed IS the
+  // answer, so WordPress goes first there.
+  const tryWP = async () => {
+    try {
+      const parsed = await loadWordPressFeed(origin);
+      // The feed URL is the site's canonical /feed/, not the typed
+      // address: the API returns the same main-posts feed, and using
+      // /feed/ lets the duplicate check catch an already-subscribed
+      // main feed added by its feed URL (#160). Refresh loads through
+      // wpRoot, not this URL.
+      if (parsed.items.length) return { parsed, via: "wp", url: origin + "/feed/", wpRoot: origin };
+    } catch {}
+    return null;
+  };
+  const tryProxy = async () => {
+    if (!state.settings.proxyFallback) return null;
     try {
       const parsed = await loadViaProxy(url);
       return { parsed, via: "proxy", url, wpRoot: "" };
     } catch {}
-  }
+    return null;
+  };
+  const loaded = (!bare && !noLink ? (await tryProxy()) || (await tryWP()) : (await tryWP()) || (await tryProxy()));
+  if (loaded) return loaded;
   throw directError || Error("Could not load this feed.");
 }
 
@@ -1053,13 +1079,26 @@ async function searchFeeds(raw) {
     renderDiscoveryResults(items);
   } finally { clearTimeout(timeout); }
 }
+/* One box for adding a feed (#157): an address (feed URL or bare
+   website) goes the direct-add path; anything else is a directory
+   search. Same address test Feedsearch uses for URL queries. */
+function looksLikeAddress(q) {
+  return /^(https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?$/i.test(q.trim());
+}
 function scheduleFeedSearch() {
   discoveryRun++;
   clearTimeout(discoveryTimer);
   const q = $("#feedSearchInput").value;
+  $("#feedError").textContent = "";
   if (q.trim().length < 2) {
     if (discoveryController) discoveryController.abort();
-    $("#feedSearchStatus").textContent = "Search by publication, podcast, topic, or website.";
+    $("#feedSearchStatus").textContent = "Type an address to add it, or a name or topic to search.";
+    $("#feedSearchResults").innerHTML = "";
+    return;
+  }
+  if (looksLikeAddress(q)) {
+    if (discoveryController) discoveryController.abort();
+    $("#feedSearchStatus").textContent = "Press Enter or Add feed to add this address.";
     $("#feedSearchResults").innerHTML = "";
     return;
   }
@@ -1088,12 +1127,21 @@ async function addFeed(raw) {
   const loaded = await loadFeedFromUrl(url);
   // The check above only sees the address typed in. The same feed can
   // be reached another way (the bare site vs its /feed, or a probed
-  // /rss), so check the resolved feed too: same feed URL, or the same
-  // site under the same title.
-  const originOf = s => { try { return new URL(s).origin; } catch { return ""; } };
+  // /rss), so check the resolved feed URL too. Title + site is NOT
+  // checked on the feed path: one publisher can run several feeds
+  // under one title (NASA titles both its main feed and its Image of
+  // the Day feed "NASA", #159), and a different address is a different
+  // feed. The WordPress and proxy paths are the exceptions
+  // (#160, #163): the API only ever serves the site's main posts
+  // feed, and the proxy echoes the requested address as the feed
+  // URL, so neither loaded URL carries a feed identity of its own.
+  // Same site + same title is the same feed on those paths,
+  // whichever load path produced it (direct fetch, probe, or fallback).
+  const originKey = s => { try { const u = new URL(s); return u.hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; } };
+  const loadedOrigin = originKey(loaded.wpRoot || loaded.parsed.site || "");
   const dup = state.feeds.find(f =>
     sameFeedUrl(f.url, loaded.url) ||
-    (f.site && loaded.parsed.site && originOf(f.site) && originOf(f.site) === originOf(loaded.parsed.site) &&
+    ((loaded.via === "wp" || loaded.via === "proxy") && loadedOrigin && originKey(f.wpRoot || f.site) === loadedOrigin &&
       (f.title || "").trim().toLowerCase() === (loaded.parsed.title || "").trim().toLowerCase()));
   if (dup) throw Error(`You already subscribe to this feed (“${dup.title}”).`);
   const feed = {
@@ -2564,10 +2612,9 @@ function showOrganize() {
 function showFeed() {
   $("#feedError").textContent = "";
   $("#feedSearchInput").value = "";
-  $("#feedSearchStatus").textContent = "Search by publication, podcast, topic, or website.";
+  $("#feedSearchStatus").textContent = "Type an address to add it, or a name or topic to search.";
   $("#feedSearchResults").innerHTML = "";
   window.feedDiscoveryResults = [];
-  $("#feedUrl").value = "";
   $("#feedDialog").showModal();
   $("#feedSearchInput").focus();
 }
@@ -2631,7 +2678,7 @@ function ruleDesc(r) {
 function renderRules() {
   const editorHTML = cur => {
     const groups = [...new Set(state.feeds.map(f => f.group).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-    return `<div class="org-section"><label>Name<input id="ruleName" type="text" value="${esc(cur.name)}" placeholder="e.g. Save every Rethinking Hell post"></label><label>Look in<select id="ruleScope"><option value="all">All feeds</option>${groups.map(g => `<option value="folder:${esc(g)}" ${cur.scope === "folder:" + g ? "selected" : ""}>Folder: ${esc(g)}</option>`).join("")}${state.feeds.map(f => `<option value="feed:${esc(f.id)}" ${cur.scope === "feed:" + f.id ? "selected" : ""}>Feed: ${esc(f.title)}</option>`).join("")}</select></label><label>Title contains<input id="ruleKeyword" type="text" value="${esc(cur.keyword || "")}" placeholder="Optional"></label><label>Author contains<input id="ruleAuthor" type="text" value="${esc(cur.author || "")}" placeholder="Optional"></label><label>Add tag<input id="ruleTag" type="text" list="tagList" value="${esc(cur.tag || "")}" placeholder="Optional"></label><label class="setting">Save the article<input id="ruleSave" type="checkbox" ${cur.save ? "checked" : ""}></label><label class="setting">Mark the article read<input id="ruleMarkRead" type="checkbox" ${cur.markRead ? "checked" : ""}></label><div class="dialog-actions"><button type="button" class="quiet" data-rule-cancel>Cancel</button><button type="button" class="primary" data-rule-save>${ruleEdit === "new" ? "Add rule" : "Save rule"}</button></div></div>`;
+    return `<div class="org-section"><label>Name<input id="ruleName" type="text" value="${esc(cur.name)}" placeholder="e.g. Save every post from this feed"></label><label>Look in<select id="ruleScope"><option value="all">All feeds</option>${groups.map(g => `<option value="folder:${esc(g)}" ${cur.scope === "folder:" + g ? "selected" : ""}>Folder: ${esc(g)}</option>`).join("")}${state.feeds.map(f => `<option value="feed:${esc(f.id)}" ${cur.scope === "feed:" + f.id ? "selected" : ""}>Feed: ${esc(f.title)}</option>`).join("")}</select></label><label>Title contains<input id="ruleKeyword" type="text" value="${esc(cur.keyword || "")}" placeholder="Optional"></label><label>Author contains<input id="ruleAuthor" type="text" value="${esc(cur.author || "")}" placeholder="Optional"></label><label>Add tag<input id="ruleTag" type="text" list="tagList" value="${esc(cur.tag || "")}" placeholder="Optional"></label><label class="setting">Save the article<input id="ruleSave" type="checkbox" ${cur.save ? "checked" : ""}></label><label class="setting">Mark the article read<input id="ruleMarkRead" type="checkbox" ${cur.markRead ? "checked" : ""}></label><div class="dialog-actions"><button type="button" class="quiet" data-rule-cancel>Cancel</button><button type="button" class="primary" data-rule-save>${ruleEdit === "new" ? "Add rule" : "Save rule"}</button></div></div>`;
   };
   const row = r => {
     const armed = pendingDelete?.kind === "rule" && pendingDelete.id === r.id;
@@ -3021,9 +3068,9 @@ function bind() {
   $("#home").onclick = () => { goView("all"); };
   $("#add").onclick = $("#mobileAdd").onclick = $("#firstAdd").onclick = showFeed;
   $("#feedSearchInput").addEventListener("input", scheduleFeedSearch);
-  $("#feedSearchInput").addEventListener("keydown", e => {
-    if (e.key === "Enter") { e.preventDefault(); clearTimeout(discoveryTimer); searchFeeds(e.target.value); }
-  });
+  // Enter in the single box submits the form, which runs the unified
+  // add logic (#157): direct add for an address, directory search
+  // for words. No separate key handler.
   $("#feedSearchResults").addEventListener("click", e => {
     const f = e.target.closest("[data-discovery-filter]");
     if (f && !f.disabled) {
@@ -3183,16 +3230,28 @@ function bind() {
   $("#feedDialog").addEventListener("click", e => {
     if (e.target.closest('button[value="cancel"]')) $("#feedDialog").close();
   });
+  // Unified add (#157): one box. An address is added directly
+  // (loadFeedFromUrl probes /feed, /rss, … and WordPress for a bare
+  // site); words run a directory search instead.
   $("#feedForm").onsubmit = async e => {
     if (e.submitter?.value === "cancel") return;
     e.preventDefault();
+    clearTimeout(discoveryTimer);
+    if (discoveryController) discoveryController.abort();
+    const q = $("#feedSearchInput").value.trim();
+    if (!q) { $("#feedSearchStatus").textContent = "Type a feed or website address, or a name or topic to search."; return; }
+    if (!looksLikeAddress(q)) { searchFeeds(q); return; }
     const b = $("#saveFeed");
     b.disabled = true;
     try {
-      await addFeed($("#feedUrl").value.trim());
+      await addFeed(q);
       $("#feedDialog").close();
     } catch (err) {
-      $("#feedError").textContent = classifyError(err, /^http:/i.test($("#feedUrl").value.trim()));
+      $("#feedError").textContent = classifyError(err, /^http:/i.test(q));
+      // Direct add failed: fall back to directory search, which can
+      // surface the site's feeds even when a direct fetch cannot.
+      // An already-subscribed feed needs no search.
+      if (!/already subscribe/i.test(err.message || "")) searchFeeds(q);
     } finally { b.disabled = false; }
   };
   $("#saveSettings").onclick = () => {
