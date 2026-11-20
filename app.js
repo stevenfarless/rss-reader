@@ -1663,7 +1663,7 @@ function setupFeedDrag() {
     const id = (e.dataTransfer.getData("text/plain") || draggedFeedId || "").trim();
     const target = dropTargetAt(e) || dropTarget;
     clearDropIndicators();
-    if (id && target) moveFeed(id, target);
+    if (id && target) moveFeedByDrag(id, target);
   });
   nav.addEventListener("dragend", () => {
     draggedFeedId = null;
@@ -1671,7 +1671,7 @@ function setupFeedDrag() {
     $$("#feeds .dragging").forEach(el => el.classList.remove("dragging"));
   });
 }
-function moveFeed(draggedId, target) {
+function moveFeedByDrag(draggedId, target) {
   const feed = moveFeedInList(state.feeds, draggedId, target);
   if (!feed) return;
   // Dropping on a collapsed folder expands it, so the feed is visible

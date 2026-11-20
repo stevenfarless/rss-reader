@@ -100,3 +100,21 @@ test("moveFeedInList never stores a non-string group", () => {
   assert.equal(moved2.group, "");
   assert.equal(typeof moved2.group, "string");
 });
+
+test("no duplicate top-level function declarations in the app source", () => {
+  // Two functions with the same name silently shadow each other: the
+  // drag handler once called the organize dialog's moveFeed(feedId,
+  // folder) instead of the drag one, storing the whole drop-target
+  // object as the feed's folder ("[object Object]").
+  const fs = require("node:fs");
+  const path = require("node:path");
+  for (const file of ["app.js", "utils.js"]) {
+    const src = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
+    const names = [...src.matchAll(/^function ([A-Za-z0-9_]+)\(/gm)].map(m => m[1]);
+    const seen = new Set();
+    for (const name of names) {
+      assert.ok(!seen.has(name), `${file} declares function ${name} more than once`);
+      seen.add(name);
+    }
+  }
+});
