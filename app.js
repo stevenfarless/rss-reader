@@ -31,7 +31,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.9";
+const APP_VERSION = "1.8.10";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -43,6 +43,10 @@ let db, timer, pendingG = null, refreshAt = 0, orgEdit = null, pendingDelete = n
 /* Text-to-speech state (#105): the article being read, its sentence
    chunks, and where playback has reached. Null when nothing is playing. */
 let tts = null;
+/* Tag box expanded state (#171): the article id whose tag input is
+   open, or null. Per article, so re-renders keep it and opening
+   another article collapses it again. */
+let tagsExpandedId = null;
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -1973,12 +1977,24 @@ function renderReader(x) {
   const isAudio = !!x.enclosure?.type?.startsWith("audio/");
   const canListen = "speechSynthesis" in window;
   const audioHTML = isAudio ? `<div class="audio-player"><audio id="audioPlayer" controls preload="metadata" src="${esc(x.enclosure.url)}"></audio><div class="audio-controls"><label>Speed <select id="audioSpeed" aria-label="Playback speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><a href="${esc(x.enclosure.url)}" target="_blank" rel="noopener">Open audio ↗</a></div></div>` : "";
-  // Tags live in the top bar with the other actions (#169): the reader
-  // itself stays clean — title, byline, body, nothing else.
-  const tagsRowHTML = `<div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></div>`;
+  // The tag box stays collapsed by default (#171): a Tag button in the
+  // top bar, expanded by clicking it or pressing T. Expanded state is
+  // per article, so re-renders keep it and opening another article
+  // collapses it again.
+  const tagsOpen = tagsExpandedId === x.id;
+  const tagsRowHTML = `<div class="tags-row" id="tagsRow"><button type="button" class="quiet" id="tagToggleBtn" aria-expanded="${tagsOpen}" aria-label="Tag article">${icon("tag")}<span>Tag</span></button>${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<span id="tagInputWrap" ${tagsOpen ? "" : "hidden"}><input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></span></div>`;
   $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f?.title || x.feedTitle)}</span><div class="reader-actions"><button data-reader="save" class="reader-btn" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}<span>${x.saved ? "Saved" : "Save"}</span></button><button data-reader="open" class="reader-btn" title="Open original (v)" aria-label="Open original">↗<span>Open original</span></button><div class="menu-wrap"><button id="moreMenuBtn" class="reader-btn" aria-haspopup="true" aria-expanded="false">···<span>More</span></button><div class="menu" id="moreMenu" hidden><button data-reader="listen" title="${canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="${tts?.itemId === x.id}" ${canListen ? "" : "disabled"}>${tts?.itemId === x.id ? "Stop listening" : "Listen to article"}</button><button data-reader="snooze" title="Snooze article" aria-label="Snooze article" aria-haspopup="true" aria-expanded="false">Snooze article</button><button data-reader="fulltext" title="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" aria-label="${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}" ${canFull ? "" : "disabled"}>${showingFull ? "Showing full article" : alreadyFull ? "Full article included in feed" : "Load full article"}</button><button data-reader="share" title="Share article" aria-label="Share article">Share article</button><button data-reader="read" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "○ Mark unread" : "● Mark read"}</button></div></div><button data-reader="close" class="reader-btn" title="Close (u / Esc)" aria-label="Close article">${icon("close")}<span>Close</span></button></div>${tagsRowHTML}</div>${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
   const tagAdd = $("#tagAddBtn");
   if (tagAdd) tagAdd.onclick = () => { const x = selectedItem(); const inp = $("#tagInput"); if (x && inp) addTagToItem(x, inp.value); };
+  // Tag button toggles the collapsed input (#171): expanding focuses it.
+  const tagToggle = $("#tagToggleBtn");
+  if (tagToggle) tagToggle.onclick = () => {
+    const sel = selectedItem();
+    if (!sel) return;
+    tagsExpandedId = tagsExpandedId === sel.id ? null : sel.id;
+    renderReader(sel);
+    if (tagsExpandedId === sel.id) { const inp = $("#tagInput"); if (inp) { inp.focus(); inp.select(); } }
+  };
   // The More menu is rebuilt with the reader, so its wiring lives here
   // (#162): toggle on the button, close on an item or Escape, and the
   // document handler below closes it on an outside click.
@@ -3479,6 +3495,7 @@ function bind() {
     if (e.key === "s" && sel) { sel.saved = !sel.saved; put(sel); render(); openItem(sel.id); return; }
     if (e.key === "t" && sel) {
       e.preventDefault(); // otherwise the "t" is typed into the input
+      if (tagsExpandedId !== sel.id) { tagsExpandedId = sel.id; renderReader(sel); }
       const inp = $("#tagInput");
       if (inp) { inp.focus(); inp.select(); }
       return;
