@@ -50,11 +50,11 @@ Browsers enforce cross-origin resource sharing (CORS). This reader loads feeds e
 
 1. Direct fetch of the feed (works when the publisher sends permissive CORS headers).
 2. The site's own WordPress REST API (`/wp-json/wp/v2/posts`), which sends permissive CORS headers even when the site's `/feed` does not.
-3. A public feed-to-JSON service (rss2json), only when the user opts in under Settings ("Proxy fallback for blocked feeds"). The feed address passes through that third party, so it is off by default.
+3. A public feed-to-JSON service (rss2json), as a last resort. The feed address passes through that third party.
 
 Feeds that block cross-origin requests and offer none of the above still cannot load from a browser page; that is a browser security rule, not a bug in this reader.
 
-"Load full article" fetches the article the same way: directly, then the site's own WordPress API looked up by the article's slug (no third party involved), then — with the proxy fallback on — public reader services (a Markdown reader, then a generic proxy). The fetched page is reduced to the article itself with Mozilla Readability (the library behind Firefox Reader View), falling back to a hand-rolled extractor when Readability returns nothing. Those services are free and rate-limited, and some publishers block them, so full text is not guaranteed for every site.
+"Load full article" fetches the article the same way: directly, then the site's own WordPress API looked up by the article's slug (no third party involved), then public reader services (a Markdown reader, then a generic proxy). The fetched page is reduced to the article itself with Mozilla Readability (the library behind Firefox Reader View), falling back to a hand-rolled extractor when Readability returns nothing. Those services are free and rate-limited, and some publishers block them, so full text is not guaranteed for every site.
 
 ## Feed discovery
 
