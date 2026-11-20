@@ -1110,14 +1110,17 @@ async function addFeed(raw) {
   // checked on the feed path: one publisher can run several feeds
   // under one title (NASA titles both its main feed and its Image of
   // the Day feed "NASA", #159), and a different address is a different
-  // feed. The WordPress path is the exception (#160): the API only
-  // ever serves the site's main posts feed, so the same WordPress
-  // root + the same title is the same feed, whichever load path
-  // produced it (direct fetch, probe, or API fallback).
+  // feed. The WordPress and proxy paths are the exceptions
+  // (#160, #163): the API only ever serves the site's main posts
+  // feed, and the proxy echoes the requested address as the feed
+  // URL, so neither loaded URL carries a feed identity of its own.
+  // Same site + same title is the same feed on those paths,
+  // whichever load path produced it (direct fetch, probe, or fallback).
   const originKey = s => { try { const u = new URL(s); return u.hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; } };
+  const loadedOrigin = originKey(loaded.wpRoot || loaded.parsed.site || "");
   const dup = state.feeds.find(f =>
     sameFeedUrl(f.url, loaded.url) ||
-    (loaded.via === "wp" && loaded.wpRoot && originKey(f.wpRoot || f.site) === originKey(loaded.wpRoot) &&
+    ((loaded.via === "wp" || loaded.via === "proxy") && loadedOrigin && originKey(f.wpRoot || f.site) === loadedOrigin &&
       (f.title || "").trim().toLowerCase() === (loaded.parsed.title || "").trim().toLowerCase()));
   if (dup) throw Error(`You already subscribe to this feed (“${dup.title}”).`);
   const feed = {
