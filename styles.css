@@ -2,7 +2,12 @@
 @font-face{font-family:Gentium;src:url("./fonts/GentiumBookPlus-Bold.woff2") format("woff2");font-weight:700;font-style:normal;font-display:swap}
 @font-face{font-family:Gentium;src:url("./fonts/GentiumBookPlus-Italic.woff2") format("woff2");font-weight:400;font-style:italic;font-display:swap}
 @font-face{font-family:Gentium;src:url("./fonts/GentiumBookPlus-BoldItalic.woff2") format("woff2");font-weight:700;font-style:italic;font-display:swap}
-:root{color-scheme:dark;--bg:#171916;--panel:#1d201c;--panel2:#232720;--line:#343a31;--text:#e9e7df;--muted:#a2a597;--soft:#9a9d8f;--accent:#c5a77a;--accentbg:#393326;--err:#e18d7d;--serif:Gentium,Georgia,serif;--sans:system-ui,-apple-system,"Segoe UI",sans-serif}
+@font-face{font-family:Inter;src:url("./fonts/InterVariable.woff2") format("woff2");font-weight:100 900;font-style:normal;font-display:swap}
+@font-face{font-family:Inter;src:url("./fonts/InterVariable-Italic.woff2") format("woff2");font-weight:100 900;font-style:italic;font-display:swap}
+/* Inter is a variable font (weight 100-900, optical size axis); let the
+   browser pick the optical size. License: fonts/inter-font-license.txt (OFL 1.1). */
+html{font-optical-sizing:auto}
+:root{color-scheme:dark;--bg:#171916;--panel:#1d201c;--panel2:#232720;--line:#343a31;--text:#e9e7df;--muted:#a2a597;--soft:#9a9d8f;--accent:#c5a77a;--accentbg:#393326;--err:#e18d7d;--serif:Gentium,Georgia,serif;--sans:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 :root[data-theme=light]{color-scheme:light;--bg:#f4f2ec;--panel:#faf9f5;--panel2:#e7e4d6;--line:#d5d2c5;--text:#292b25;--muted:#4b4e41;--soft:#56594b;--accent:#6d5228;--accentbg:#e9dcc2;--err:#a33d2e}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);display:flex;flex-direction:column;height:100dvh;overflow:hidden}button,input,select{font:inherit}button{cursor:pointer;color:inherit}button:disabled{opacity:.45;cursor:default}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}#refresh[aria-busy="true"] svg{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
