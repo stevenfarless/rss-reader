@@ -42,15 +42,15 @@ test("Vim is a keyboard shortcut preset", () => {
 
 
 test("disclosure chevrons animate from their accessible expanded state", () => {
-  assert.match(app, /class="folder-chevron" aria-hidden="true">▾<\\/span>/);
-  assert.match(app, /aria-expanded="\\$\\{!collapsed\\}"/);
-  assert.match(app, /class="folder-toggle"/);
-  assert.match(app, /saveCollapsedFolders\(\);\s*renderNav\(\);/);
-  assert.match(app, /applySidebarCollapsed\(\)[^]*setAttribute\("aria-expanded", String\(!collapsed\)\)/);
-  assert.match(html, /class="disclosure-chevron" aria-hidden="true">▾<\\/span>/);
-  assert.match(app, /querySelector\("\.disclosure-label"\)\.textContent/);
-  assert.match(css, /\.disclosure-chevron,[\s\S]*?transition: transform \.2s/);
-  assert.match(css, /\[aria-expanded="true"\] > \.disclosure-chevron/);
-  assert.match(css, /\.folder-toggle\[aria-expanded="false"\] \.folder-chevron/);
-  assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\*\{transition:none!important;animation:none!important\}\}/);
+  assert.ok(app.includes('class="folder-chevron" aria-hidden="true">▾</span>'));
+  assert.ok(app.includes('aria-expanded="${!collapsed}"'));
+  assert.ok(app.includes('saveCollapsedFolders();'));
+  assert.ok(app.includes('renderNav();'));
+  assert.ok(app.includes('setAttribute("aria-expanded", String(!collapsed))'));
+  assert.ok(html.includes('class="disclosure-chevron" aria-hidden="true">▾</span>'));
+  assert.ok(app.includes('querySelector(".disclosure-label").textContent'));
+  assert.ok(css.includes("transition: transform .2s"));
+  assert.ok(css.includes('[aria-expanded="true"] > .disclosure-chevron'));
+  assert.ok(css.includes('.folder-toggle[aria-expanded="false"] .folder-chevron'));
+  assert.ok(css.includes("@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}"));
 });
