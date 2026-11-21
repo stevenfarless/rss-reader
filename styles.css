@@ -273,3 +273,31 @@ body:not(.mobile-bar-top) #readProgress.bottom{bottom:calc(56px + env(safe-area-
    next to the row by JS, so it is never clipped by the sidebar. */
 #feedMenu{position:fixed;right:auto}
 #feedMenu button[aria-pressed="true"]{color:var(--accent)}
+
+/* Feed hierarchy (#203). */
+.folder-head .folder-toggle{width:26px;min-width:26px;font-size:19px;font-weight:700;line-height:1;padding:3px 5px}
+.folder-head .folder-open{font-size:14px;font-weight:750;color:var(--text)}
+.folder-feeds .feed-row-wrap.nested-feed{padding-left:22px}
+.folder-feeds .feed-row-wrap.nested-feed .feed-row{border-left:2px solid var(--line);padding-left:9px}
+.folder-feeds .feed-row-wrap.nested-feed .feed-row.active{border-left-color:var(--accent)}
+/* Full article states (#202). */
+.reader-actions .reader-btn.fulltext-active{color:var(--accent)}
+.reader-actions .reader-btn.fulltext-loading{color:var(--accent);opacity:1}
+.reader-spinner{width:15px;height:15px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;display:inline-block;animation:readerSpin .7s linear infinite}
+@keyframes readerSpin{to{transform:rotate(360deg)}}
+/* Single-row reader header and responsive action overflow (#204). */
+.reader-top{min-width:0;gap:10px;flex-wrap:nowrap;overflow:visible}
+.reader-top>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reader-actions{flex:0 1 auto;min-width:0;flex-wrap:nowrap;overflow:visible}
+.reader-actions>.reader-btn{flex:none}
+.reader-overflow{position:relative;flex:none}
+.reader-overflow[hidden]{display:none}
+.reader-overflow .menu{top:calc(100% + 6px);right:0;left:auto;max-height:min(65vh,420px);overflow:auto}
+.reader-overflow .menu button{display:flex;width:100%;justify-content:flex-start;align-items:center;gap:9px;text-align:left;white-space:nowrap}
+.reader-overflow .menu button[hidden]{display:none}
+/* Vim-like pane focus (#205). */
+body.vim-navigation-enabled #sidebar.vim-focused,
+body.vim-navigation-enabled .list-pane.vim-focused,
+body.vim-navigation-enabled #reader.vim-focused{outline:2px solid var(--accent);outline-offset:-2px}
+#feeds .vim-cursor{outline:2px solid var(--accent);outline-offset:-2px;background:var(--accentbg)}
+@media(prefers-reduced-motion:reduce){.reader-spinner{animation:none}}
