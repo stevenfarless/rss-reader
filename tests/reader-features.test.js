@@ -39,3 +39,18 @@ test("Vim is a keyboard shortcut preset", () => {
   assert.match(html, /id="shortcutPresetSelect"[^]*<option value="vim">Vim<\/option>/);
   assert.doesNotMatch(html, /vimNavigationToggle/);
 });
+
+
+test("disclosure chevrons animate from their accessible expanded state", () => {
+  assert.match(app, /class="folder-chevron" aria-hidden="true">▾<\\/span>/);
+  assert.match(app, /aria-expanded="\\$\\{!collapsed\\}"/);
+  assert.match(app, /class="folder-toggle"/);
+  assert.match(app, /saveCollapsedFolders\(\);\s*renderNav\(\);/);
+  assert.match(app, /applySidebarCollapsed\(\)[^]*setAttribute\("aria-expanded", String\(!collapsed\)\)/);
+  assert.match(html, /class="disclosure-chevron" aria-hidden="true">▾<\\/span>/);
+  assert.match(app, /querySelector\("\.disclosure-label"\)\.textContent/);
+  assert.match(css, /\.disclosure-chevron,[\s\S]*?transition: transform \.2s/);
+  assert.match(css, /\[aria-expanded="true"\] > \.disclosure-chevron/);
+  assert.match(css, /\.folder-toggle\[aria-expanded="false"\] \.folder-chevron/);
+  assert.match(css, /@media\(prefers-reduced-motion:reduce\)\{\*\{transition:none!important;animation:none!important\}\}/);
+});
