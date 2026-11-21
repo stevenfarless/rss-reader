@@ -72,12 +72,14 @@ function toolbarOrder() {
 }
 function toolbarButtonHTML(key, x, ctx) {
   const { fullLabel, canListen, canFull, hasNote } = ctx;
+  const fullTextLoading = loadingFullTextIds.has(x.id);
+  const fullTextActive = fullTextState(x).showingFull;
   switch (key) {
     case "back": return `<button data-reader="back" class="reader-btn reader-back" title="Back to list" aria-label="Back to list">‹</button>`;
     case "save": return `<button data-reader="save" class="reader-btn" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button>`;
     case "tags": return `<button data-reader="tags" class="reader-btn" title="Add tags (T)" aria-label="Add tags" aria-expanded="${tagsExpandedId === x.id}">${icon("tag")}</button>`;
     case "read": return `<button data-reader="read" class="reader-btn" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "○" : "●"}</button>`;
-    case "fulltext": return `<button data-reader="fulltext" class="reader-btn" title="${fullLabel}${canFull ? " (w)" : ""}" aria-label="${fullLabel}" ${canFull ? "" : "disabled"}>${icon("expand")}</button>`;
+    case "fulltext": return `<button data-reader="fulltext" class="reader-btn${fullTextActive ? " fulltext-active" : ""}${fullTextLoading ? " fulltext-loading" : ""}" title="${fullTextLoading ? "Loading full article…" : fullLabel + (canFull ? " (w)" : "")}" aria-label="${fullLabel}" aria-busy="${fullTextLoading}" ${canFull && !fullTextLoading ? "" : "disabled"}>${fullTextLoading ? '<span class="reader-spinner" aria-hidden="true"></span>' : icon("book-open")}</button>`;
     case "listen": return `<button data-reader="listen" class="reader-btn" title="${tts?.itemId === x.id ? "Stop listening" : canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="${tts?.itemId === x.id}" ${canListen ? "" : "disabled"}>${icon("speak")}</button>`;
     case "note": return `<button data-reader="note" class="reader-btn${hasNote ? " on" : ""}" title="Add note" aria-label="Add note" aria-pressed="${hasNote}">${icon("note")}</button>`;
     case "share": return `<button data-reader="share" class="reader-btn" title="Share article" aria-label="Share article">${icon("share")}</button>`;
@@ -86,6 +88,42 @@ function toolbarButtonHTML(key, x, ctx) {
     case "close": return `<button data-reader="close" class="reader-btn" title="Close (u / Esc)" aria-label="Close article">${icon("close")}</button>`;
     default: return "";
   }
+}
+let readerToolbarObserver = null;
+function setupReaderToolbarOverflow() {
+  readerToolbarObserver?.disconnect();
+  const top = $("#reader .reader-top");
+  const actions = top?.querySelector(".reader-actions");
+  if (!actions) return;
+  const buttons = [...actions.querySelectorAll(":scope > .reader-btn")];
+  const wrap = document.createElement("div");
+  wrap.className = "reader-overflow";
+  wrap.innerHTML = '<button type="button" class="reader-btn" data-reader-more aria-label="More article actions" title="More article actions" aria-haspopup="true" aria-expanded="false">···</button><div class="menu" role="menu" aria-label="More article actions" hidden></div>';
+  actions.append(wrap);
+  const moreButton = wrap.querySelector("[data-reader-more]");
+  const menu = wrap.querySelector(".menu");
+  const update = () => {
+    buttons.forEach(button => { button.hidden = false; });
+    menu.replaceChildren();
+    wrap.hidden = true;
+    if (actions.scrollWidth <= actions.clientWidth) return;
+    wrap.hidden = false;
+    const overflowed = [];
+    for (let i = buttons.length - 1; i >= 0 && actions.scrollWidth > actions.clientWidth; i--) {
+      buttons[i].hidden = true;
+      overflowed.unshift(buttons[i].cloneNode(true));
+    }
+    menu.replaceChildren(...overflowed);
+    wrap.hidden = overflowed.length === 0;
+    menu.hidden = true;
+    moreButton.setAttribute("aria-expanded", "false");
+  };
+  update();
+  if ("ResizeObserver" in window) {
+    readerToolbarObserver = new ResizeObserver(update);
+    readerToolbarObserver.observe(top);
+    readerToolbarObserver.observe(actions);
+  } else window.addEventListener("resize", update);
 }
 /* Article notes (#197): a freeform note attached to one article, kept
    in localStorage (not the feed item, which refreshes overwrite). */
@@ -129,7 +167,7 @@ function feedMenuHTML(f) {
   const orderLabel = !f.sort || f.sort === "global" ? "Use global" : f.sort === "newest" ? "Newest" : "Oldest";
   return `<button type="button" data-feed-opt="rename">Rename</button>` +
     `<button type="button" data-feed-opt="open">Open site</button>` +
-    `<button type="button" data-feed-opt="autofull" aria-pressed="${!!f.autoFull}">${f.autoFull ? "✓ " : ""}Auto full article</button>` +
+    `<button type="button" data-feed-opt="autofull" aria-pressed="${!!f.autoFull}">${f.autoFull ? "✓ " : ""}Full article: ${f.autoFull ? "Always fetch" : "Use RSS text"}</button>` +
     `<button type="button" data-feed-opt="layout">Layout for this feed</button>` +
     `<button type="button" data-feed-opt="order">Order for this feed: ${orderLabel}</button>` +
     `<button type="button" data-feed-opt="unsub">${armed ? "Click again to unsubscribe" : "Unsubscribe"}</button>`;
@@ -663,6 +701,8 @@ function readSettingsFromDialog() {
     progressPosition: $("#progressSelect").value,
     mobileReaderBar: $("#mobileBarSelect").value,
     shortcutPreset: $("#shortcutPresetSelect").value,
+    vimNavigation: $("#vimNavigationToggle").checked,
+    vimPane: state.settings.vimPane || "list",
     cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
     sidebarCollapsed: state.settings.sidebarCollapsed || false,
@@ -722,6 +762,19 @@ async function refreshSyncCapability() {
   }
   if (note) note.textContent = n?.disabled ? "Notifications are blocked in this browser." : "";
 }
+function applyVimPaneFocus() {
+  const pane = ["sidebar", "list", "article"].includes(state.settings.vimPane) ? state.settings.vimPane : "list";
+  document.body.dataset.vimPane = pane;
+  $("#sidebar")?.classList.toggle("vim-focused", !!state.settings.vimNavigation && pane === "sidebar");
+  $(".list-pane")?.classList.toggle("vim-focused", !!state.settings.vimNavigation && pane === "list");
+  $("#reader")?.classList.toggle("vim-focused", !!state.settings.vimNavigation && pane === "article");
+}
+function setVimPaneFocus(pane) {
+  if (!["sidebar", "list", "article"].includes(pane)) return;
+  state.settings.vimPane = pane;
+  local(S, state.settings);
+  applyVimPaneFocus();
+}
 function applySettings() {
   let t = state.settings.theme;
   if (t === "system") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
@@ -739,6 +792,8 @@ function applySettings() {
   // Mobile article actions (#179): bottom bar by default, top bar when
   // the user picks it in Settings. The CSS keys off this class.
   document.body.classList.toggle("mobile-bar-top", state.settings.mobileReaderBar === "top");
+  document.body.classList.toggle("vim-navigation-enabled", !!state.settings.vimNavigation);
+  applyVimPaneFocus();
   applySidebarCollapsed();
   applyPaneWidths();
 }
@@ -1816,7 +1871,7 @@ function renderNav() {
       const countBtn = unreadCount ? `<button type="button" class="feed-count" data-mark-read="${esc(f.id)}" title="Mark ${esc(displayTitle)} read" aria-label="Mark ${esc(displayTitle)} read">${fmtCount(unreadCount)}</button>` : "";
       const muteBtn = `<button type="button" class="feed-mute${f.muted ? " on" : ""}" data-mute="${esc(f.id)}" title="${f.muted ? "Unmute" : "Mute"} ${esc(displayTitle)}" aria-label="${f.muted ? "Unmute" : "Mute"} ${esc(displayTitle)}" aria-pressed="${!!f.muted}">${f.muted ? "Muted" : "Mute"}</button>`;
       const optsBtn = `<button type="button" class="feed-opts" data-feed-opts="${esc(f.id)}" title="Options for ${esc(displayTitle)}" aria-label="Options for ${esc(displayTitle)}" aria-haspopup="true" aria-expanded="false">···</button>`;
-      return `<div class="feed-row-wrap"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" draggable="true" title="${esc(displayTitle)}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(displayTitle)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(displayTitle)}">!</button>` : ""}${countBtn}${muteBtn}${optsBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(displayTitle)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(displayTitle)}` : `Unsubscribe from ${esc(displayTitle)}`}">${armed ? "Sure?" : "×"}</button></div>`;
+      return `<div class="feed-row-wrap${g ? " nested-feed" : ""}"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" draggable="true" title="${esc(displayTitle)}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(displayTitle)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(displayTitle)}">!</button>` : ""}${countBtn}${muteBtn}${optsBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(displayTitle)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(displayTitle)}` : `Unsubscribe from ${esc(displayTitle)}`}">${armed ? "Sure?" : "×"}</button></div>`;
     }).join("");
     return label + (g ? `<div class="folder-feeds" data-drop-folder="${esc(g)}"${collapsed ? " hidden" : ""}>${rows}</div>` : rows);
   }).join("") : '<p class="muted">Your feeds will appear here.</p>';
@@ -2240,11 +2295,9 @@ function markdownToHTML(md) {
   return html;
 }
 async function loadFullText(item) {
-  const btn = $('[data-reader="fulltext"]');
-  // Loading is shown on the toolbar button itself: disabled with a
-  // "Loading…" tooltip. The button is icon-only (#197), so its content
-  // (the icon) is left alone.
-  if (btn) { btn.disabled = true; btn.title = "Loading full article…"; }
+  if (!item || loadingFullTextIds.has(item.id) || item.fullContent) return;
+  loadingFullTextIds.add(item.id);
+  if (state.selected === item.id) renderReader(item);
   try {
     // The site's own WordPress API first — but only for sites we know
     // are WordPress (their feed loaded via the WP API). Asking every
@@ -2260,6 +2313,7 @@ async function loadFullText(item) {
       item.fullContent = body.innerHTML;
     }
     await put(item);
+    loadingFullTextIds.delete(item.id);
     // The article's body changed, so its cached search text is stale.
     searchTextCache.delete(item.id);
     // The load can take tens of seconds; the user may have opened
@@ -2267,10 +2321,10 @@ async function loadFullText(item) {
     // article if it is still the one on screen, or the completed load
     // would yank the reader back to a stale article.
     if (state.selected === item.id) openItem(item.id);
-    else if (btn) { btn.disabled = false; btn.title = "Load full article (w)"; }
     toast("Full article loaded.");
   } catch (e) {
-    if (btn) { btn.disabled = false; btn.title = "Load full article (w)"; }
+    loadingFullTextIds.delete(item.id);
+    if (state.selected === item.id) renderReader(item);
     toast("Full text unavailable — the publisher blocks direct access and the reader services could not fetch this page.");
   }
 }
@@ -2279,6 +2333,7 @@ async function loadFullText(item) {
    excerpt with W (or the More menu). In-memory only: the fetched full
    text stays stored on the item, so toggling back on is instant. */
 const fullOffIds = new Set();
+const loadingFullTextIds = new Set();
 /* Whether the reader is showing fetched full text, and whether the feed
    content already IS the full article (nothing to load or toggle). */
 function fullTextState(x) {
@@ -2416,7 +2471,9 @@ function renderReader(x) {
   // tags or the input is open; the toolbar Tag button toggles it.
   const tagsRowHTML = ((x.tags || []).length || tagsOpen) ? `<div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<span id="tagInputWrap" ${tagsOpen ? "" : "hidden"}><input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></span></div>` : "";
   const hasNote = !!getArticleNote(x.id);
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span>${esc(f ? feedDisplayTitle(f) : x.feedTitle)}</span><div class="reader-actions">${toolbarOrder().map(k => toolbarButtonHTML(k, x, {fullLabel, canListen, canFull, hasNote})).join("")}</div></div>${tagsRowHTML}${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${articleNoteHTML(x)}${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
+  const readerFeedTitle = f ? feedDisplayTitle(f) : x.feedTitle;
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span title="${esc(readerFeedTitle)}" aria-label="${esc(readerFeedTitle)}">${esc(readerFeedTitle)}</span><div class="reader-actions">${toolbarOrder().map(k => toolbarButtonHTML(k, x, {fullLabel, canListen, canFull, hasNote})).join("")}</div></div>${tagsRowHTML}${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${articleNoteHTML(x)}${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
+  setupReaderToolbarOverflow();
   const tagAdd = $("#tagAddBtn");
   if (tagAdd) tagAdd.onclick = () => { const x = selectedItem(); const inp = $("#tagInput"); if (x && inp) addTagToItem(x, inp.value); };
   const bodyEl = $("#body");
@@ -3376,6 +3433,7 @@ function showSettings() {
   $("#progressSelect").value = state.settings.progressPosition || "bottom";
   $("#mobileBarSelect").value = state.settings.mobileReaderBar || "bottom";
   $("#shortcutPresetSelect").value = state.settings.shortcutPreset || "inoreader";
+  $("#vimNavigationToggle").checked = !!state.settings.vimNavigation;
   $("#cardExcerptSelect").value = state.settings.cardExcerpt || "full";
   $("#cardImageToggle").checked = state.settings.cardImage !== false;
   $("#hideDuplicatesToggle").checked = state.settings.hideDuplicates !== false;
@@ -3437,8 +3495,19 @@ function renderHelpRows() {
   }).join("");
   const tbody = $("#helpRows");
   if (tbody) tbody.innerHTML = body;
+  const vimRows = state.settings.vimNavigation ? [
+    ["h / l", "Move focus between sidebar, article list, and article"],
+    ["j / k", "Move through the focused pane"],
+    ["d / u", "Page down / up in the focused pane"],
+    ["Ctrl+d / Ctrl+u", "Page down / up in the focused pane"],
+    ["g g / G", "Top / bottom of the focused pane"],
+    ["Enter", "Open selected article; expand or collapse selected folder"],
+    ["Space / Shift+Space", "Page down / up in the focused pane"],
+    ["q", "Close article and return focus to the article list"]
+  ].map(([keys, action]) => `<tr><td>${esc(keys)}</td><td>${esc(action)}</td></tr>`).join("") : "";
+  if (tbody) tbody.innerHTML = body + vimRows;
   const note = $("#helpPresetNote");
-  if (note) note.textContent = `Preset: ${preset.name}. Change it in Settings under Keyboard shortcuts. Quick access (.) is not built yet.`;
+  if (note) note.textContent = `Preset: ${preset.name}. Change it in Settings under Keyboard shortcuts. ${state.settings.vimNavigation ? "Vim-like pane navigation is enabled." : "Vim-like pane navigation can be enabled in Settings."} Quick access (.) is not built yet.`;
 }
 
 
@@ -3890,8 +3959,22 @@ function bind() {
       if (ttsBtn.dataset.tts === "stop") stopTTS();
       return;
     }
+    const more = e.target.closest("[data-reader-more]");
+    if (more) {
+      const menu = more.nextElementSibling;
+      if (menu) {
+        menu.hidden = !menu.hidden;
+        more.setAttribute("aria-expanded", String(!menu.hidden));
+      }
+      return;
+    }
     const ra = e.target.closest("[data-reader]");
     if (ra && state.selected) {
+      const overflowMenu = ra.closest(".reader-overflow .menu");
+      if (overflowMenu) {
+        overflowMenu.hidden = true;
+        overflowMenu.previousElementSibling?.setAttribute("aria-expanded", "false");
+      }
       const x = selectedItem();
       if (!x) return;
       if (ra.dataset.reader === "save") { x.saved = !x.saved; await put(x); openItem(x.id); return; }
@@ -4230,9 +4313,100 @@ function bind() {
   matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
     if (state.settings.theme === "system") applySettings();
   });
+  let vimPendingG = false, vimPendingGTimer = null;
+  function visibleVimSidebarItems() {
+    return $("#feeds .folder-toggle, #feeds .feed-row").filter(node => node.getClientRects().length);
+  }
+  function moveVimSidebarCursor(direction) {
+    const nodes = visibleVimSidebarItems();
+    if (!nodes.length) return;
+    let index = nodes.findIndex(node => node.classList.contains("vim-cursor"));
+    if (index < 0) {
+      index = nodes.findIndex(node => node.dataset.feed === state.feed);
+      if (index < 0) index = direction > 0 ? -1 : nodes.length;
+    }
+    index = Math.max(0, Math.min(nodes.length - 1, index + direction));
+    nodes.forEach(node => node.classList.toggle("vim-cursor", nodes[index] === node));
+    nodes[index].scrollIntoView({block:"nearest"});
+  }
+  function vimSidebarEnter() {
+    const selected = $("#feeds .vim-cursor");
+    if (selected) selected.click();
+    else if (state.feed) $("#feeds [data-feed=\"" + CSS.escape(state.feed) + "\"]")?.click();
+  }
+  function vimListEdge(edge) {
+    const items = visible();
+    if (!items.length) return;
+    const item = edge === "top" ? items[0] : items[items.length - 1];
+    state.selected = item.id;
+    renderList();
+    document.querySelector("[data-article=\"" + CSS.escape(item.id) + "\"]")?.scrollIntoView({block:"nearest"});
+  }
+  function handleVimNavigation(e) {
+    if (!state.settings.vimNavigation || e.altKey || e.metaKey) return false;
+    const pane = state.settings.vimPane || "list", key = e.key;
+    if (vimPendingG) {
+      clearTimeout(vimPendingGTimer); vimPendingG = false;
+      if (key === "g" && !e.ctrlKey && !e.shiftKey) {
+        e.preventDefault();
+        if (pane === "sidebar") visibleVimSidebarItems()[0]?.scrollIntoView({block:"nearest"});
+        else if (pane === "list") vimListEdge("top");
+        else $("#reader")?.scrollTo({top:0});
+        return true;
+      }
+    }
+    if (key === "g" && !e.ctrlKey && !e.shiftKey) {
+      vimPendingG = true;
+      vimPendingGTimer = setTimeout(() => { vimPendingG = false; }, 1000);
+      e.preventDefault(); return true;
+    }
+    if (key === "h" || key === "l") {
+      const panes = ["sidebar", "list", "article"];
+      setVimPaneFocus(panes[Math.max(0, Math.min(2, panes.indexOf(pane) + (key === "h" ? -1 : 1)))]);
+      e.preventDefault(); return true;
+    }
+    if (key === "j" || key === "k") {
+      const dir = key === "j" ? 1 : -1;
+      if (pane === "sidebar") moveVimSidebarCursor(dir);
+      else if (pane === "list") moveHighlight(dir);
+      else $("#reader")?.scrollBy({top:dir * 40});
+      e.preventDefault(); return true;
+    }
+    if (key === "G" && !e.ctrlKey) {
+      if (pane === "sidebar") visibleVimSidebarItems().at(-1)?.scrollIntoView({block:"nearest"});
+      else if (pane === "list") vimListEdge("bottom");
+      else $("#reader")?.scrollTo({top:$("#reader").scrollHeight});
+      e.preventDefault(); return true;
+    }
+    if ((key === "d" || key === "u") && !e.altKey && !e.metaKey) {
+      const target = pane === "sidebar" ? $("#sidebar") : pane === "list" ? $(".list-pane") : $("#reader");
+      target?.scrollBy({top:(key === "d" ? 1 : -1) * target.clientHeight / 2});
+      e.preventDefault(); return true;
+    }
+    if (key === " ") {
+      const target = pane === "sidebar" ? $("#sidebar") : pane === "list" ? $(".list-pane") : $("#reader");
+      target?.scrollBy({top:(e.shiftKey ? -1 : 1) * target.clientHeight / 2});
+      e.preventDefault(); return true;
+    }
+    if (key === "Enter") {
+      if (pane === "sidebar") vimSidebarEnter();
+      else if (pane === "list" && state.selected) openItem(state.selected);
+      e.preventDefault(); return true;
+    }
+    if (key === "q" && pane === "article") {
+      closeReader(); setVimPaneFocus("list"); e.preventDefault(); return true;
+    }
+    return false;
+  }
+  for (const [selector, pane] of [["#sidebar", "sidebar"], [".list-pane", "list"], ["#reader", "article"]]) {
+    $(selector)?.addEventListener("pointerdown", () => {
+      if (state.settings.vimNavigation) setVimPaneFocus(pane);
+    });
+  }
   document.onkeydown = e => {
     const tag = document.activeElement?.tagName;
     if (["INPUT", "SELECT", "TEXTAREA"].includes(tag) || $("dialog[open]")) return;
+    if (handleVimNavigation(e)) return;
     if (e.key === "Escape") {
       $("#sidebar").classList.remove("open");
       $("#scrim").classList.remove("show");
