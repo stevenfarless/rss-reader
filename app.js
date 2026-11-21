@@ -1856,7 +1856,7 @@ function renderNav() {
     // A folder's chevron collapses its feeds (#175); the name still
     // opens the folder's merged list, as before.
     const collapsed = g ? collapsedFolders.has(g) : false;
-    const label = g ? `<div class="folder-head" data-drop-folder="${esc(g)}"><button type="button" class="folder-toggle" data-folder-toggle="${esc(g)}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Collapse"} folder ${esc(g)}">${collapsed ? "▸" : "▾"}</button><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${fmtCount(folderUnread)}</span>` : ""}</button></div>` : (groupNames.length > 1 ? `<div class="feed-group" data-drop-folder="">Ungrouped</div>` : "");
+    const label = g ? `<div class="folder-head" data-drop-folder="${esc(g)}"><button type="button" class="folder-toggle" data-folder-toggle="${esc(g)}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Collapse"} folder ${esc(g)}"><span class="folder-chevron" aria-hidden="true">▾</span></button><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${fmtCount(folderUnread)}</span>` : ""}</button></div>` : (groupNames.length > 1 ? `<div class="feed-group" data-drop-folder="">Ungrouped</div>` : "");
     const rows = groups[g].map(f => {
       const unreadCount = unreadByFeed.get(f.id) || 0;
       const err = f.error ? " feed-error" : "";
@@ -2035,7 +2035,7 @@ function renderList() {
   $$(".filter").forEach(x => x.classList.toggle("active", x.dataset.filter === state.filter));
   // The filter menu button shows the active filter (#175).
   const fb = $("#filterMenuBtn");
-  if (fb) fb.textContent = ({ all: "All", today: "Today", week: "This week" }[state.filter] || "All") + " ▾";
+  if (fb) fb.querySelector(".disclosure-label").textContent = ({ all: "All", today: "Today", week: "This week" }[state.filter] || "All");
   const base = state.view === "saved" ? "Articles you have kept for later."
     : state.view === "snoozed" ? "Articles waiting to come back."
     : state.view === "unread" ? "Stories you have not read yet."
