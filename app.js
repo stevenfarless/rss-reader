@@ -1780,7 +1780,7 @@ function renderNav() {
     const named = groupNames.filter(g => g);
     const allCollapsed = allFoldersCollapsed(named, collapsedFolders);
     allBtn.hidden = named.length === 0;
-    allBtn.textContent = allCollapsed ? "▾▾ Expand all" : "▴▴ Collapse all";
+    allBtn.textContent = allCollapsed ? "Expand all" : "Collapse all";
     const label = allCollapsed ? "Expand all folders" : "Collapse all folders";
     allBtn.setAttribute("aria-label", label);
     allBtn.title = label;
