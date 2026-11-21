@@ -4344,7 +4344,7 @@ function bind() {
     document.querySelector("[data-article=\"" + CSS.escape(item.id) + "\"]")?.scrollIntoView({block:"nearest"});
   }
   function handleVimNavigation(e) {
-    if (!shortcutPreset() === "vim" || e.altKey || e.metaKey) return false;
+    if (shortcutPreset() !== "vim" || e.altKey || e.metaKey) return false;
     const pane = state.settings.vimPane || "list", key = e.key;
     if (vimPendingG) {
       clearTimeout(vimPendingGTimer); vimPendingG = false;
@@ -4355,13 +4355,20 @@ function bind() {
         else $("#reader")?.scrollTo({top:0});
         return true;
       }
+      // Preserve the preset's other g-prefixed commands (g a, g u, etc.).
+      const sequenceAction = (PRESETS[shortcutPreset()] || PRESETS.inoreader).keys["g " + keyDesc(e)];
+      if (sequenceAction) {
+        e.preventDefault();
+        runShortcutAction(sequenceAction, e);
+        return true;
+      }
     }
     if (key === "g" && !e.ctrlKey && !e.shiftKey) {
       vimPendingG = true;
       vimPendingGTimer = setTimeout(() => { vimPendingG = false; }, 1000);
       e.preventDefault(); return true;
     }
-    if (key === "h" || key === "l") {
+    if ((key === "h" || key === "l") && !pendingSeq) {
       const panes = ["sidebar", "list", "article"];
       setVimPaneFocus(panes[Math.max(0, Math.min(2, panes.indexOf(pane) + (key === "h" ? -1 : 1)))]);
       e.preventDefault(); return true;
