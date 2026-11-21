@@ -44,6 +44,17 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 
 The GitHub Actions workflow in `.github/workflows/pages.yml` deploys the repository root to GitHub Pages. Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**.
 
+### Automated audits
+
+The `.github/workflows/lighthouse.yml` workflow runs on pull requests targeting `main`, pushes to `main`, and manual dispatches. It launches real Chrome through Lighthouse CI, audits the static site on a local server, and runs three Lighthouse passes. Performance, accessibility, best practices, and SEO thresholds initially report warnings so the first measurements can establish a baseline without blocking deployment.
+
+Each run saves HTML and JSON reports as a downloadable GitHub Actions artifact for 30 days. Reports stay in the workflow artifact rather than being sent to public report storage.
+
+The project test suite also checks the web app manifest, required icon files, mobile viewport metadata, and service worker registration and lifecycle handlers. These checks cover repository-level PWA configuration.
+
+**Lighthouse no longer includes a PWA category.** Google removed it in Lighthouse 12. The workflow therefore uses current Lighthouse categories and explicit PWA configuration regression tests. To verify Chrome's live installability diagnostics, open the deployed site in Chrome and inspect **DevTools → Application → Manifest**. The automated checks do not claim to replace that browser-level check.
+
+
 ## Feed access
 
 Browsers enforce cross-origin resource sharing (CORS). This reader loads feeds entirely in the page, with no backend of its own, in this order:
