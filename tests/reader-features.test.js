@@ -24,8 +24,18 @@ test("single-row reader header and overflow menu", () => {
   assert.match(css, /flex-wrap:nowrap/);
 });
 test("Vim-like navigation is optional and persistent", () => {
-  assert.match(html, /id="vimNavigationToggle"/);
+  assert.match(html, /<option value="vim">Vim<\/option>/);
   assert.match(app, /handleVimNavigation/);
   assert.match(app, /vimPane/);
+  assert.match(app, /shortcutPreset\(\) === "vim"/);
+  assert.match(html, /id="shortcutHelp"/);
+  assert.match(app, /shortcutHelp.*showHelp/);
   assert.match(css, /vim-navigation-enabled/);
+});
+
+test("Vim is a keyboard shortcut preset", () => {
+  const utils = readFileSync(new URL("../utils.js", import.meta.url), "utf8");
+  assert.match(utils, /PRESETS\.vim = \{ name: "Vim"/);
+  assert.match(html, /id="shortcutPresetSelect"[^]*<option value="vim">Vim<\/option>/);
+  assert.doesNotMatch(html, /vimNavigationToggle/);
 });

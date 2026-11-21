@@ -295,6 +295,12 @@ const PRESETS = {
   } }
 };
 
+/* Vim is a first-class preset. The pane-navigation handler owns its
+   movement keys, so remove the overlapping Inoreader bindings here. */
+const vimKeys = { ...PRESETS.inoreader.keys };
+for (const key of ["h", "j", "k", "d", "u", "Enter", "Space", "Shift+Space", "g g"]) delete vimKeys[key];
+PRESETS.vim = { name: "Vim", keys: vimKeys };
+
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder, nextFeedSort, keyDesc, PRESETS, ACTION_LABELS };
