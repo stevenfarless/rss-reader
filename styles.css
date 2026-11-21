@@ -235,7 +235,10 @@ body:not(.mobile-bar-top) .reader-actions .menu-wrap .reader-btn{flex:1;justify-
 body:not(.mobile-bar-top) .reader-actions .reader-btn{justify-content:center;min-height:44px;font-size:20px}
 body:not(.mobile-bar-top) .reader-actions .reader-btn span{display:none}
 body:not(.mobile-bar-top) .reader-actions .menu{top:auto;bottom:calc(100% + 6px)}
-body:not(.mobile-bar-top) #readProgress.bottom{bottom:calc(56px + env(safe-area-inset-bottom))}
+/* Keep the bottom progress indicator on the viewport edge, below the
+   reader controls. The safe-area offset places it above the iPhone home
+   indicator while the toolbar continues to occupy its normal space. */
+#readProgress.bottom{position:fixed;left:0;right:0;bottom:env(safe-area-inset-bottom);margin:0;z-index:31}
 }
 
 /* Sidebar drag and drop (#182): the dragged row fades, the drop spot
