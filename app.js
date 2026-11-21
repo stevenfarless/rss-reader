@@ -480,6 +480,8 @@ function validateSettings(d) {
   const prog = pick("#progressSelect", d.progressPosition); if (prog) next.progressPosition = prog;
   const mbar = pick("#mobileBarSelect", d.mobileReaderBar); if (mbar) next.mobileReaderBar = mbar;
   const preset = pick("#shortcutPresetSelect", d.shortcutPreset); if (preset) next.shortcutPreset = preset;
+  // Migrate the former standalone Vim toggle into the unified preset selector.
+  if (d.vimNavigation === true) next.shortcutPreset = "vim";
   const exc = pick("#cardExcerptSelect", d.cardExcerpt); if (exc) next.cardExcerpt = exc;
   if (typeof d.cardImage === "boolean") next.cardImage = d.cardImage;
   if (typeof d.hideDuplicates === "boolean") next.hideDuplicates = d.hideDuplicates;
@@ -701,7 +703,6 @@ function readSettingsFromDialog() {
     progressPosition: $("#progressSelect").value,
     mobileReaderBar: $("#mobileBarSelect").value,
     shortcutPreset: $("#shortcutPresetSelect").value,
-    vimNavigation: $("#vimNavigationToggle").checked,
     vimPane: state.settings.vimPane || "list",
     cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
@@ -765,9 +766,9 @@ async function refreshSyncCapability() {
 function applyVimPaneFocus() {
   const pane = ["sidebar", "list", "article"].includes(state.settings.vimPane) ? state.settings.vimPane : "list";
   document.body.dataset.vimPane = pane;
-  $("#sidebar")?.classList.toggle("vim-focused", !!state.settings.vimNavigation && pane === "sidebar");
-  $(".list-pane")?.classList.toggle("vim-focused", !!state.settings.vimNavigation && pane === "list");
-  $("#reader")?.classList.toggle("vim-focused", !!state.settings.vimNavigation && pane === "article");
+  $("#sidebar")?.classList.toggle("vim-focused", shortcutPreset() === "vim" && pane === "sidebar");
+  $(".list-pane")?.classList.toggle("vim-focused", shortcutPreset() === "vim" && pane === "list");
+  $("#reader")?.classList.toggle("vim-focused", shortcutPreset() === "vim" && pane === "article");
 }
 function setVimPaneFocus(pane) {
   if (!["sidebar", "list", "article"].includes(pane)) return;
@@ -792,7 +793,7 @@ function applySettings() {
   // Mobile article actions (#179): bottom bar by default, top bar when
   // the user picks it in Settings. The CSS keys off this class.
   document.body.classList.toggle("mobile-bar-top", state.settings.mobileReaderBar === "top");
-  document.body.classList.toggle("vim-navigation-enabled", !!state.settings.vimNavigation);
+  document.body.classList.toggle("vim-navigation-enabled", shortcutPreset() === "vim");
   applyVimPaneFocus();
   applySidebarCollapsed();
   applyPaneWidths();
@@ -3433,7 +3434,6 @@ function showSettings() {
   $("#progressSelect").value = state.settings.progressPosition || "bottom";
   $("#mobileBarSelect").value = state.settings.mobileReaderBar || "bottom";
   $("#shortcutPresetSelect").value = state.settings.shortcutPreset || "inoreader";
-  $("#vimNavigationToggle").checked = !!state.settings.vimNavigation;
   $("#cardExcerptSelect").value = state.settings.cardExcerpt || "full";
   $("#cardImageToggle").checked = state.settings.cardImage !== false;
   $("#hideDuplicatesToggle").checked = state.settings.hideDuplicates !== false;
@@ -3495,7 +3495,7 @@ function renderHelpRows() {
   }).join("");
   const tbody = $("#helpRows");
   if (tbody) tbody.innerHTML = body;
-  const vimRows = state.settings.vimNavigation ? [
+  const vimRows = shortcutPreset() === "vim" ? [
     ["h / l", "Move focus between sidebar, article list, and article"],
     ["j / k", "Move through the focused pane"],
     ["d / u", "Page down / up in the focused pane"],
@@ -3507,7 +3507,7 @@ function renderHelpRows() {
   ].map(([keys, action]) => `<tr><td>${esc(keys)}</td><td>${esc(action)}</td></tr>`).join("") : "";
   if (tbody) tbody.innerHTML = body + vimRows;
   const note = $("#helpPresetNote");
-  if (note) note.textContent = `Preset: ${preset.name}. Change it in Settings under Keyboard shortcuts. ${state.settings.vimNavigation ? "Vim-like pane navigation is enabled." : "Vim-like pane navigation can be enabled in Settings."} Quick access (.) is not built yet.`;
+  if (note) note.textContent = `Preset: ${preset.name}. Change it in Settings under Keyboard shortcuts. ${shortcutPreset() === "vim" ? "Vim pane navigation is enabled." : "Vim pane navigation is available as a shortcut mode."} Quick access (.) is not built yet.`;
 }
 
 
@@ -4281,6 +4281,7 @@ function bind() {
     } finally { b.disabled = false; }
   };
   $("#saveSettings").onclick = () => applySettingsFromDialog(true);
+  $("#shortcutHelp").onclick = showHelp;
   // Settings apply live (#162): a change to any control saves and applies
   // at once, so closing with × keeps the change. The background-sync
   // registration only runs when its own toggles change.
@@ -4343,7 +4344,7 @@ function bind() {
     document.querySelector("[data-article=\"" + CSS.escape(item.id) + "\"]")?.scrollIntoView({block:"nearest"});
   }
   function handleVimNavigation(e) {
-    if (!state.settings.vimNavigation || e.altKey || e.metaKey) return false;
+    if (!shortcutPreset() === "vim" || e.altKey || e.metaKey) return false;
     const pane = state.settings.vimPane || "list", key = e.key;
     if (vimPendingG) {
       clearTimeout(vimPendingGTimer); vimPendingG = false;
@@ -4400,7 +4401,7 @@ function bind() {
   }
   for (const [selector, pane] of [["#sidebar", "sidebar"], [".list-pane", "list"], ["#reader", "article"]]) {
     $(selector)?.addEventListener("pointerdown", () => {
-      if (state.settings.vimNavigation) setVimPaneFocus(pane);
+      if (shortcutPreset() === "vim") setVimPaneFocus(pane);
     });
   }
   document.onkeydown = e => {
