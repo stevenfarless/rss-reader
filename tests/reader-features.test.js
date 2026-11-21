@@ -54,3 +54,10 @@ test("disclosure chevrons animate from their accessible expanded state", () => {
   assert.ok(css.includes('.folder-toggle[aria-expanded="false"] .folder-chevron'));
   assert.ok(css.includes("@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}"));
 });
+
+
+test("mobile bottom reading progress stays on the viewport edge", () => {
+  assert.match(css, /#readProgress\\.bottom\\{position:fixed;left:0;right:0;bottom:env\\(safe-area-inset-bottom\\);margin:0;z-index:31\\}/);
+  assert.doesNotMatch(css, /#readProgress\\.bottom\\{bottom:calc\\(56px \\+ env\\(safe-area-inset-bottom\\)\\)\\}/);
+  assert.match(css, /body:not\\(\\.mobile-bar-top\\) \\.reader-actions\\{position:fixed;left:0;right:0;bottom:0;z-index:30/);
+});
