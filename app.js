@@ -798,7 +798,7 @@ function applySettings() {
   // Keep the browser chrome (status bar, task switcher) on the same
   // color as the theme, so the theme never flashes the wrong color.
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = t === "light" || t === "white" ? "#ffffff" : t === "oled" ? "#000000" : "#171916";
+  if (meta) meta.content = t === "light" ? "#f4f2ec" : t === "white" ? "#ffffff" : t === "oled" ? "#000000" : "#171916";
   document.documentElement.dataset.width = state.settings.width;
   document.documentElement.dataset.size = state.settings.size;
   // Reader typography (#111): serif/comfortable are the defaults, so
