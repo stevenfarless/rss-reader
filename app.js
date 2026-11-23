@@ -538,6 +538,7 @@ function saveFeeds() {
   local(K, state.feeds);
   local(K + ".bak", state.feeds);
   mirrorSync();
+  scheduleFeedRefresh();
 }
 function saveFolders() { local(KF, state.folders); }
 function saveTags() { local(KT, state.tags); }
@@ -1677,6 +1678,21 @@ function showFeedError(id) {
   $("#feedErrorDialog").dataset.feed = id;
   $("#feedErrorDialog").showModal();
 }
+
+function scheduleFeedRefresh() {
+  if (refreshSchedulerTimer) clearTimeout(refreshSchedulerTimer);
+  refreshSchedulerTimer = null;
+  if (!state.feeds.length) return;
+  const now = Date.now();
+  const nextAt = Math.min(...state.feeds.map(feed => Number(feed.nextRefreshAt) || now));
+  const delay = Math.max(5000, Math.min(nextAt - now, document.hidden ? 5 * 60 * 1000 : 6 * 60 * 60 * 1000));
+  refreshSchedulerTimer = setTimeout(async () => {
+    refreshSchedulerTimer = null;
+    if (!document.hidden && state.feeds.some(feed => shouldRefreshFeed(feed))) await refresh({ force: false });
+    scheduleFeedRefresh();
+  }, delay);
+}
+
 async function refresh(options = {}) {
   if (!state.feeds.length) { toast("Add a feed first."); return; }
   const now = Date.now();
@@ -3066,6 +3082,7 @@ async function moveQueueItem(item, direction) {
 const BACKUP_FORMAT = "rss-reader-backup", BACKUP_STORES = ["items", "sync", "highlights"];
 let pendingBackup = null, pendingOpmlFile = null;
 const queueSelection = new Set();
+let refreshSchedulerTimer = null;
 function backupReadStore(name) {
   return new Promise((resolve, reject) => {
     const request = db.transaction(name, "readonly").objectStore(name).getAll();
@@ -4783,6 +4800,10 @@ function bind() {
   $("#railSearch")?.addEventListener("click", () => $("#search").focus());
   $("#railRefresh")?.addEventListener("click", refresh);
   $("#railNextUnread")?.addEventListener("click", () => moveUnread(1));
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && state.feeds.some(feed => shouldRefreshFeed(feed))) refresh({ force: false });
+    else scheduleFeedRefresh();
+  });
   $("#railTags")?.addEventListener("click", () => toggleRailFlyout("tags"));
   $("#railSavedSearches")?.addEventListener("click", () => toggleRailFlyout("searches"));
   $("#railFlyout")?.addEventListener("click", e => {
