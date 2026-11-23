@@ -3122,6 +3122,100 @@ async function previewOPML(file) {
   } catch (error) { pendingOpmlFile = null; toast(error.message || "Could not read OPML file."); }
 }
 
+
+/* Storage management (#212). Saved, queued, highlighted, and annotated
+   articles are protected from age-based cleanup by default. */
+function cleanupCandidates(days) {
+  if (!days) return [];
+  const cutoff = Date.now() - days * 86400000;
+  const protectedIds = new Set(state.highlights.map(h => h.itemId));
+  for (const itemId of Object.keys(articleNotes)) if (articleNotes[itemId]) protectedIds.add(itemId);
+  return state.items.filter(item => {
+    const published = item.published ? Date.parse(item.published) : NaN;
+    return !item.saved && !item.queued && !protectedIds.has(item.id) && Number.isFinite(published) && published < cutoff;
+  });
+}
+async function updateStorageEstimate() {
+  const output = $("#storageEstimate");
+  if (!output) return;
+  if (!navigator.storage?.estimate) { output.textContent = "Storage estimates are unavailable in this browser."; return; }
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    if (!Number.isFinite(usage) || !Number.isFinite(quota) || quota <= 0) { output.textContent = "Storage estimate unavailable."; return; }
+    const fmt = bytes => bytes < 1048576 ? Math.round(bytes / 1024) + " KB" : (bytes / 1048576).toFixed(1) + " MB";
+    output.textContent = `Approximately ${fmt(usage)} used of ${fmt(quota)} available.`;
+  } catch { output.textContent = "Could not read browser storage usage."; }
+}
+function updateCleanupPreview() {
+  const output = $("#cleanupPreview");
+  if (!output) return;
+  const days = Number($("#retentionSelect")?.value || 0);
+  output.textContent = days ? `${cleanupCandidates(days).length} articles are eligible for removal. Saved articles, queued articles, highlights, and notes are protected.` : "No age-based cleanup is selected.";
+}
+async function cleanupOldArticles() {
+  const days = Number($("#retentionSelect")?.value || 0), candidates = cleanupCandidates(days);
+  if (!days) { toast("Choose a retention period first."); return; }
+  updateCleanupPreview();
+  if (!candidates.length) { toast("No unprotected articles are older than that period."); return; }
+  if (!confirm(`Remove ${candidates.length} old articles? Saved, queued, highlighted, and annotated articles will be preserved.`)) return;
+  try {
+    const ids = candidates.map(x => x.id);
+    for (let i = 0; i < ids.length; i += 250) {
+      await deleteMany(ids.slice(i, i + 250));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    const removed = new Set(ids);
+    state.items = state.items.filter(x => !removed.has(x.id));
+    render(); updateStorageEstimate(); updateCleanupPreview();
+    toast(`Removed ${ids.length} old articles.`);
+  } catch (error) {
+    toast(`Cleanup could not finish: ${error.message || "browser storage error"}. Existing saved and annotated articles remain protected.`);
+  }
+}
+
+/* Reading activity is calculated locally from read timestamps. Older
+   records without readAt are excluded rather than assigned invented dates. */
+function localDayKey(date) {
+  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+}
+function updateReadingStats() {
+  const output = $("#readingStats"), chart = $("#readingActivityChart");
+  if (!output) return;
+  const range = Number($("#statsRange")?.value || 30);
+  const today = new Date(), start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - range + 1);
+  const byDay = new Map(), byFeed = new Map();
+  for (const item of state.items) {
+    if (!Number.isFinite(item.readAt)) continue;
+    const date = new Date(item.readAt);
+    if (date < start || date > today) continue;
+    const key = localDayKey(date);
+    byDay.set(key, (byDay.get(key) || 0) + 1);
+    byFeed.set(item.feedId, (byFeed.get(item.feedId) || 0) + 1);
+  }
+  const total = [...byDay.values()].reduce((sum, count) => sum + count, 0);
+  const queue = state.items.filter(x => x.queued);
+  const mostActiveId = [...byFeed.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const mostActive = state.feeds.find(f => f.id === mostActiveId);
+  const activeDays = new Set(byDay.keys());
+  let streak = 0, cursor = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  if (!activeDays.has(localDayKey(cursor))) cursor.setDate(cursor.getDate() - 1);
+  while (activeDays.has(localDayKey(cursor))) { streak++; cursor.setDate(cursor.getDate() - 1); }
+  output.textContent = `${total} articles marked read in ${range} days across ${activeDays.size} active days. Current streak: ${streak} days. Queue: ${queue.filter(x => x.read).length}/${queue.length} read. Most active feed: ${mostActive?.title || "No activity"}.`;
+  if (chart) {
+    const days = [];
+    for (let offset = range - 1; offset >= 0; offset--) {
+      const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - offset);
+      days.push({ key: localDayKey(date), label: date.toLocaleDateString([], { month: "short", day: "numeric" }) });
+    }
+    const max = Math.max(1, ...days.map(d => byDay.get(d.key) || 0));
+    chart.innerHTML = days.map(d => {
+      const count = byDay.get(d.key) || 0;
+      return `<div class="activity-day" title="${esc(d.label)}: ${count} articles"><i style="height:${Math.max(2, count / max * 100)}%"></i></div>`;
+    }).join("");
+    chart.setAttribute("aria-label", `${total} articles marked read over ${range} days`);
+  }
+}
+
 /* ---------- folders & tags ---------- */
 function goTag(tag) {
   stopTTS();

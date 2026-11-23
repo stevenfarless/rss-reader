@@ -337,7 +337,3 @@ dialog .x:focus:not(:focus-visible){outline:none;background:transparent;color:va
 .list-heading>div:first-child:has(>#subtitle:empty) #subtitle{display:none}
 @media(min-width:821px){.layout{grid-template-columns:clamp(180px,var(--side-w,250px),420px) minmax(260px,clamp(260px,var(--list-w,390px),640px)) minmax(300px,1fr)}body.sidebar-collapsed .layout{grid-template-columns:52px minmax(260px,clamp(260px,calc(var(--list-w,390px) + var(--side-w,250px) - 52px),640px)) minmax(300px,1fr)}}
 .library-more[open] summary .disclosure-chevron{transform:rotate(180deg)}
-
-.activity-chart{display:flex;align-items:flex-end;gap:2px;height:64px;margin:8px 0 14px;overflow:hidden}.activity-day{flex:1;min-width:2px;height:100%;display:flex;align-items:flex-end;background:var(--panel2);border-radius:2px}.activity-day i{display:block;width:100%;min-height:2px;background:var(--accent);border-radius:2px 2px 0 0}
-#backupRestoreDialog,#opmlPreviewDialog{width:min(520px,calc(100% - 28px))}
-dialog :focus:not(:focus-visible){outline:none;box-shadow:none}dialog .x:focus:not(:focus-visible){background:transparent;color:var(--muted)}
