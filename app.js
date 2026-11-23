@@ -3784,13 +3784,24 @@ const xml = s => String(s).replace(/[<>&'"]/g, c => ({ "<": "&lt;", ">": "&gt;",
 
 /* ---------- OPML / settings import-export ---------- */
 function exportOPML() {
-  const groups = {};
-  for (const f of state.feeds) (groups[f.group || ""] ||= []).push(f);
-  const row = f => `<outline text="${xml(f.title)}" title="${xml(f.title)}" type="rss" xmlUrl="${xml(f.url)}" htmlUrl="${xml(f.site)}"/>`;
-  const body = Object.keys(groups).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b))).map(g =>
-    g ? `<outline text="${xml(g)}" title="${xml(g)}">${groups[g].map(row).join("")}</outline>` : groups[g].map(row).join("")
-  ).join("");
-  download(`<?xml version="1.0"?><opml version="2.0"><head><title>RSS Reader subscriptions</title></head><body>${body}</body></opml>`, "rss-reader-subscriptions.opml", "text/xml");
+  const root = { folders: new Map(), feeds: [] };
+  for (const feed of state.feeds) {
+    const path = String(feed.group || "").split("/").map(part => part.trim()).filter(Boolean);
+    let node = root;
+    for (const name of path) {
+      if (!node.folders.has(name)) node.folders.set(name, { folders: new Map(), feeds: [] });
+      node = node.folders.get(name);
+    }
+    node.feeds.push(feed);
+  }
+  const row = feed => `<outline text="${xml(feed.title)}" title="${xml(feed.title)}" type="rss" xmlUrl="${xml(feed.url)}" htmlUrl="${xml(feed.site)}"/>`;
+  const render = node => {
+    const folders = [...node.folders.entries()].sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, child]) => `<outline text="${xml(name)}" title="${xml(name)}">${render(child)}</outline>`);
+    const feeds = [...node.feeds].sort((a, b) => a.title.localeCompare(b.title)).map(row);
+    return [...folders, ...feeds].join("");
+  };
+  download(`<?xml version="1.0"?><opml version="2.0"><head><title>RSS Reader subscriptions</title></head><body>${render(root)}</body></opml>`, "rss-reader-subscriptions.opml", "text/xml");
 }
 async function importOPML(file) {
   const d = new DOMParser().parseFromString(await file.text(), "text/xml");
