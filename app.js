@@ -1693,7 +1693,7 @@ async function refreshFeed(f) {
 function showFeedError(id) {
   const f = state.feeds.find(v => v.id === id);
   if (!f) return;
-  $("#feedErrorText").textContent = [f.error || "This feed failed to load.", `Last attempt: ${f.lastAttempt ? new Date(f.lastAttempt).toLocaleString() : "Unknown"}`, `Last success: ${f.lastSuccess ? new Date(f.lastSuccess).toLocaleString() : "Never"}`, `Most recent error: ${f.lastError || "None recorded"}`, `Error occurred: ${f.lastErrorAt ? new Date(f.lastErrorAt).toLocaleString() : "Unknown"}`, `Consecutive failures: ${Number(f.consecutiveFailures) || 0}`, `Next eligible attempt: ${f.nextRefreshAt ? new Date(f.nextRefreshAt).toLocaleString() : "Now"}`, `Retrieval method: ${f.via || "Unknown"}`].join("\n");
+  $("#feedErrorText").textContent = [f.error || f.lastError || "This feed failed to load.", `Last attempt: ${f.lastAttempt ? new Date(f.lastAttempt).toLocaleString() : "Unknown"}`, `Last success: ${f.lastSuccess ? new Date(f.lastSuccess).toLocaleString() : "Never"}`, `Most recent error: ${f.lastError || "None recorded"}`, `Error occurred: ${f.lastErrorAt ? new Date(f.lastErrorAt).toLocaleString() : "Unknown"}`, `Consecutive failures: ${Number(f.consecutiveFailures) || 0}`, `Next eligible attempt: ${f.nextRefreshAt ? new Date(f.nextRefreshAt).toLocaleString() : "Now"}`, `Retrieval method: ${f.via || "Unknown"}`].join("\n");
   $("#feedErrorDialog").dataset.feed = id;
   $("#feedErrorDialog").showModal();
 }
@@ -1961,7 +1961,7 @@ function renderNav() {
     const rows = groups[g].map(f => {
       const unreadCount = unreadByFeed.get(f.id) || 0;
       const health = feedHealthState(f);
-      const err = f.error ? " feed-error" : health === "stale" ? " feed-stale" : "";
+      const err = health === "failing" ? " feed-error" : health === "stale" ? " feed-stale" : "";
       const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id;
       // The site's own favicon marks the row; if it fails to load the
       // dot comes back (the img hides itself and unhides the dot).
@@ -1974,7 +1974,7 @@ function renderNav() {
       const countBtn = unreadCount ? `<button type="button" class="feed-count" data-mark-read="${esc(f.id)}" title="Mark ${esc(displayTitle)} read" aria-label="Mark ${esc(displayTitle)} read">${fmtCount(unreadCount)}</button>` : "";
       const muteBtn = `<button type="button" class="feed-mute${f.muted ? " on" : ""}" data-mute="${esc(f.id)}" title="${f.muted ? "Unmute" : "Mute"} ${esc(displayTitle)}" aria-label="${f.muted ? "Unmute" : "Mute"} ${esc(displayTitle)}" aria-pressed="${!!f.muted}">${f.muted ? "Muted" : "Mute"}</button>`;
       const optsBtn = `<button type="button" class="feed-opts" data-feed-opts="${esc(f.id)}" title="Options for ${esc(displayTitle)}" aria-label="Options for ${esc(displayTitle)}" aria-haspopup="true" aria-expanded="false">···</button>`;
-      return `<div class="feed-row-wrap${g ? " nested-feed" : ""}"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" draggable="true" title="${esc(displayTitle)}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(displayTitle)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(displayTitle)}">!</button>` : ""}${countBtn}${muteBtn}${optsBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(displayTitle)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(displayTitle)}` : `Unsubscribe from ${esc(displayTitle)}`}">${armed ? "Sure?" : "×"}</button></div>`;
+      return `<div class="feed-row-wrap${g ? " nested-feed" : ""}"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" draggable="true" title="${esc(displayTitle)}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(displayTitle)}</span></button>${health === "failing" ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed has refresh errors — click for details" aria-label="Feed error: ${esc(displayTitle)}">!</button>` : ""}${countBtn}${muteBtn}${optsBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(displayTitle)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(displayTitle)}` : `Unsubscribe from ${esc(displayTitle)}`}">${armed ? "Sure?" : "×"}</button></div>`;
     }).join("");
     return label + (g ? `<div class="folder-feeds" data-drop-folder="${esc(g)}"${collapsed ? " hidden" : ""}>${rows}</div>` : rows);
   }).join("") : '<p class="muted">Your feeds will appear here.</p>';
