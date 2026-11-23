@@ -317,7 +317,7 @@ test("full article loading succeeds and reports failures", async ({ page }) => {
   await page.route("https://publisher.test/article-one", route => route.fulfill({
     status: 200,
     contentType: "text/html",
-    body: "<!doctype html><html><body><article><h1>Full article fixture</h1><p>Full article body with enough text to verify extraction and rendering.</p></article></body></html>"
+    body: "<!doctype html><html><body><article><h1>Full article fixture</h1><p>Full article body with enough text to verify extraction and rendering. This publisher page contains several sentences about the topic, its background, the reported findings, and the practical details that readers need. The text is deliberately long enough to exercise the full article extraction path instead of relying on the short feed excerpt.</p><p>A second paragraph confirms that the extracted article body keeps its structure and remains available after the local IndexedDB write completes.</p></article></body></html>"
   }));
   await page.locator("#articleList [data-item]").nth(1).click();
   await clickReaderAction(page, "fulltext");
