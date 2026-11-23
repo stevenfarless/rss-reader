@@ -75,6 +75,7 @@ test("OPML import previews existing subscriptions and can be cancelled", async (
   const opml = `<?xml version="1.0"?><opml version="2.0"><body>
     <outline text="News"><outline text="Fixture" type="rss" xmlUrl="https://feeds.test/rss.xml"/></outline>
     <outline text="News"><outline text="New feed" type="rss" xmlUrl="https://new-feed.test/rss.xml"/></outline>
+    <outline text="Duplicate feed" type="rss" xmlUrl="https://new-feed.test/rss.xml"/>
     <outline text="Broken feed" type="rss" xmlUrl="not-a-valid-feed-url"/>
   </body></opml>`;
   await page.locator("#opmlFile").setInputFiles({
@@ -84,6 +85,7 @@ test("OPML import previews existing subscriptions and can be cancelled", async (
   });
   await expect(page.locator("#opmlPreviewDialog")).toBeVisible();
   await expect(page.locator("#opmlPreviewSummary")).toContainText("already subscribed");
+  await expect(page.locator("#opmlPreviewSummary")).toContainText("1 duplicate entries");
   await expect(page.locator("#opmlPreviewSummary")).toContainText("1 invalid entries");
   await expect(page.locator("#opmlPreviewDetails")).toContainText("Broken feed");
   await page.locator('#opmlPreviewDialog button[value="cancel"]').click();
