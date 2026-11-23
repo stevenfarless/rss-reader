@@ -113,6 +113,10 @@ test("service worker installs and the reader shell can start offline", async ({ 
   await page.reload();
   await expect(page.locator("#sidebar")).toBeVisible();
   await context.setOffline(false);
+  await page.reload();
+  await expect(page.locator("#sidebar")).toBeVisible();
+  const cacheNames = await page.evaluate(() => caches.keys());
+  expect(cacheNames.some(name => name.startsWith("rss-reader-shell-v"))).toBe(true);
 });
 
 test("shortcut coaching follows the active preset and respects suppression", async ({ page }, testInfo) => {
@@ -294,14 +298,14 @@ test("full article loading succeeds and reports failures", async ({ page }) => {
     contentType: "text/html",
     body: "<!doctype html><html><body><article><h1>Full article fixture</h1><p>Full article body with enough text to verify extraction and rendering.</p></article></body></html>"
   }));
-  await page.locator("#articleList [data-item]").first().click();
+  await page.locator("#articleList [data-item]").nth(1).click();
   await page.locator('#reader [data-reader="fulltext"]').click();
   await expect(page.locator("#body")).toContainText("Full article fixture");
   await expect(page.locator("#reader [data-reader='fulltext']")).toHaveAttribute("aria-busy", "false");
 
   await page.reload();
   await addFixtureFeed(page);
-  await page.route("https://publisher.test/article-one", route => route.abort());
+  await page.route("https://publisher.test/article-two", route => route.abort());
   await page.route(/r\.jina\.ai/, route => route.fulfill({ status: 502, body: "unavailable" }));
   await page.route(/api\.allorigins\.win/, route => route.fulfill({ status: 502, body: "unavailable" }));
   await page.locator("#articleList [data-item]").first().click();
