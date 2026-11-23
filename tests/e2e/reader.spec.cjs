@@ -448,3 +448,26 @@ test("feed row actions expand on keyboard focus without reserving sidebar width"
   expect(bounds.width).toBeGreaterThan(0);
   await expect(action).toBeVisible();
 });
+
+test("feed health diagnostics preserve the last error and recover after retry", async ({ page }) => {
+  await page.goto("/");
+  await addFixtureFeed(page);
+  await page.route("https://feeds.test/rss.xml", route => route.fulfill({
+    status: 503, contentType: "text/plain", headers: { "access-control-allow-origin": "*" }, body: "Temporary upstream failure"
+  }));
+  await page.locator("#refresh").click();
+  await page.locator("#settings").click();
+  await expect(page.locator("#feedHealthSummary")).toContainText("failing");
+  await page.locator("#settingsDialog .x").click();
+  await page.locator("#feeds [data-feed-opts]").first().click();
+  await page.locator('#feedMenu [data-feed-opt="health"]').click();
+  await expect(page.locator("#feedErrorDialog")).toBeVisible();
+  await expect(page.locator("#feedErrorText")).toContainText("Temporary upstream failure");
+  await page.route("https://feeds.test/rss.xml", route => route.fulfill({
+    status: 200, contentType: "application/rss+xml", headers: { "access-control-allow-origin": "*" }, body: feedXml
+  }));
+  await page.locator("#feedErrorRetry").click();
+  await expect(page.locator("#feedErrorDialog")).not.toBeVisible();
+  await page.locator("#settings").click();
+  await expect(page.locator("#feedHealthSummary")).toContainText("All feeds healthy");
+});
