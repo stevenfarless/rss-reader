@@ -734,6 +734,8 @@ function readSettingsFromDialog() {
 }
 function applySettingsFromDialog(runSync) {
   state.settings = readSettingsFromDialog();
+  for (const feed of state.feeds) if (!Number(feed.refreshIntervalMinutes) && feed.lastAttempt) feed.nextRefreshAt = feed.lastAttempt + refreshBackoffMinutes(feed) * 60000;
+  saveFeeds();
   local(S, state.settings);
   applySettings();
   mirrorSync();
@@ -1671,7 +1673,7 @@ async function refreshFeed(f) {
 function showFeedError(id) {
   const f = state.feeds.find(v => v.id === id);
   if (!f) return;
-  $("#feedErrorText").textContent = [f.error || "This feed failed to load.", `Last attempt: ${f.lastAttempt ? new Date(f.lastAttempt).toLocaleString() : "Unknown"}`, `Last success: ${f.lastSuccess ? new Date(f.lastSuccess).toLocaleString() : "Never"}`, `Consecutive failures: ${Number(f.consecutiveFailures) || 0}`, `Retrieval method: ${f.via || "Unknown"}`].join("\n");
+  $("#feedErrorText").textContent = [f.error || "This feed failed to load.", `Last attempt: ${f.lastAttempt ? new Date(f.lastAttempt).toLocaleString() : "Unknown"}`, `Last success: ${f.lastSuccess ? new Date(f.lastSuccess).toLocaleString() : "Never"}`, `Consecutive failures: ${Number(f.consecutiveFailures) || 0}`, `Next eligible attempt: ${f.nextRefreshAt ? new Date(f.nextRefreshAt).toLocaleString() : "Now"}`, `Retrieval method: ${f.via || "Unknown"}`].join("\n");
   $("#feedErrorDialog").dataset.feed = id;
   $("#feedErrorDialog").showModal();
 }
@@ -4580,6 +4582,7 @@ function bind() {
     if (opt === "interval") {
       const choices = [0, 15, 30, 60, 180, 720, 1440], current = Number(f.refreshIntervalMinutes || 0);
       f.refreshIntervalMinutes = choices[(choices.indexOf(current) + 1) % choices.length];
+      f.nextRefreshAt = f.lastAttempt ? f.lastAttempt + refreshBackoffMinutes(f) * 60000 : 0;
       saveFeeds(); mirrorSync(); renderFeedMenu();
       toast(`Refresh interval: ${f.refreshIntervalMinutes ? f.refreshIntervalMinutes + " minutes" : "global default"}.`);
       return;
