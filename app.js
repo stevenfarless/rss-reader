@@ -549,7 +549,7 @@ async function loadWorkerFeedMetadata() {
     for (const feed of state.feeds) {
       const worker = byId.get(feed.id);
       if (!worker || Number(worker.lastAttempt || 0) <= Number(feed.lastAttempt || 0)) continue;
-      for (const key of ["lastAttempt", "lastSuccess", "nextRefreshAt", "consecutiveFailures", "lastError"]) {
+      for (const key of ["lastAttempt", "lastSuccess", "nextRefreshAt", "consecutiveFailures", "lastError", "lastErrorAt"]) {
         if (worker[key] !== undefined) feed[key] = worker[key];
       }
       changed = true;
@@ -655,7 +655,7 @@ function deleteMany(ids) { return runBatch("readwrite", s => { for (const id of 
    where the service worker can read them for background refresh.
    Fire-and-forget: a mirror failure must not break the UI. */
 function mirrorSync() {
-  const feeds = state.feeds.map(f => ({ id: f.id, url: f.url, title: f.title, via: f.via, wpRoot: f.wpRoot, site: f.site, refreshIntervalMinutes: Number(f.refreshIntervalMinutes) || 0, lastAttempt: f.lastAttempt || 0, lastSuccess: f.lastSuccess || 0, nextRefreshAt: f.nextRefreshAt || 0, consecutiveFailures: Number(f.consecutiveFailures) || 0, lastError: f.lastError || "" }));
+  const feeds = state.feeds.map(f => ({ id: f.id, url: f.url, title: f.title, via: f.via, wpRoot: f.wpRoot, site: f.site, refreshIntervalMinutes: Number(f.refreshIntervalMinutes) || 0, lastAttempt: f.lastAttempt || 0, lastSuccess: f.lastSuccess || 0, nextRefreshAt: f.nextRefreshAt || 0, consecutiveFailures: Number(f.consecutiveFailures) || 0, lastError: f.lastError || "", lastErrorAt: f.lastErrorAt || 0 }));
   const settings = { notifyNew: !!state.settings.notifyNew, refreshIntervalMinutes: Number(state.settings.refreshIntervalMinutes) || 60 };
   runBatch("readwrite", s => {
     s.put({ key: "feeds", value: feeds });
@@ -1674,7 +1674,7 @@ async function refreshFeed(f) {
       loaded = await loadFeedFromUrl(f.url);
     }
     f.title = loaded.parsed.title || f.title;
-    f.lastSuccess = Date.now(); f.lastError = ""; f.consecutiveFailures = 0;
+    f.lastSuccess = Date.now(); f.consecutiveFailures = 0;
     f.nextRefreshAt = f.lastSuccess + refreshIntervalFor(f) * 60000;
     f.error = "";
     f.via = loaded.via;
@@ -1693,7 +1693,7 @@ async function refreshFeed(f) {
 function showFeedError(id) {
   const f = state.feeds.find(v => v.id === id);
   if (!f) return;
-  $("#feedErrorText").textContent = [f.error || "This feed failed to load.", `Last attempt: ${f.lastAttempt ? new Date(f.lastAttempt).toLocaleString() : "Unknown"}`, `Last success: ${f.lastSuccess ? new Date(f.lastSuccess).toLocaleString() : "Never"}`, `Consecutive failures: ${Number(f.consecutiveFailures) || 0}`, `Next eligible attempt: ${f.nextRefreshAt ? new Date(f.nextRefreshAt).toLocaleString() : "Now"}`, `Retrieval method: ${f.via || "Unknown"}`].join("\n");
+  $("#feedErrorText").textContent = [f.error || "This feed failed to load.", `Last attempt: ${f.lastAttempt ? new Date(f.lastAttempt).toLocaleString() : "Unknown"}`, `Last success: ${f.lastSuccess ? new Date(f.lastSuccess).toLocaleString() : "Never"}`, `Most recent error: ${f.lastError || "None recorded"}`, `Error occurred: ${f.lastErrorAt ? new Date(f.lastErrorAt).toLocaleString() : "Unknown"}`, `Consecutive failures: ${Number(f.consecutiveFailures) || 0}`, `Next eligible attempt: ${f.nextRefreshAt ? new Date(f.nextRefreshAt).toLocaleString() : "Now"}`, `Retrieval method: ${f.via || "Unknown"}`].join("\n");
   $("#feedErrorDialog").dataset.feed = id;
   $("#feedErrorDialog").showModal();
 }

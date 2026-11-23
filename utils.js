@@ -413,7 +413,7 @@ function getFeedBackoffMinutes(feed, settings = {}) {
   return getFeedRefreshInterval(feed, settings) * Math.min(2 ** Math.max(0, Number(feed?.consecutiveFailures) || 0), 8);
 }
 function getFeedHealthState(feed, now = Date.now()) {
-  if (feed?.error || feed?.lastError || Number(feed?.consecutiveFailures) > 0) return "failing";
+  if (feed?.error || Number(feed?.consecutiveFailures) > 0) return "failing";
   if (!feed?.lastSuccess || now - feed.lastSuccess > 48 * 60 * 60 * 1000) return "stale";
   return "healthy";
 }

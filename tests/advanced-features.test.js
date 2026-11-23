@@ -119,6 +119,7 @@ test("feed scheduling inherits global intervals and applies bounded backoff", ()
 test("feed health separates repeated failures, stale success, and recent success", () => {
   const now = 10_000_000_000;
   assert.equal(getFeedHealthState({ error: "timeout" }, now), "failing");
+  assert.equal(getFeedHealthState({ lastError: "previous timeout", lastSuccess: now }, now), "healthy");
   assert.equal(getFeedHealthState({ consecutiveFailures: 2 }, now), "failing");
   assert.equal(getFeedHealthState({}, now), "stale");
   assert.equal(getFeedHealthState({ lastSuccess: now - 48 * 60 * 60 * 1000 }, now), "healthy");
