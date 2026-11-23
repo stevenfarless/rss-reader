@@ -457,7 +457,7 @@ test("feed health diagnostics preserve the last error and recover after retry", 
   }));
   await page.locator("#refresh").click();
   await page.locator("#settings").click();
-  await expect(page.locator("#feedHealthSummary")).toContainText("failing");
+  await expect(page.locator("#feedHealthSummary")).toContainText("Temporary upstream failure");
   await page.locator("#settingsDialog .x").click();
   await page.locator("#feeds [data-feed-opts]").first().click();
   await page.locator('#feedMenu [data-feed-opt="health"]').click();
@@ -469,5 +469,5 @@ test("feed health diagnostics preserve the last error and recover after retry", 
   await page.locator("#feedErrorRetry").click();
   await expect(page.locator("#feedErrorDialog")).not.toBeVisible();
   await page.locator("#settings").click();
-  await expect(page.locator("#feedHealthSummary")).toContainText("All feeds healthy");
+  await expect(page.locator("#feedHealthSummary")).toContainText("All subscriptions refreshed successfully");
 });
