@@ -56,7 +56,9 @@ test("adds a deterministic feed and persists read, saved, queue, and theme state
 
   await page.locator("#settings").click();
   await page.locator("#themeSelect").selectOption("oled");
+  await page.locator("#saveSettings").click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "oled");
+  await page.locator("#settings").click();
   await page.locator("#settingsDialog .x").click();
 
   await page.reload();
@@ -263,7 +265,7 @@ test("keyboard preset help reflects the active preset", async ({ page }) => {
   await page.goto("/");
   await page.locator("#settings").click();
   await page.locator("#shortcutPresetSelect").selectOption("feedly");
-  await page.locator("#settingsDialog .x").click();
+  await page.locator("#saveSettings").click();
   await page.locator("#shortcutHelp").click();
   await expect(page.locator("#helpDialog")).toBeVisible();
   await expect(page.locator("#helpPresetNote")).toContainText("Feedly");
