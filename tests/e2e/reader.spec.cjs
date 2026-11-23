@@ -113,3 +113,19 @@ test("service worker installs and the reader shell can start offline", async ({ 
   await expect(page.locator("#sidebar")).toBeVisible();
   await context.setOffline(false);
 });
+
+test("shortcut coaching follows the active preset and respects suppression", async ({ page }, testInfo) => {
+  await page.goto("/");
+  await page.locator("#refresh").click();
+  if (testInfo.project.name === "chromium-mobile") {
+    await expect(page.locator("#shortcutCoach")).toBeHidden();
+    return;
+  }
+  await expect(page.locator("#shortcutCoach")).toBeVisible();
+  await expect(page.locator("#shortcutCoachText")).toContainText("Refresh all feeds");
+  await expect(page.locator("#shortcutCoachText")).toContainText("r");
+  await page.locator("#shortcutCoachNever").click();
+  await expect(page.locator("#shortcutCoach")).toBeHidden();
+  await page.locator("#refresh").click();
+  await expect(page.locator("#shortcutCoach")).toBeHidden();
+});

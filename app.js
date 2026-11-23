@@ -483,6 +483,9 @@ function validateSettings(d) {
   const prog = pick("#progressSelect", d.progressPosition); if (prog) next.progressPosition = prog;
   const mbar = pick("#mobileBarSelect", d.mobileReaderBar); if (mbar) next.mobileReaderBar = mbar;
   const preset = pick("#shortcutPresetSelect", d.shortcutPreset); if (preset) next.shortcutPreset = preset;
+  if (typeof d.shortcutCoaching === "boolean") next.shortcutCoaching = d.shortcutCoaching;
+  if ([15, 30, 60, 120, 300, 600].includes(d.shortcutCoachCooldown)) next.shortcutCoachCooldown = d.shortcutCoachCooldown;
+  if (Array.isArray(d.shortcutCoachDismissed) && d.shortcutCoachDismissed.length <= 100 && d.shortcutCoachDismissed.every(x => typeof x === "string")) next.shortcutCoachDismissed = [...new Set(d.shortcutCoachDismissed)];
   // Migrate the former standalone Vim toggle into the unified preset selector.
   if (d.vimNavigation === true) next.shortcutPreset = "vim";
   const exc = pick("#cardExcerptSelect", d.cardExcerpt); if (exc) next.cardExcerpt = exc;
@@ -708,6 +711,9 @@ function readSettingsFromDialog() {
     progressPosition: $("#progressSelect").value,
     mobileReaderBar: $("#mobileBarSelect").value,
     shortcutPreset: $("#shortcutPresetSelect").value,
+    shortcutCoaching: $("#shortcutCoachingToggle")?.checked !== false,
+    shortcutCoachCooldown: Number($("#shortcutCoachCooldown")?.value) || 60,
+    shortcutCoachDismissed: state.settings.shortcutCoachDismissed || [],
     vimPane: state.settings.vimPane || "list",
     cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
@@ -3257,6 +3263,73 @@ function updateReadingStats() {
   }
 }
 
+
+/* Contextual shortcut coaching (#231). It uses the active preset's
+   actual key map, and only observes trusted pointer clicks on devices
+   with a fine pointer. Keyboard and touch-only interactions are ignored. */
+let lastCoachedAction = null, shortcutCoachTimer = null;
+const SHORTCUT_COACH_LAST_KEY = "rss-reader.shortcutCoach.lastShownAt";
+function shortcutActionForPointer(target) {
+  const control = target.closest("button,[role='button']");
+  if (!control || control.disabled || control.closest("#settingsDialog,#helpDialog,#backupRestoreDialog,#opmlPreviewDialog")) return null;
+  const viewActions = { all: ["allView", "goAll"], unread: ["unreadView", "goUnread"], saved: ["goSaved", "goStarred"], snoozed: ["goSnoozed"], highlights: ["goHighlights"] };
+  const actionMap = {
+    "data-action:save": ["save"], "data-action:read": ["toggleRead"], "data-action:share": ["share"],
+    "data-reader:save": ["save"], "data-reader:read": ["toggleRead"], "data-reader:share": ["share"],
+    "data-reader:tags": ["tag"], "data-reader:fulltext": ["fullArticle"], "data-reader:open": ["openOriginal"],
+    "id:add": ["addFeed"], "id:refresh": ["refresh"], "id:railRefresh": ["refresh"],
+    "id:search": ["search"], "id:railSearch": ["search"], "id:settings": ["goPrefs"],
+    "id:sideToggle": ["sidebarToggle"], "id:shortcutHelp": ["help"], "id:railNextUnread": ["nextUnread"],
+    "id:markRead": ["markVisibleRead"]
+  };
+  let candidates = [];
+  if (control.dataset.action) candidates = actionMap[`data-action:${control.dataset.action}`] || [];
+  else if (control.dataset.reader) candidates = actionMap[`data-reader:${control.dataset.reader}`] || [];
+  else if (control.dataset.view) candidates = viewActions[control.dataset.view] || [];
+  else if (control.id) candidates = actionMap[`id:${control.id}`] || [];
+  else if (control.matches(".article[data-item]")) candidates = ["openSelected"];
+  if (!candidates.length) return null;
+  const preset = PRESETS[shortcutPreset()] || PRESETS.inoreader;
+  for (const action of candidates) {
+    const key = Object.entries(preset.keys).find(([, mapped]) => mapped === action)?.[0];
+    if (key && ACTION_LABELS[action]) return { action, key };
+  }
+  return null;
+}
+function showShortcutCoach(action, key) {
+  if (state.settings.shortcutCoaching === false) return;
+  const dismissed = state.settings.shortcutCoachDismissed || [];
+  if (dismissed.includes(action)) return;
+  const cooldown = Number(state.settings.shortcutCoachCooldown) || 60;
+  const lastShown = Number(localStorage.getItem(SHORTCUT_COACH_LAST_KEY) || 0);
+  if (Date.now() - lastShown < cooldown * 1000) return;
+  const panel = $("#shortcutCoach");
+  if (!panel) return;
+  lastCoachedAction = action;
+  $("#shortcutCoachText").textContent = `${ACTION_LABELS[action]}. Keyboard shortcut: ${displayDesc(key)}.`;
+  panel.hidden = false;
+  localStorage.setItem(SHORTCUT_COACH_LAST_KEY, String(Date.now()));
+  clearTimeout(shortcutCoachTimer);
+  shortcutCoachTimer = setTimeout(() => { panel.hidden = true; }, 7000);
+}
+function bindShortcutCoaching() {
+  document.addEventListener("click", event => {
+    if (!event.isTrusted || event.detail === 0 || !matchMedia("(pointer:fine)").matches) return;
+    const match = shortcutActionForPointer(event.target);
+    if (match) showShortcutCoach(match.action, match.key);
+  }, true);
+  $("#shortcutCoachDismiss")?.addEventListener("click", () => { $("#shortcutCoach").hidden = true; });
+  $("#shortcutCoachNever")?.addEventListener("click", () => {
+    if (lastCoachedAction) {
+      const dismissed = new Set(state.settings.shortcutCoachDismissed || []);
+      dismissed.add(lastCoachedAction);
+      state.settings.shortcutCoachDismissed = [...dismissed];
+      local(S, state.settings);
+    }
+    $("#shortcutCoach").hidden = true;
+  });
+}
+
 /* ---------- folders & tags ---------- */
 function goTag(tag) {
   stopTTS();
@@ -3758,6 +3831,8 @@ function showSettings() {
   $("#progressSelect").value = state.settings.progressPosition || "bottom";
   $("#mobileBarSelect").value = state.settings.mobileReaderBar || "bottom";
   $("#shortcutPresetSelect").value = state.settings.shortcutPreset || "inoreader";
+  $("#shortcutCoachingToggle").checked = state.settings.shortcutCoaching !== false;
+  $("#shortcutCoachCooldown").value = String(state.settings.shortcutCoachCooldown || 60);
   if ($("#refreshIntervalSelect")) $("#refreshIntervalSelect").value = String(state.settings.refreshIntervalMinutes || 60);
   if ($("#retentionSelect")) $("#retentionSelect").value = String(state.settings.retentionDays || 0);
   updateStorageEstimate(); updateCleanupPreview(); updateReadingStats();
@@ -4669,6 +4744,7 @@ function bind() {
     const flyout = $("#railFlyout");
     if (flyout && !flyout.hidden && !flyout.contains(e.target) && !e.target.closest("#railTags,#railSavedSearches")) flyout.hidden = true;
   });
+  bindShortcutCoaching();
   $("#menu").onclick = () => {
     const open = $("#sidebar").classList.toggle("open");
     $("#scrim").classList.toggle("show", open);
