@@ -24,6 +24,14 @@ async function interceptFixtureFeed(page) {
   }));
 }
 
+
+async function clickReaderAction(page, action) {
+  const direct = page.locator(`#reader .reader-actions > [data-reader="${action}"]`);
+  if (await direct.isVisible()) return direct.click();
+  await page.locator("#reader [data-reader-more]").click();
+  await page.locator(`#reader .reader-overflow .menu [data-reader="${action}"]`).click();
+}
+
 async function addFixtureFeed(page) {
   await interceptFixtureFeed(page);
   await page.locator("#add").click();
@@ -41,9 +49,9 @@ test("adds a deterministic feed and persists read, saved, queue, and theme state
   await firstArticle.click();
   await expect(page.locator("#reader")).toContainText("Fixture article one");
 
-  await page.locator('#reader [data-reader="save"]').click();
+  await clickReaderAction(page, "save");
   await expect(page.locator('#reader [data-reader="save"]')).toHaveAttribute("aria-pressed", "true");
-  await page.locator('#reader [data-reader="queue"]').click();
+  await clickReaderAction(page, "queue");
   await expect(page.locator('#reader [data-reader="queue"]')).toHaveAttribute("aria-pressed", "true");
 
   await page.locator("#settings").click();
@@ -299,9 +307,9 @@ test("full article loading succeeds and reports failures", async ({ page }) => {
     body: "<!doctype html><html><body><article><h1>Full article fixture</h1><p>Full article body with enough text to verify extraction and rendering.</p></article></body></html>"
   }));
   await page.locator("#articleList [data-item]").nth(1).click();
-  await page.locator('#reader [data-reader="fulltext"]').click();
+  await clickReaderAction(page, "fulltext");
   await expect(page.locator("#body")).toContainText("Full article fixture");
-  await expect(page.locator("#reader [data-reader='fulltext']")).toHaveAttribute("aria-busy", "false");
+  await expect(page.locator('#reader .reader-actions > [data-reader="fulltext"]')).toHaveAttribute("aria-busy", "false");
 
   await page.reload();
   await addFixtureFeed(page);
@@ -321,7 +329,7 @@ test("full article loading can be cancelled while a publisher request is pending
     try { await route.fulfill({ status: 200, contentType: "text/html", body: "<article><p>Late response.</p></article>" }); } catch {}
   });
   await page.locator("#articleList [data-item]").first().click();
-  const fullTextButton = page.locator('#reader [data-reader="fulltext"]');
+  const fullTextButton = page.locator('#reader .reader-actions > [data-reader="fulltext"]');
   await fullTextButton.click();
   await expect(fullTextButton).toHaveAttribute("aria-busy", "true");
   await fullTextButton.click();
@@ -346,10 +354,10 @@ test("highlight, note, and tag data survive reload", async ({ page }) => {
   await expect(page.locator("#hlDialog")).toBeVisible();
   await page.locator("#hlNote").fill("Keep this passage");
   await page.locator("#hlSave").click();
-  await page.locator('#reader [data-reader="note"]').click();
+  await clickReaderAction(page, "note");
   await page.locator("#articleNoteText").fill("Article note persists");
   await page.locator("#articleNoteSave").click();
-  await page.locator('#reader [data-reader="tags"]').click();
+  await clickReaderAction(page, "tags");
   await page.locator("#tagInput").fill("research");
   await page.locator("#tagAddBtn").click();
   await page.reload();
