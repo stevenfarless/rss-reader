@@ -1,4 +1,4 @@
-const CACHE = "rss-reader-shell-v60";
+const CACHE = "rss-reader-shell-v61";
 const RUNTIME_CACHE = "rss-reader-runtime-v7";
 const RUNTIME_MAX = 50;
 const FILES = ["./", "./index.html", "./styles.css", "./markdown.js", "./purify.min.js", "./utils.js", "./readability.js", "./app.js", "./manifest.webmanifest", "./assets/icon.svg", "./assets/icon-192.png", "./assets/icon-512.png", "./assets/icon-maskable-512.png", "./assets/apple-touch-icon.png", "./fonts/GentiumBookPlus-Regular.woff2", "./fonts/GentiumBookPlus-Bold.woff2", "./fonts/GentiumBookPlus-Italic.woff2", "./fonts/GentiumBookPlus-BoldItalic.woff2", "./fonts/InterVariable.woff2", "./fonts/InterVariable-Italic.woff2", "./fonts/NunitoVariable.woff2", "./fonts/NunitoVariable-Italic.woff2", "./fonts/Ubuntu-Regular.woff2", "./fonts/Ubuntu-Bold.woff2", "./fonts/Ubuntu-Italic.woff2", "./fonts/Ubuntu-BoldItalic.woff2"];
@@ -349,12 +349,12 @@ async function swRefreshFeeds() {
       try {
         const items = await swLoadFeed(feed, settings);
         const added = await swSaveItems(db, feed, items);
-        feed.lastAttempt = Date.now(); feed.lastSuccess = feed.lastAttempt; feed.consecutiveFailures = 0;
+        feed.lastAttempt = Date.now(); feed.lastSuccess = feed.lastAttempt; feed.consecutiveFailures = 0; feed.lastError = "";
         const interval = Number(feed.refreshIntervalMinutes) || Number(settings.refreshIntervalMinutes) || 60;
         feed.nextRefreshAt = feed.lastAttempt + interval * 60000;
         if (added > 0) { newCount += added; newByFeed.push({ title: feed.title, count: added }); }
       } catch (e) {
-        feed.lastAttempt = Date.now(); feed.consecutiveFailures = (Number(feed.consecutiveFailures) || 0) + 1;
+        feed.lastAttempt = Date.now(); feed.consecutiveFailures = (Number(feed.consecutiveFailures) || 0) + 1; feed.lastError = String(e?.message || e || "Background refresh failed").slice(0, 500);
         const interval = Number(feed.refreshIntervalMinutes) || Number(settings.refreshIntervalMinutes) || 60;
         feed.nextRefreshAt = feed.lastAttempt + interval * Math.min(2 ** feed.consecutiveFailures, 8) * 60000;
       }

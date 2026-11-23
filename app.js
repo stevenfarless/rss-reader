@@ -540,6 +540,23 @@ function saveFeeds() {
   mirrorSync();
   scheduleFeedRefresh();
 }
+async function loadWorkerFeedMetadata() {
+  if (!db || !state.feeds.length) return;
+  try {
+    const record = await runTx("readonly", store => store.get("feeds"), "sync");
+    const byId = new Map((record?.value || []).map(feed => [feed.id, feed]));
+    let changed = false;
+    for (const feed of state.feeds) {
+      const worker = byId.get(feed.id);
+      if (!worker || Number(worker.lastAttempt || 0) <= Number(feed.lastAttempt || 0)) continue;
+      for (const key of ["lastAttempt", "lastSuccess", "nextRefreshAt", "consecutiveFailures", "lastError"]) {
+        if (worker[key] !== undefined) feed[key] = worker[key];
+      }
+      changed = true;
+    }
+    if (changed) saveFeeds();
+  } catch (error) { console.warn("Could not merge background refresh metadata:", error); }
+}
 function saveFolders() { local(KF, state.folders); }
 function saveTags() { local(KT, state.tags); }
 function saveSavedSearches() { local(KS, state.savedSearches); }
@@ -1866,7 +1883,7 @@ function renderFeedHealth() {
   const unhealthy = state.feeds.filter(feed => feedHealthState(feed) !== "healthy");
   output.innerHTML = unhealthy.length ? unhealthy.map(feed => {
     const status = feedHealthState(feed);
-    const reason = status === "failing" ? (feed.error || "Repeated refresh failures") : "No successful refresh in 48 hours";
+    const reason = status === "failing" ? (feed.error || feed.lastError || "Repeated refresh failures") : "No successful refresh in 48 hours";
     return `<div class="health-row"><span class="health-dot ${status}" aria-hidden="true"></span><span>${esc(feedDisplayTitle(feed))} · ${esc(reason)}</span><button type="button" data-health-retry="${esc(feed.id)}" class="quiet">Retry</button></div>`;
   }).join("") : `<p class="muted">${state.feeds.length ? "All subscriptions refreshed successfully within the last 48 hours." : "Add a feed to see its health here."}</p>`;
 }
@@ -5120,6 +5137,7 @@ async function init() {
       state.highlights = await hlAll();
       syncTags();
       saveTags();
+      await loadWorkerFeedMetadata();
       mirrorSync();
     } catch (e) {
       console.error(e);
