@@ -1857,6 +1857,7 @@ function renderNav() {
   $("#savedCount").textContent = fmtCount(state.items.filter(x => x.saved && !isSnoozed(x)).length);
   $("#snoozedCount").textContent = fmtCount(state.items.filter(isSnoozed).length);
   $("#highlightsCount").textContent = fmtCount(state.highlights.length);
+  $("#queueCount").textContent = fmtCount(state.items.filter(x => x.queued).length);
   $("#collapsedRail [data-view]").forEach(button => {
     const active = button.dataset.view === state.view && state.view !== "feed";
     button.classList.toggle("active", active);
@@ -3111,17 +3112,17 @@ async function restorePendingBackup() {
 function exportAnnotations(format) {
   const highlights = state.highlights.map(h => {
     const item = state.items.find(x => x.id === h.itemId);
-    return { ...h, articleTitle: item?.title || "Article no longer in library", articleUrl: item?.url || "", feedTitle: item ? feedTitleFor(item) : "" };
+    return { ...h, articleTitle: item?.title || "Article no longer in library", articleUrl: item?.url || "", feedTitle: item ? (state.feeds.find(f => f.id === item.feedId)?.customTitle || state.feeds.find(f => f.id === item.feedId)?.title || "") : "" };
   });
   const notes = Object.entries(articleNotes).map(([itemId, note]) => {
     const item = state.items.find(x => x.id === itemId);
-    return { itemId, note, articleTitle: item?.title || "Article no longer in library", articleUrl: item?.url || "", feedTitle: item ? feedTitleFor(item) : "" };
+    return { itemId, note, articleTitle: item?.title || "Article no longer in library", articleUrl: item?.url || "", feedTitle: item ? (state.feeds.find(f => f.id === item.feedId)?.customTitle || state.feeds.find(f => f.id === item.feedId)?.title || "") : "" };
   });
   if (format === "json") download(JSON.stringify({ format: "rss-reader-annotations", version: 1, exportedAt: new Date().toISOString(), highlights, notes }, null, 2), "rss-reader-annotations.json", "application/json");
   else {
     const blocks = [];
-    for (const h of highlights) blocks.push(`## ${h.articleTitle}\n\n> ${h.text}\n\n${h.note ? h.note + "\n\n" : ""}Source: ${h.articleUrl || "Unavailable"}\nFeed: ${h.feedTitle || "Unknown"}\nCreated: ${h.created ? new Date(h.created).toISOString() : "Unknown"}`);
-    for (const n of notes) blocks.push(`## ${n.articleTitle}\n\n${n.note}\n\nSource: ${n.articleUrl || "Unavailable"}\nFeed: ${n.feedTitle || "Unknown"}`);
+    for (const h of highlights) blocks.push(`## ${h.articleTitle}\n\n> ${h.text}\n\n${h.note ? h.note + "\n\n" : ""}Source: ${h.articleUrl ? `[${h.articleUrl}](${h.articleUrl})` : "Unavailable"}\nFeed: ${h.feedTitle || "Unknown"}\nCreated: ${(h.createdAt || h.created) ? new Date(h.createdAt || h.created).toISOString() : "Unknown"}`);
+    for (const n of notes) blocks.push(`## ${n.articleTitle}\n\n${n.note}\n\nSource: ${n.articleUrl ? `[${n.articleUrl}](${n.articleUrl})` : "Unavailable"}\nFeed: ${n.feedTitle || "Unknown"}`);
     download("# Article annotations\n\n" + (blocks.join("\n\n---\n\n") || "No annotations."), "rss-reader-annotations.md", "text/markdown");
   }
   toast(`Annotations exported as ${format.toUpperCase()}.`);

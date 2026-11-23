@@ -339,3 +339,7 @@ dialog .x:focus:not(:focus-visible){outline:none;background:transparent;color:va
 .library-more[open] summary .disclosure-chevron{transform:rotate(180deg)}
 
 .feed-row.feed-stale .feed-dot{background:var(--warn,#c28b32)}.health-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px}.health-row span:nth-child(2){flex:1;min-width:0}.health-dot{width:8px;height:8px;border-radius:50%;background:var(--ok,#55966b);flex:none}.health-dot.failing{background:var(--err)}.health-dot.stale{background:var(--warn,#c28b32)}
+
+.feed-row-wrap .feed-mute.on,.feed-row-wrap .feed-unsub.armed{display:inline-flex;opacity:1}
+.feed-row-wrap:focus-within .feed-mute,.feed-row-wrap:focus-within .feed-unsub,.feed-row-wrap:focus-within .feed-opts{display:inline-flex;opacity:1}
+dialog :focus:not(:focus-visible){outline:none;box-shadow:none}
