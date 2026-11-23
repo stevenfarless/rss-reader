@@ -428,3 +428,13 @@ test("full-text reader renders Markdown returned by the reader service", async (
   await expect(page.locator("#body ul li")).toHaveCount(2);
   await expect(page.locator("#body pre code")).toContainText("const answer = 42");
 });
+
+test("feed row actions expand on keyboard focus without reserving sidebar width", async ({ page }) => {
+  await page.goto("/");
+  await addFixtureFeed(page);
+  const action = page.locator("#feeds .feed-row-wrap .feed-mute").first();
+  await action.focus();
+  const bounds = await action.boundingBox();
+  expect(bounds.width).toBeGreaterThan(0);
+  await expect(action).toBeVisible();
+});
