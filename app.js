@@ -1850,6 +1850,18 @@ function renderFeedHealth() {
     return `<div class="health-row"><span class="health-dot ${status}" aria-hidden="true"></span><span>${esc(feedDisplayTitle(feed))} · ${esc(reason)}</span><button type="button" data-health-retry="${esc(feed.id)}" class="quiet">Retry</button></div>`;
   }).join("") : `<p class="muted">${state.feeds.length ? "All subscriptions refreshed successfully within the last 48 hours." : "Add a feed to see its health here."}</p>`;
 }
+
+function toggleRailFlyout(kind) {
+  const flyout = $("#railFlyout"), source = kind === "tags" ? $("#tags") : $("#savedSearches");
+  if (!flyout || !source) return;
+  const entries = [...source.querySelectorAll("button")];
+  const heading = kind === "tags" ? "Tags" : "Saved searches";
+  flyout.dataset.kind = kind;
+  flyout.innerHTML = `<div class="rail-flyout-head"><strong>${heading}</strong><button type="button" id="railFlyoutClose" aria-label="Close">×</button></div>` +
+    (entries.length ? source.innerHTML : `<p class="muted">No ${kind === "tags" ? "tags" : "saved searches"} yet.</p>`);
+  flyout.hidden = false;
+}
+
 function renderNav() {
   const shown = countableItems();
   $("#allCount").textContent = fmtCount(shown.length);
@@ -4644,6 +4656,19 @@ function bind() {
   $("#railSearch")?.addEventListener("click", () => $("#search").focus());
   $("#railRefresh")?.addEventListener("click", refresh);
   $("#railNextUnread")?.addEventListener("click", () => moveUnread(1));
+  $("#railTags")?.addEventListener("click", () => toggleRailFlyout("tags"));
+  $("#railSavedSearches")?.addEventListener("click", () => toggleRailFlyout("searches"));
+  $("#railFlyout")?.addEventListener("click", e => {
+    if (e.target.closest("#railFlyoutClose")) { $("#railFlyout").hidden = true; return; }
+    const tag = e.target.closest("[data-tag]");
+    if (tag) { $("#railFlyout").hidden = true; goTag(tag.dataset.tag); return; }
+    const saved = e.target.closest("[data-saved-search]");
+    if (saved) { $("#railFlyout").hidden = true; goSavedSearch(saved.dataset.savedSearch); }
+  });
+  document.addEventListener("click", e => {
+    const flyout = $("#railFlyout");
+    if (flyout && !flyout.hidden && !flyout.contains(e.target) && !e.target.closest("#railTags,#railSavedSearches")) flyout.hidden = true;
+  });
   $("#menu").onclick = () => {
     const open = $("#sidebar").classList.toggle("open");
     $("#scrim").classList.toggle("show", open);

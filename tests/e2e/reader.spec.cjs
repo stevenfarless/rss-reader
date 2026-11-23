@@ -83,14 +83,14 @@ test("collapsed sidebar rail works on desktop and mobile sidebar remains usable"
     await page.locator("#sideToggle").click();
     await expect(page.locator("body")).toHaveClass(/sidebar-collapsed/);
     await page.locator('#collapsedRail [data-view="unread"]').click();
-    await expect(page.locator("#listTitle")).toContainText("Unread");
+    await expect(page.locator("#heading")).toContainText("Unread");
     await page.locator("#railSearch").click();
     await expect(page.locator("#search")).toBeFocused();
   } else {
     await page.locator("#menu").click();
     await expect(page.locator("#sidebar")).toHaveClass(/open/);
     await page.locator('#sidebar [data-view="unread"]').click();
-    await expect(page.locator("#listTitle")).toContainText("Unread");
+    await expect(page.locator("#heading")).toContainText("Unread");
     const dimensions = await page.evaluate(() => ({
       viewport: document.documentElement.clientWidth,
       content: document.documentElement.scrollWidth
