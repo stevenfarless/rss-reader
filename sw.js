@@ -349,12 +349,12 @@ async function swRefreshFeeds() {
       try {
         const items = await swLoadFeed(feed, settings);
         const added = await swSaveItems(db, feed, items);
-        feed.lastAttempt = Date.now(); feed.lastSuccess = feed.lastAttempt; feed.consecutiveFailures = 0;
+        feed.lastAttempt = Date.now(); feed.lastSuccess = feed.lastAttempt; feed.consecutiveFailures = 0; feed.error = "";
         const interval = Number(feed.refreshIntervalMinutes) || Number(settings.refreshIntervalMinutes) || 60;
         feed.nextRefreshAt = feed.lastAttempt + interval * 60000;
         if (added > 0) { newCount += added; newByFeed.push({ title: feed.title, count: added }); }
       } catch (e) {
-        feed.lastAttempt = Date.now(); feed.consecutiveFailures = (Number(feed.consecutiveFailures) || 0) + 1; feed.lastError = String(e?.message || e || "Background refresh failed").slice(0, 500); feed.lastErrorAt = feed.lastAttempt;
+        feed.lastAttempt = Date.now(); feed.consecutiveFailures = (Number(feed.consecutiveFailures) || 0) + 1; feed.lastError = String(e?.message || e || "Background refresh failed").slice(0, 500); feed.lastErrorAt = feed.lastAttempt; feed.error = feed.lastError;
         const interval = Number(feed.refreshIntervalMinutes) || Number(settings.refreshIntervalMinutes) || 60;
         feed.nextRefreshAt = feed.lastAttempt + interval * Math.min(2 ** feed.consecutiveFailures, 8) * 60000;
       }
