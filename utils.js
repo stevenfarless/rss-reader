@@ -302,6 +302,176 @@ for (const key of ["h", "j", "k", "d", "u", "Enter", "Space", "Shift+Space", "g 
 PRESETS.vim = { name: "Vim", keys: vimKeys };
 
 
+
+/* Pure helpers shared by the reader and Node tests. */
+function migrateBackupDocument(input) {
+  if (!input || input.format !== "rss-reader-backup" || !Number.isInteger(input.version)) throw new Error("Unsupported backup format.");
+  let data = JSON.parse(JSON.stringify(input));
+  if (data.version === 0) {
+    const stores = data.indexedDB && typeof data.indexedDB === "object" ? data.indexedDB : {};
+    data = {
+      ...data,
+      version: 1,
+      createdAt: data.createdAt || new Date(0).toISOString(),
+      localStorage: data.localStorage && typeof data.localStorage === "object" ? data.localStorage : {},
+      indexedDB: {
+        items: Array.isArray(stores.items) ? stores.items : [],
+        sync: Array.isArray(stores.sync) ? stores.sync : [],
+        highlights: Array.isArray(stores.highlights) ? stores.highlights : []
+      }
+    };
+  }
+  if (data.version !== 1) throw new Error("Unsupported backup version.");
+  if (!data.createdAt || !Number.isFinite(Date.parse(data.createdAt))) throw new Error("Backup timestamp is invalid.");
+  if (!data.localStorage || typeof data.localStorage !== "object" || Array.isArray(data.localStorage)) throw new Error("Backup local data is invalid.");
+  if (!data.indexedDB || typeof data.indexedDB !== "object" || Array.isArray(data.indexedDB)) throw new Error("Backup database data is invalid.");
+  for (const name of ["items", "sync", "highlights"]) if (!Array.isArray(data.indexedDB[name])) throw new Error(`Backup store ${name} is invalid.`);
+  for (const [key, value] of Object.entries(data.localStorage)) {
+    if (!key.startsWith("rss-reader.") || typeof value !== "string") throw new Error("Backup contains an invalid local storage entry.");
+    try { JSON.parse(value); } catch { throw new Error(`Backup setting ${key} contains invalid JSON.`); }
+  }
+  const unique = (records, key, label) => {
+    const seen = new Set();
+    for (const record of records) {
+      const value = record?.[key];
+      if (typeof value !== "string" || !value) throw new Error(`Backup contains an invalid ${label} record.`);
+      if (seen.has(value)) throw new Error(`Backup contains duplicate ${label} IDs.`);
+      seen.add(value);
+    }
+  };
+  unique(data.indexedDB.items, "id", "article");
+  unique(data.indexedDB.highlights, "id", "highlight");
+  unique(data.indexedDB.sync, "key", "sync");
+  for (const highlight of data.indexedDB.highlights) {
+    if (typeof highlight.itemId !== "string" || typeof highlight.text !== "string") throw new Error("Backup contains an invalid highlight.");
+  }
+  return data;
+}
+
+function mergeBackupDocument(current, incoming) {
+  const keyFor = (record, localKey = "") => {
+    if (typeof record === "string") return record;
+    if (localKey.toLowerCase().includes("feed") && record?.url) return String(record.url).toLowerCase();
+    return record?.id ?? record?.key ?? record?.url ?? JSON.stringify(record);
+  };
+  const mergeRecords = (oldRecords, newRecords, localKey = "") => {
+    const map = new Map(), conflicts = new Set();
+    for (const record of newRecords) map.set(keyFor(record, localKey), record);
+    for (const record of oldRecords) {
+      const key = keyFor(record, localKey);
+      if (map.has(key)) conflicts.add(key);
+      map.set(key, record);
+    }
+    return { records: [...map.values()], conflicts: conflicts.size };
+  };
+  const indexedDB = {}, conflictCounts = {};
+  let totalConflicts = 0;
+  for (const name of ["items", "sync", "highlights"]) {
+    const merged = mergeRecords(current.indexedDB?.[name] || [], incoming.indexedDB?.[name] || []);
+    indexedDB[name] = merged.records;
+    conflictCounts[name] = merged.conflicts;
+    totalConflicts += merged.conflicts;
+  }
+  const localStorage = { ...(incoming.localStorage || {}) };
+  for (const [key, currentValue] of Object.entries(current.localStorage || {})) {
+    const incomingValue = localStorage[key];
+    if (incomingValue === undefined) { localStorage[key] = currentValue; continue; }
+    try {
+      const oldData = JSON.parse(currentValue), newData = JSON.parse(incomingValue);
+      if (Array.isArray(oldData) && Array.isArray(newData)) {
+        const merged = mergeRecords(oldData, newData, key);
+        localStorage[key] = JSON.stringify(merged.records);
+        conflictCounts[key] = merged.conflicts;
+        totalConflicts += merged.conflicts;
+      } else if (oldData && newData && typeof oldData === "object" && typeof newData === "object") {
+        const conflicts = Object.keys(oldData).filter(k => Object.hasOwn(newData, k)).length;
+        localStorage[key] = JSON.stringify({ ...newData, ...oldData });
+        if (conflicts) { conflictCounts[key] = conflicts; totalConflicts += conflicts; }
+      } else localStorage[key] = currentValue;
+    } catch { localStorage[key] = currentValue; }
+  }
+  return { localStorage, indexedDB, conflicts: { total: totalConflicts, bySource: conflictCounts } };
+}
+
+function getRetentionCandidates(items, days, protectedIds = new Set(), now = Date.now()) {
+  if (!Number.isFinite(days) || days <= 0) return [];
+  const cutoff = now - days * 86400000;
+  return items.filter(item => {
+    const published = item?.published ? Date.parse(item.published) : NaN;
+    return !item?.saved && !item?.queued && !protectedIds.has(item?.id) && Number.isFinite(published) && published < cutoff;
+  });
+}
+
+function getFeedRefreshInterval(feed, settings = {}) {
+  return Number(feed?.refreshIntervalMinutes) > 0 ? Number(feed.refreshIntervalMinutes) :
+    Number(settings.refreshIntervalMinutes) > 0 ? Number(settings.refreshIntervalMinutes) : 60;
+}
+function isFeedRefreshDue(feed, now = Date.now()) {
+  return !Number.isFinite(feed?.nextRefreshAt) || !feed.nextRefreshAt || feed.nextRefreshAt <= now;
+}
+function getFeedBackoffMinutes(feed, settings = {}) {
+  return getFeedRefreshInterval(feed, settings) * Math.min(2 ** Math.max(0, Number(feed?.consecutiveFailures) || 0), 8);
+}
+function getFeedHealthState(feed, now = Date.now()) {
+  if (feed?.error || Number(feed?.consecutiveFailures) > 0) return "failing";
+  if (!feed?.lastSuccess || now - feed.lastSuccess > 48 * 60 * 60 * 1000) return "stale";
+  return "healthy";
+}
+
+function getOpmlFolderPath(ancestors = []) {
+  return ancestors.filter(name => typeof name === "string" && name.trim()).map(name => name.trim()).join(" / ");
+}
+function selectAnnotationEntries(highlights = [], notes = [], selectedKeys = null) {
+  const selected = selectedKeys ? new Set(selectedKeys) : null;
+  return {
+    highlights: highlights.filter(h => !selected || selected.has(`highlight:${h.id}`)),
+    notes: notes.filter(n => !selected || selected.has(`note:${n.itemId}`))
+  };
+}
+
+function getShortcutForAction(presetId, candidates) {
+  const preset = PRESETS[presetId] || PRESETS.inoreader;
+  for (const action of candidates) {
+    const key = Object.entries(preset.keys).find(([, mapped]) => mapped === action)?.[0];
+    if (key && ACTION_LABELS[action]) return { action, key };
+  }
+  return null;
+}
+function shouldShowShortcutCoach({ trusted, detail, pointerFine, enabled, dismissed = [], action, lastShownAt = 0, now = Date.now(), cooldownSeconds = 60 }) {
+  return !!trusted && detail > 0 && !!pointerFine && enabled !== false &&
+    !!action && !dismissed.includes(action) && now - lastShownAt >= Math.max(0, cooldownSeconds) * 1000;
+}
+
+function calculateReadingActivity(items, rangeDays = 30, now = Date.now(), timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
+  const formatter = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+  const dateKey = date => {
+    const parts = Object.fromEntries(formatter.formatToParts(date).map(part => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  };
+  const shiftKey = (key, days) => {
+    const [year, month, day] = key.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day + days));
+    return date.toISOString().slice(0, 10);
+  };
+  const todayKey = dateKey(new Date(now)), startKey = shiftKey(todayKey, -(Math.max(1, rangeDays) - 1));
+  const byDay = {}, byFeed = {};
+  for (const item of items) {
+    if (!Number.isFinite(item?.readAt) || item.readAt > now) continue;
+    const key = dateKey(new Date(item.readAt));
+    if (key < startKey || key > todayKey) continue;
+    byDay[key] = (byDay[key] || 0) + 1;
+    if (item.feedId) byFeed[item.feedId] = (byFeed[item.feedId] || 0) + 1;
+  }
+  const activeDays = Object.keys(byDay);
+  let cursor = todayKey;
+  if (!byDay[cursor]) cursor = shiftKey(cursor, -1);
+  let streak = 0;
+  while (byDay[cursor]) { streak++; cursor = shiftKey(cursor, -1); }
+  const total = Object.values(byDay).reduce((sum, count) => sum + count, 0);
+  const mostActiveFeedId = Object.entries(byFeed).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  return { todayKey, startKey, byDay, byFeed, total, activeDays: activeDays.length, streak, mostActiveFeedId };
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder, nextFeedSort, keyDesc, PRESETS, ACTION_LABELS };
+  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder, nextFeedSort, keyDesc, PRESETS, ACTION_LABELS, migrateBackupDocument, mergeBackupDocument, getRetentionCandidates, getFeedRefreshInterval, isFeedRefreshDue, getFeedBackoffMinutes, getFeedHealthState, getOpmlFolderPath, selectAnnotationEntries, getShortcutForAction, shouldShowShortcutCoach, calculateReadingActivity };
 }
