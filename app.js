@@ -1616,7 +1616,7 @@ async function saveItems(feed, items) {
       published: d ? d.toISOString() : null,
       image: x.image || old?.image || "",
       enclosure: x.enclosure || old?.enclosure || null,
-      read: old?.read || false, readAt: old?.readAt || null, saved: old?.saved || false,
+      read: old?.read || false, readAt: old?.readAt || null, queued: old?.queued || false, queueOrder: old?.queueOrder ?? null, saved: old?.saved || false,
       queued: !!old?.queued, queueOrder: old?.queueOrder ?? null,
       snoozedUntil: old?.snoozedUntil || null,
       tags: old?.tags || []

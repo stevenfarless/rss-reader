@@ -98,6 +98,8 @@ test("retention uses a strict age boundary and protects saved, queued, highlight
     { id: "queued", published: published(90), queued: true },
     { id: "highlight", published: published(90) },
     { id: "note", published: published(90) },
+    { id: "snoozed", published: published(90), snoozeUntil: now + 1000 },
+    { id: "pinned", published: published(90), pinned: true },
     { id: "invalid", published: "unknown" }
   ];
   const protectedIds = new Set(["highlight", "note"]);

@@ -398,7 +398,7 @@ function getRetentionCandidates(items, days, protectedIds = new Set(), now = Dat
   const cutoff = now - days * 86400000;
   return items.filter(item => {
     const published = item?.published ? Date.parse(item.published) : NaN;
-    return !item?.saved && !item?.queued && !protectedIds.has(item?.id) && Number.isFinite(published) && published < cutoff;
+    return !item?.saved && !item?.queued && !item?.pinned && !item?.favorite && !(Number(item?.snoozeUntil) > now) && !protectedIds.has(item?.id) && Number.isFinite(published) && published < cutoff;
   });
 }
 
