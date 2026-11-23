@@ -491,6 +491,7 @@ function validateSettings(d) {
   if (typeof d.sidebarCollapsed === "boolean") next.sidebarCollapsed = d.sidebarCollapsed;
   if (typeof d.sidebarWidth === "number" && d.sidebarWidth >= 180 && d.sidebarWidth <= 420) next.sidebarWidth = d.sidebarWidth;
   if (typeof d.listWidth === "number" && d.listWidth >= 260 && d.listWidth <= 640) next.listWidth = d.listWidth;
+  if ([0, 30, 90, 180, 365].includes(d.retentionDays)) next.retentionDays = d.retentionDays;
   if (d.sort === "newest" || d.sort === "oldest") next.sort = d.sort;
   if (["all", "today", "week"].includes(d.filter)) next.filter = d.filter;
   if (Array.isArray(d.toolbarOrder)) {
@@ -709,6 +710,7 @@ function readSettingsFromDialog() {
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
     sidebarCollapsed: state.settings.sidebarCollapsed || false,
     sidebarWidth: state.settings.sidebarWidth, listWidth: state.settings.listWidth,
+    retentionDays: Number($("#retentionSelect")?.value) || 0,
     // Sort and filter are set elsewhere (the sort button, the filter
     // pills) and must survive a settings save, or a trip through
     // Settings silently resets them.
@@ -1828,6 +1830,12 @@ function renderNav() {
   $("#snoozedCount").textContent = fmtCount(state.items.filter(isSnoozed).length);
   $("#highlightsCount").textContent = fmtCount(state.highlights.length);
   const queueCount = $("#queueCount"); if (queueCount) queueCount.textContent = fmtCount(state.items.filter(x => x.queued).length);
+  $("#collapsedRail [data-view]").forEach(button => {
+    const active = button.dataset.view === state.view && state.view !== "feed";
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "true"); else button.removeAttribute("aria-current");
+  });
+  const queueCount = $("#queueCount"); if (queueCount) queueCount.textContent = fmtCount(state.items.filter(x => x.queued).length);
   $$(".nav").forEach(b => {
     b.classList.toggle("active", b.dataset.view === state.view && state.view !== "feed");
     if (b.dataset.view === state.view && state.view !== "feed") b.setAttribute("aria-current", "true");
@@ -2884,7 +2892,7 @@ function openItem(itemId) {
   const prevId = state.selected;
   state.selected = itemId;
   const wasUnread = !x.read;
-  if (wasUnread) { x.read = true; put(x); }
+  if (wasUnread) { x.read = true; x.readAt = Date.now(); put(x); }
   renderNav();
   // Opening an article in the Unread view removes it from that list,
   // so the whole list has to be rebuilt there. Everywhere else the
@@ -3615,6 +3623,8 @@ function showSettings() {
   $("#progressSelect").value = state.settings.progressPosition || "bottom";
   $("#mobileBarSelect").value = state.settings.mobileReaderBar || "bottom";
   $("#shortcutPresetSelect").value = state.settings.shortcutPreset || "inoreader";
+  if ($("#retentionSelect")) $("#retentionSelect").value = String(state.settings.retentionDays || 0);
+  updateStorageEstimate(); updateCleanupPreview(); updateReadingStats();
   $("#cardExcerptSelect").value = state.settings.cardExcerpt || "full";
   $("#cardImageToggle").checked = state.settings.cardImage !== false;
   $("#hideDuplicatesToggle").checked = state.settings.hideDuplicates !== false;
@@ -3855,7 +3865,7 @@ function runShortcutAction(name, e) {
     case "openCurrentTab": openInCurrentTab(); return true;
     case "toggleRead":
       if (!sel) return false;
-      sel.read = !sel.read; put(sel); render(); renderReader(sel); return true;
+      sel.read = !sel.read; sel.readAt = sel.read ? Date.now() : null; put(sel); render(); renderReader(sel); return true;
     case "toggleReadNext": toggleReadNext(); return true;
     case "toggleReadPrev": toggleReadPrev(); return true;
     case "markVisibleRead": markVisibleRead(); return true;
@@ -3961,7 +3971,7 @@ function goSavedSearch(id) {
 async function markVisibleRead() {
   const targets = visible().filter(x => !x.read);
   if (!targets.length) { toast("Visible articles are already read."); return; }
-  for (const x of targets) x.read = true;
+  for (const x of targets) { x.read = true; x.readAt = Date.now(); }
   await putMany(targets);
   render();
   toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} read.`, { label: "Undo", fn: async () => {
@@ -3977,7 +3987,7 @@ async function markFeedRead(feedId) {
   const feed = state.feeds.find(f => f.id === feedId);
   const targets = state.items.filter(x => x.feedId === feedId && !x.read);
   if (!targets.length) { toast("That feed is already read."); return; }
-  for (const x of targets) x.read = true;
+  for (const x of targets) { x.read = true; x.readAt = Date.now(); }
   await putMany(targets);
   render();
   toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} in “${feed?.title || "feed"}” read.`, { label: "Undo", fn: async () => {
@@ -4011,7 +4021,7 @@ async function markAboveBelow(which) {
   if (i === -1) { toast("Select an article first."); return; }
   const targets = (which === "above" ? a.slice(0, i) : a.slice(i + 1)).filter(x => !x.read);
   if (!targets.length) { toast(which === "above" ? "Nothing above this article is unread." : "Nothing below this article is unread."); return; }
-  for (const x of targets) x.read = true;
+  for (const x of targets) { x.read = true; x.readAt = Date.now(); }
   await putMany(targets);
   render();
   toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} ${which} read.`, { label: "Undo", fn: async () => {
@@ -4104,6 +4114,7 @@ function bind() {
         if (act.dataset.action === "queue-up" || act.dataset.action === "queue-down") { await moveQueueItem(x, act.dataset.action === "queue-up" ? -1 : 1); return; }
         const key = act.dataset.action === "save" ? "saved" : "read";
         x[key] = !x[key];
+        if (key === "read") x.readAt = x.read ? Date.now() : null;
         if (key === "read") x.readAt = x.read ? Date.now() : null;
         await put(x);
         render();
@@ -4435,6 +4446,8 @@ function bind() {
   $("#importOpml").onclick = () => $("#opmlFile").click();
   $("#exportOpml").onclick = exportOPML;
   $("#opmlFile").onchange = e => { if (e.target.files[0]) previewOPML(e.target.files[0]); e.target.value = ""; };
+  $("#opmlPreviewDialog").addEventListener("click", e => { if (e.target.closest('button[value="cancel"]')) { pendingOpmlFile = null; $("#opmlPreviewDialog").close(); } });
+  $("#backupRestoreDialog").addEventListener("click", e => { if (e.target.closest('button[value="cancel"]')) { pendingBackup = null; $("#backupRestoreDialog").close(); } });
   $("#opmlPreviewConfirm").onclick = async () => { if (pendingOpmlFile) await importOPML(pendingOpmlFile); pendingOpmlFile = null; $("#opmlPreviewDialog").close(); };
   // The X and Cancel buttons are type="button" (not submit), so the
   // Add feed button is the form's only submit button and therefore
@@ -4486,8 +4499,12 @@ function bind() {
   $("#backupRestoreConfirm").onclick = restorePendingBackup;
   $("#exportAnnotationsJson").onclick = () => exportAnnotations("json");
   $("#exportAnnotationsMarkdown").onclick = () => exportAnnotations("markdown");
+  $("#cleanupArticles").onclick = cleanupOldArticles;
+  $("#retentionSelect").onchange = updateCleanupPreview;
+  $("#statsRange").onchange = updateReadingStats;
   $("#railSearch")?.addEventListener("click", () => $("#search").focus());
   $("#railRefresh")?.addEventListener("click", refresh);
+  $("#railNextUnread")?.addEventListener("click", () => moveUnread(1));
   $("#menu").onclick = () => {
     const open = $("#sidebar").classList.toggle("open");
     $("#scrim").classList.toggle("show", open);

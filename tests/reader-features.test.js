@@ -71,3 +71,7 @@ test("complete backup validates and restores all application stores",()=>{assert
 test("OPML import previews duplicates before mutation",()=>{assert.match(app,/async function previewOPML\(/);assert.match(app,/repeated/);assert.match(html,/id="opmlPreviewConfirm"/)});
 test("reading queue is separate from saved and read state",()=>{assert.match(app,/async function toggleQueue\(/);assert.match(app,/queueOrder/);assert.match(app,/state.view === "queue"/);assert.match(html,/data-view="queue"/)});
 test("annotations can be exported as JSON and Markdown",()=>{assert.match(app,/function exportAnnotations\(/);assert.match(html,/id="exportAnnotationsJson"/);assert.match(html,/id="exportAnnotationsMarkdown"/)});
+
+test("secondary library views remain grouped and the rail includes next unread",()=>{assert.match(html,/id="libraryMore"[^]*data-view="queue"[^]*data-view="saved"/);assert.match(html,/id="railNextUnread"/);assert.match(app,/collapsedRail \[data-view\]/)});
+test("cleanup preview and reading activity controls are available",()=>{assert.match(html,/id="cleanupPreview"/);assert.match(html,/id="statsRange"/);assert.match(app,/function updateStorageEstimate\(/);assert.match(app,/function updateReadingStats\(/)});
+test("modal pointer focus decoration is suppressed while keyboard focus remains styled",()=>{assert.match(css,/dialog :focus:not\(:focus-visible\)/);assert.match(css,/:focus-visible/)});
