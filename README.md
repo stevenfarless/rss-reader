@@ -7,18 +7,22 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - RSS 2.0, RSS 1.0/RDF, Atom, and JSON Feed parsing
 - One Add a feed box: type a feed or website address to add it directly (conventional locations and WordPress are probed for bare sites), or type a publication, podcast, or topic to search Apple Podcasts and public RSS directories (RSS.mobi and RSSAmp, plus Feedsearch for website addresses) in one deduplicated result list
 - Discover feed links from publisher pages
-- Feed refresh, unread and saved article views, and per-feed navigation
-- Feed folders: create, rename, delete, and move feeds between folders (OPML folders are kept on import). Click a folder name in the sidebar to read all of its feeds as one merged newest-first list; collapse a folder with the chevron beside its name (the collapsed state is remembered)
+- Feed refresh, unread, saved, snoozed, and reading-queue views, with per-feed navigation and a configurable queue
+- Feed folders: create, rename, delete, and move feeds between folders. OPML import and export preserve nested folder paths. Click a folder name in the sidebar to read all of its feeds as one merged newest-first list; collapsed folder rows stay compact
 - Unsubscribe from a feed with the × beside it in the sidebar, or from the Folders &amp; tags dialog; the feed's articles are removed, except ones you saved
 - Article tags: create, rename, and delete tags; apply them from the reader (t); filter by tag from the sidebar; search covers tags
 - Full-text search: the search box matches article bodies (loaded full text, then feed content) as well as titles, summaries, authors, and tags
 - Saved searches: save the current search and view as a named filter in the sidebar (keywords, feed/folder scope, tag, unread-only), with rename/delete in the organize dialog
 - Rules: automatically tag, save, or mark read new articles that match (feed/folder scope, title keyword, author). Rules run on new arrivals at refresh and never delete anything; manage them in Settings with an on/off toggle per rule
-- Highlights and notes: select text in the reader to save a highlight with an optional note; passages are marked back into the article when it opens, listed under the article and in a Highlights view, with edit-note, show-in-article, and delete
+- Highlights and notes: select text in the reader to save a highlight with an optional note; passages are marked back into the article when it opens, listed under the article and in a Highlights view. Export all or selected annotations as JSON or Markdown
 - Markdown article rendering for plain-text RSS, Atom, and JSON Feed content, including headings, links, lists, tables, and code blocks
 - Full-article view: "Load full article" (or press W to toggle full article / feed excerpt) extracts the article text from the original page with Mozilla Readability (the library behind Firefox Reader View), with a hand-rolled fallback
 - Listen to an article in the reader (text-to-speech, with pause/resume, stop, and speed)
 - Estimated reading time on cards and in the reader
+- Reading queue with independent read/unread state, persistent manual ordering, bulk mark-read, remove, and local-copy deletion actions
+- Reading activity statistics by local calendar day, including streaks, most-read feeds, saved articles, and queue completion
+- Storage estimates and configurable retention cleanup with previews; saved, queued, snoozed, highlighted, annotated, and pinned articles are protected
+- Cancellable full-article loading with explicit loading, cancellation, and failure feedback
 - Reader font (serif, sans-serif, Nunito, Ubuntu) and line height (compact/comfortable/roomy) in Settings
 - Share an article: the system share sheet, or a copy-link fallback where the sheet is unavailable
 - Mark everything above or below the open one read (in the Mark read menu, Ctrl+M / Shift+M)
@@ -26,18 +30,18 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Duplicate articles (the same address in more than one feed) shown once, with a toggle in Settings
 - Mute a feed: hide its articles from All and Unread without unsubscribing
 - Search, date filters, and newest/oldest sorting
-- OPML subscription import and export
-- JSON settings import and export
-- Subscriptions and preferences stored in browser localStorage
-- Article cache and read/saved state stored in IndexedDB
+- OPML subscription import and export with a pre-import report for new feeds, duplicates, invalid URLs, and nested folders
+- JSON settings import and export, plus complete versioned profile backups with validation, migration, merge, and replace modes
+- Subscriptions and preferences stored in browser localStorage; feed and article data remain local to the browser
+- Article cache, read/saved state, queue order, highlights, and notes stored in IndexedDB
 - Responsive desktop and mobile layout
-- Collapsible sidebar: the ‹/› toggle in the top left folds the sidebar to a narrow rail, remembered across visits
-- Refresh on launch when the newest article is stale, with a last-updated time under the heading
+- Collapsible sidebar: the ‹/› toggle folds the sidebar to an icon rail with counts, next-unread navigation, search, refresh, and tag/saved-search flyouts; the preference is remembered
+- Per-feed and global refresh intervals with bounded exponential backoff, foreground scheduling, best-effort background refresh, and per-feed health diagnostics
 - Undo for bulk actions (mark all in this list read, unsubscribe)
 - Article thumbnails, per-feed favicons, and relative dates ("5m ago")
-- Dark mode by default, with light and system options
+- Dark mode by default, with light, system, pure-white, and OLED-black themes
 - Adjustable reading width and text size
-- Keyboard shortcuts: / search, j/k navigate, n/p next/previous unread, o or Enter open, v open original, m toggle read, s save, t add a tag, a mark all in this list read, Ctrl+M / Shift+M mark everything above/below read, u back to list, g then a/u/s go to All/Unread/Saved, r refresh, Space scroll, ? help, Esc close
+- Keyboard shortcuts: / search, j/k navigate, n/p next/previous unread, o or Enter open, v open original, m toggle read, s save, t add a tag, a mark all in this list read, Ctrl+M / Shift+M mark everything above/below read, u back to list, g then a/u/s go to All/Unread/Saved, r refresh, Space scroll, ? help, Esc close. Contextual suggestions can teach the active preset after mouse actions and can be disabled or suppressed per shortcut
 - Gentium Book Plus typography
 
 ## Hosting
@@ -50,7 +54,7 @@ The `.github/workflows/lighthouse.yml` workflow runs on pull requests targeting 
 
 Each run saves HTML and JSON reports as a downloadable GitHub Actions artifact for 30 days. Reports stay in the workflow artifact rather than being sent to public report storage.
 
-The project test suite also checks the web app manifest, required icon files, mobile viewport metadata, and service worker registration and lifecycle handlers. These checks cover repository-level PWA configuration.
+The project includes Node unit tests for backup migration and merge behavior, retention boundaries, feed scheduling and backoff, health classification, shortcut coaching, OPML folder paths, annotation selection, and time-zone-aware reading statistics. Playwright browser tests exercise desktop and mobile workflows, persistence, import/export, queue operations, full-text loading and cancellation, rich-content sanitization, and service-worker offline recovery. Repository checks also validate the web app manifest, required icons, mobile viewport metadata, and service-worker lifecycle handlers.
 
 **Lighthouse no longer includes a PWA category.** Google removed it in Lighthouse 12. The workflow therefore uses current Lighthouse categories and explicit PWA configuration regression tests. To verify Chrome's live installability diagnostics, open the deployed site in Chrome and inspect **DevTools → Application → Manifest**. The automated checks do not claim to replace that browser-level check.
 
