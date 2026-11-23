@@ -402,20 +402,21 @@ test("full-text reader renders Markdown returned by the reader service", async (
   await page.goto("/");
   await addFixtureFeed(page);
   await page.route("https://publisher.test/article-one", route => route.abort());
-  const markdown = `# Markdown full article
-
-This is a **bold paragraph** with ` + "`inline code`" + ` and a [source link](https://publisher.test/source).
-
-- First list item
-- Second list item
-
-```js
-const answer = 42;
-console.log(answer);
-```
-
-This final paragraph provides additional text so the reader service response is long enough to pass extraction checks and render as a complete article.
-`;
+  const markdown = [
+    "# Markdown full article",
+    "",
+    "This is a **bold paragraph** with `inline code` and a [source link](https://publisher.test/source).",
+    "",
+    "- First list item",
+    "- Second list item",
+    "",
+    "```js",
+    "const answer = 42;",
+    "console.log(answer);",
+    "```",
+    "",
+    "This final paragraph provides additional text so the reader service response is long enough to pass extraction checks and render as a complete article."
+  ].join("\\n");
   await page.route(/r\.jina\.ai/, route => route.fulfill({ status: 200, contentType: "text/plain", body: markdown }));
   await page.locator("#articleList [data-item]").first().click();
   await clickReaderAction(page, "fulltext");
