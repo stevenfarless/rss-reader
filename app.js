@@ -3323,7 +3323,7 @@ function updateReadingStats() {
   const stats = calculateReadingActivity(state.items, range, Date.now());
   const queue = state.items.filter(x => x.queued), saved = state.items.filter(x => x.saved).length;
   const topFeed = state.feeds.find(f => f.id === stats.mostActiveFeedId);
-  output.textContent = `${stats.total} articles marked read in ${range} days across ${stats.activeDays} active days. Current streak: ${stats.streak} days. Saved: ${saved}. Queue: ${queue.filter(x => x.read).length}/${queue.length} read. Most active feed: ${topFeed?.title || "No activity"}.`;
+  output.textContent = `${stats.total} articles marked read in ${range} days across ${stats.activeDays} active days. Current streak: ${stats.streak} days. Saved: ${saved}. Queue: ${queue.filter(x => x.read).length}/${queue.length} read. Most-read feed: ${topFeed?.title || "No activity"}.`;
   if (chart) {
     const days = [], [year, month, day] = stats.startKey.split("-").map(Number);
     for (let offset = 0; offset < range; offset++) {
