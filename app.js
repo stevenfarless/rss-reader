@@ -2080,6 +2080,7 @@ function renderHighlightsList() {
   if (mb) mb.disabled = true;
 }
 function renderList() {
+  renderQueueBulkBar();
   const a = visible();
   const titles = { all: "All articles", unread: "Unread", queue: "Reading queue", saved: "Saved", snoozed: "Snoozed", highlights: "Highlights", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", folder: state.folder || "Folder", savedSearch: state.savedSearches.find(s => s.id === state.savedSearch)?.name || "Saved search", tag: state.tag ? "Tag: " + state.tag : "Tag" };
   $("#heading").textContent = titles[state.view];
@@ -2127,8 +2128,9 @@ function renderList() {
     const thumb = feedCardImage(srcFeed) && x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : "";
     const rt = readingTimeText(x);
     const snoozeNote = state.view === "snoozed" && x.snoozedUntil ? ` · <span>Snoozed until ${esc(fmtDateTime(new Date(x.snoozedUntil)))}</span>` : "";
+    const queueSelect = state.view === "queue" ? `<label class="queue-select" title="Select article"><input type="checkbox" data-queue-select="${esc(x.id)}" ${queueSelection.has(x.id) ? "checked" : ""} aria-label="Select ${esc(x.title)}"></label>` : "";
     const queueControls = state.view === "queue" ? `<button data-action="queue-up" data-id="${esc(x.id)}" title="Move up" aria-label="Move ${esc(x.title)} up">↑</button><button data-action="queue-down" data-id="${esc(x.id)}" title="Move down" aria-label="Move ${esc(x.title)} down">↓</button>` : "";
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}">${thumb}<div class="article-main"><h2>${esc(x.title)}</h2><div class="article-source">${fav ? `<img class="card-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span>${esc(feedTitle)}</span></div>${excerpt}<div class="article-bottom"><span>${showAuthor ? `${esc(x.author)} · ` : ""}<time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? ` · <span>${rt}</span>` : ""}${snoozeNote}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="queue" data-id="${esc(x.id)}" title="${x.queued ? "Remove from queue" : "Add to queue"}" aria-label="${x.queued ? "Remove from queue" : "Add to queue"}" aria-pressed="${!!x.queued}">${icon("clock")}</button>${queueControls}<button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button>${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div></article>`;
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}">${thumb}<div class="article-main"><h2>${esc(x.title)}</h2><div class="article-source">${fav ? `<img class="card-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span>${esc(feedTitle)}</span></div>${excerpt}<div class="article-bottom"><span>${showAuthor ? `${esc(x.author)} · ` : ""}<time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? ` · <span>${rt}</span>` : ""}${snoozeNote}</span><span class="article-actions">${queueSelect}<button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="queue" data-id="${esc(x.id)}" title="${x.queued ? "Remove from queue" : "Add to queue"}" aria-label="${x.queued ? "Remove from queue" : "Add to queue"}" aria-pressed="${!!x.queued}">${icon("clock")}</button>${queueControls}<button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button>${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div></article>`;
   }).join("") : (state.query || state.filter !== "all" ? `<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>No articles match${state.query ? " &quot;" + esc(state.query) + "&quot;" : ""}.</p><button class="primary" id="emptyClear">Clear search</button></div>` : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>');
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
@@ -2996,7 +2998,47 @@ function render() {
 
 
 /* Queue state is independent of read/saved state and persists with each article. */
-async function toggleQueue(item) {
+async 
+function renderQueueBulkBar() {
+  const bar = $("#queueBulkBar");
+  if (!bar) return;
+  if (state.view !== "queue") { bar.hidden = true; queueSelection.clear(); return; }
+  const queueIds = state.items.filter(x => x.queued).map(x => x.id);
+  for (const id of queueSelection) if (!queueIds.includes(id)) queueSelection.delete(id);
+  bar.hidden = false;
+  const count = queueSelection.size, allSelected = queueIds.length > 0 && count === queueIds.length;
+  bar.innerHTML = `<button type="button" data-queue-bulk="select-all">${allSelected ? "Clear selection" : "Select all"}</button><span>${count} selected of ${queueIds.length}</span>` +
+    (count ? `<button type="button" data-queue-bulk="read">Mark read</button><button type="button" data-queue-bulk="remove">Remove from queue</button><button type="button" data-queue-bulk="delete">Delete local copies</button><button type="button" data-queue-bulk="clear">Clear</button>` : "");
+}
+async function runQueueBulkAction(action) {
+  const selected = state.items.filter(x => queueSelection.has(x.id) && x.queued);
+  if (!selected.length) return;
+  if (action === "select-all") {
+    const all = state.items.filter(x => x.queued);
+    if (queueSelection.size === all.length) queueSelection.clear();
+    else all.forEach(x => queueSelection.add(x.id));
+    renderList(); return;
+  }
+  if (action === "clear") { queueSelection.clear(); renderList(); return; }
+  if (action === "delete" && !confirm(`Delete ${selected.length} local article copies? Their source feeds will remain subscribed, and articles may return on a future refresh.`)) return;
+  if (action === "read") {
+    const now = Date.now();
+    for (const item of selected) { item.read = true; item.readAt = now; }
+    await putMany(selected);
+  } else if (action === "remove") {
+    for (const item of selected) { item.queued = false; item.queueOrder = null; }
+    await putMany(selected);
+  } else if (action === "delete") {
+    const ids = selected.map(x => x.id);
+    await deleteMany(ids);
+    state.items = state.items.filter(x => !queueSelection.has(x.id));
+    if (ids.includes(state.selected)) { state.selected = null; renderReader(null); }
+  }
+  queueSelection.clear(); render();
+  toast(action === "delete" ? `Deleted ${selected.length} local article copies.` : action === "remove" ? `Removed ${selected.length} articles from the queue.` : `Marked ${selected.length} queued articles read.`);
+}
+
+function toggleQueue(item) {
   if (!item) return;
   if (item.queued) { item.queued = false; item.queueOrder = null; }
   else { item.queued = true; item.queueOrder = state.items.reduce((m, x) => Math.max(m, Number(x.queueOrder) || 0), 0) + 1; }
@@ -3015,6 +3057,7 @@ async function moveQueueItem(item, direction) {
 /* Versioned local profile backup. */
 const BACKUP_FORMAT = "rss-reader-backup", BACKUP_STORES = ["items", "sync", "highlights"];
 let pendingBackup = null, pendingOpmlFile = null;
+const queueSelection = new Set();
 function backupReadStore(name) {
   return new Promise((resolve, reject) => {
     const request = db.transaction(name, "readonly").objectStore(name).getAll();
@@ -4190,7 +4233,18 @@ async function markAboveBelow(which) {
 }
 
 function bind() {
+  document.addEventListener("change", e => {
+    const checkbox = e.target.closest("[data-queue-select]");
+    if (!checkbox) return;
+    if (checkbox.checked) queueSelection.add(checkbox.dataset.queueSelect);
+    else queueSelection.delete(checkbox.dataset.queueSelect);
+    renderQueueBulkBar();
+  });
   document.addEventListener("click", async e => {
+    const queueCheckbox = e.target.closest("[data-queue-select]");
+    if (queueCheckbox) { e.stopPropagation(); return; }
+    const queueBulk = e.target.closest("[data-queue-bulk]");
+    if (queueBulk) { await runQueueBulkAction(queueBulk.dataset.queueBulk); return; }
     // The snooze menu closes on any click outside it or its button.
     // Remember whether it was open first: the snooze button toggles
     // from that pre-click state, so it can still close the menu.
