@@ -80,7 +80,7 @@ function toolbarButtonHTML(key, x, ctx) {
     case "queue": return `<button data-reader="queue" class="reader-btn${x.queued ? " on" : ""}" title="${x.queued ? "Remove from reading queue" : "Add to reading queue"}" aria-label="${x.queued ? "Remove from reading queue" : "Add to reading queue"}" aria-pressed="${!!x.queued}">${icon("clock")}</button>`;
     case "tags": return `<button data-reader="tags" class="reader-btn" title="Add tags (T)" aria-label="Add tags" aria-expanded="${tagsExpandedId === x.id}">${icon("tag")}</button>`;
     case "read": return `<button data-reader="read" class="reader-btn" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "○" : "●"}</button>`;
-    case "fulltext": return `<button data-reader="fulltext" class="reader-btn${fullTextActive ? " fulltext-active" : ""}${fullTextLoading ? " fulltext-loading" : ""}" title="${fullTextLoading ? "Loading full article…" : fullLabel + (canFull ? " (w)" : "")}" aria-label="${fullLabel}" aria-busy="${fullTextLoading}" ${canFull && !fullTextLoading ? "" : "disabled"}>${fullTextLoading ? '<span class="reader-spinner" aria-hidden="true"></span>' : icon("book-open")}</button>`;
+    case "fulltext": return `<button data-reader="fulltext" class="reader-btn${fullTextActive ? " fulltext-active" : ""}${fullTextLoading ? " fulltext-loading" : ""}" title="${fullTextLoading ? "Cancel full article loading" : fullLabel + (canFull ? " (w)" : "")}" aria-label="${fullTextLoading ? "Cancel full article loading" : fullLabel}" aria-busy="${fullTextLoading}" ${canFull ? "" : "disabled"}>${fullTextLoading ? '<span class="reader-spinner" aria-hidden="true"></span>' : icon("book-open")}</button>`;
     case "listen": return `<button data-reader="listen" class="reader-btn" title="${tts?.itemId === x.id ? "Stop listening" : canListen ? "Listen to article" : "Text-to-speech is not available in this browser"}" aria-label="Listen to article" aria-pressed="${tts?.itemId === x.id}" ${canListen ? "" : "disabled"}>${icon("speak")}</button>`;
     case "note": return `<button data-reader="note" class="reader-btn${hasNote ? " on" : ""}" title="Add note" aria-label="Add note" aria-pressed="${hasNote}">${icon("note")}</button>`;
     case "share": return `<button data-reader="share" class="reader-btn" title="Share article" aria-label="Share article">${icon("share")}</button>`;
@@ -976,7 +976,9 @@ function classifyError(e, wasHttp) {
 
 /* ---------- fetching ---------- */
 async function fetchWithTimeout(url, opts = {}, ms = FETCH_TIMEOUT_MS) {
-  const r = await fetch(url, { ...opts, signal: AbortSignal.timeout(ms) });
+  const timeoutSignal = AbortSignal.timeout(ms);
+  const signal = opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal;
+  const r = await fetch(url, { ...opts, signal });
   return r;
 }
 async function fetchText(url) {
@@ -2294,17 +2296,17 @@ function extractArticleHeuristic(html, base) {
   const clone = root.cloneNode(true);
   return cleanHTML(clone.innerHTML, base);
 }
-async function fetchArticleHtml(url, title) {
+async function fetchArticleHtml(url, title, signal) {
   let directErr = null;
   try {
     const r = await fetchWithTimeout(url, {
-      headers: { Accept: "text/html,application/xhtml+xml,*/*" }, cache: "no-store"
+      headers: { Accept: "text/html,application/xhtml+xml,*/*" }, cache: "no-store", signal
     });
     if (!r.ok) throw Error("HTTP " + r.status);
     const text = await r.text();
     if (!/<(article|main|body|div|p)[\s>]/i.test(text)) throw Error("Not an article page.");
     return text;
-  } catch (e) { directErr = e; }
+  } catch (e) { if (signal?.aborted) throw e; directErr = e; }
   // Reader service (returns the article as Markdown). Fast when it works;
   // it rate-limits shared IPs, so a failure here just falls through.
   // If the title appears only after a long run of navigation text, the
@@ -2313,7 +2315,7 @@ async function fetchArticleHtml(url, title) {
   let jinaHtml = null;
   try {
     const r = await fetchWithTimeout(JINA + url, {
-      headers: { Accept: "text/plain" }, cache: "no-store"
+      headers: { Accept: "text/plain" }, cache: "no-store", signal
     }, PROXY_TIMEOUT_MS);
     if (!r.ok) throw Error("HTTP " + r.status);
     const md = await r.text();
@@ -2323,15 +2325,16 @@ async function fetchArticleHtml(url, title) {
     const pos = titleAnchorPos(stripTags(html), title);
     if (pos < 0 || pos <= 1200) return html;
     jinaHtml = html;
-  } catch {}
+  } catch (e) { if (signal?.aborted) throw e; }
   // Generic proxy (returns the raw page HTML). Slow and flaky per site.
   try {
-    const r = await fetchWithTimeout(ALLORIGINS + encodeURIComponent(url), { cache: "no-store" }, PROXY_TIMEOUT_MS);
+    const r = await fetchWithTimeout(ALLORIGINS + encodeURIComponent(url), { cache: "no-store", signal }, PROXY_TIMEOUT_MS);
     if (!r.ok) throw Error("HTTP " + r.status);
     const text = await r.text();
     if (!/<(article|main|body|div|p)[\s>]/i.test(text)) throw Error("Not an article page.");
     return text;
   } catch (e) {
+    if (signal?.aborted) throw e;
     if (jinaHtml) return jinaHtml;
     throw directErr || e;
   }
@@ -2339,7 +2342,7 @@ async function fetchArticleHtml(url, title) {
 /* The site's own WordPress API, looked up by the article slug. No third
    party is involved, so this runs whether or not the proxy is on — the
    same principle as feed loading. Returns the post HTML, or null. */
-async function fetchViaWordPress(url) {
+async function fetchViaWordPress(url, signal) {
   let origin, slug;
   try {
     const u = new URL(url);
@@ -2350,7 +2353,7 @@ async function fetchViaWordPress(url) {
   if (!slug) return null;
   try {
     const r = await fetchWithTimeout(`${origin}/wp-json/wp/v2/posts?slug=${encodeURIComponent(slug)}&per_page=1`, {
-      headers: { Accept: "application/json" }, cache: "no-store"
+      headers: { Accept: "application/json" }, cache: "no-store", signal
     });
     if (!r.ok) return null;
     const posts = await r.json();
@@ -2358,7 +2361,7 @@ async function fetchViaWordPress(url) {
     const content = posts[0]?.content?.rendered || "";
     if (stripTags(content).length < 200) return null;
     return content;
-  } catch { return null; }
+  } catch (error) { if (signal?.aborted) throw error; return null; }
 }
 /* Small Markdown → HTML converter for the reader service's output.
    The source is escaped first, so raw HTML in the article cannot inject. */
@@ -2400,37 +2403,36 @@ function markdownToHTML(md) {
   return html;
 }
 async function loadFullText(item) {
-  if (!item || loadingFullTextIds.has(item.id) || item.fullContent) return;
+  if (!item || item.fullContent) return;
+  if (loadingFullTextIds.has(item.id)) {
+    fullTextControllers.get(item.id)?.abort();
+    return;
+  }
+  const controller = new AbortController();
+  fullTextControllers.set(item.id, controller);
   loadingFullTextIds.add(item.id);
   if (state.selected === item.id) renderReader(item);
   try {
-    // The site's own WordPress API first — but only for sites we know
-    // are WordPress (their feed loaded via the WP API). Asking every
-    // other publisher's origin for /wp-json/ can only 404.
     const f = state.feeds.find(f => f.id === item.feedId);
-    const wp = (f?.via === "wp" || f?.wpRoot) ? await fetchViaWordPress(item.url) : null;
-    if (wp) {
-      item.fullContent = wp;
-    } else {
-      const html = await fetchArticleHtml(item.url, item.title);
+    const wp = (f?.via === "wp" || f?.wpRoot) ? await fetchViaWordPress(item.url, controller.signal) : null;
+    if (wp) item.fullContent = wp;
+    else {
+      const html = await fetchArticleHtml(item.url, item.title, controller.signal);
       const body = extractArticle(html, item.url);
       if (!body || !body.textContent.trim()) throw Error("No article text found.");
       item.fullContent = body.innerHTML;
     }
     await put(item);
-    loadingFullTextIds.delete(item.id);
-    // The article's body changed, so its cached search text is stale.
     searchTextCache.delete(item.id);
-    // The load can take tens of seconds; the user may have opened
-    // another article or closed the reader meanwhile. Only re-open the
-    // article if it is still the one on screen, or the completed load
-    // would yank the reader back to a stale article.
     if (state.selected === item.id) openItem(item.id);
     toast("Full article loaded.");
-  } catch (e) {
+  } catch (error) {
+    if (controller.signal.aborted) toast("Full article loading cancelled.");
+    else toast(`Full text unavailable: ${error.message || "the publisher or reader services blocked access"}`);
+  } finally {
     loadingFullTextIds.delete(item.id);
+    fullTextControllers.delete(item.id);
     if (state.selected === item.id) renderReader(item);
-    toast("Full text unavailable — the publisher blocks direct access and the reader services could not fetch this page.");
   }
 }
 
