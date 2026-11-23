@@ -489,7 +489,7 @@ function validateSettings(d) {
   if (typeof d.notifyNew === "boolean") next.notifyNew = d.notifyNew;
   if (typeof d.sidebarCollapsed === "boolean") next.sidebarCollapsed = d.sidebarCollapsed;
   if (typeof d.sidebarWidth === "number" && d.sidebarWidth >= 180 && d.sidebarWidth <= 420) next.sidebarWidth = d.sidebarWidth;
-  if (typeof d.listWidth === "number" && d.listWidth >= 320 && d.listWidth <= 640) next.listWidth = d.listWidth;
+  if (typeof d.listWidth === "number" && d.listWidth >= 260 && d.listWidth <= 640) next.listWidth = d.listWidth;
   if (d.sort === "newest" || d.sort === "oldest") next.sort = d.sort;
   if (["all", "today", "week"].includes(d.filter)) next.filter = d.filter;
   if (Array.isArray(d.toolbarOrder)) {
@@ -783,7 +783,7 @@ function applySettings() {
   // Keep the browser chrome (status bar, task switcher) on the same
   // color as the theme, so the theme never flashes the wrong color.
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = t === "light" ? "#f4f2ec" : "#171916";
+  if (meta) meta.content = t === "light" || t === "white" ? "#ffffff" : t === "oled" ? "#000000" : "#171916";
   document.documentElement.dataset.width = state.settings.width;
   document.documentElement.dataset.size = state.settings.size;
   // Reader typography (#111): serif/comfortable are the defaults, so
@@ -818,8 +818,8 @@ function applySidebarCollapsed() {
    The splitter handles are absolutely positioned in .layout and placed
    from the panes' actual rects, so they stay on the boundary even when
    the grid clamps a column on a narrow viewport. */
-const SIDE_W = { min: 180, max: 420, def: 230 };
-const LIST_W = { min: 320, max: 640, def: 430 };
+const SIDE_W = { min: 180, max: 420, def: 250 };
+const LIST_W = { min: 260, max: 640, def: 390 };
 function clampW(v, r) { return Math.min(r.max, Math.max(r.min, Math.round(v) || r.def)); }
 function applyPaneWidths() {
   const side = clampW(state.settings.sidebarWidth, SIDE_W);
@@ -1618,6 +1618,7 @@ async function saveItems(feed, items) {
 }
 
 async function refreshFeed(f) {
+  f.lastAttempt = Date.now();
   try {
     let loaded;
     if (f.via === "wp" && f.wpRoot) {
@@ -1632,6 +1633,7 @@ async function refreshFeed(f) {
       loaded = await loadFeedFromUrl(f.url);
     }
     f.title = loaded.parsed.title || f.title;
+    f.lastSuccess = Date.now(); f.lastError = ""; f.consecutiveFailures = 0;
     f.error = "";
     f.via = loaded.via;
     f.wpRoot = loaded.wpRoot || f.wpRoot || "";
@@ -1639,7 +1641,8 @@ async function refreshFeed(f) {
     await saveItems(f, loaded.parsed.items);
     return true;
   } catch (e) {
-    f.error = classifyError(e);
+    f.error = classifyError(e); f.lastError = f.error; f.lastErrorAt = Date.now();
+    f.consecutiveFailures = (Number(f.consecutiveFailures) || 0) + 1;
     return false;
   }
 }
@@ -1647,7 +1650,7 @@ async function refreshFeed(f) {
 function showFeedError(id) {
   const f = state.feeds.find(v => v.id === id);
   if (!f) return;
-  $("#feedErrorText").textContent = f.error || "This feed failed to load.";
+  $("#feedErrorText").textContent = [f.error || "This feed failed to load.", `Last attempt: ${f.lastAttempt ? new Date(f.lastAttempt).toLocaleString() : "Unknown"}`, `Last success: ${f.lastSuccess ? new Date(f.lastSuccess).toLocaleString() : "Never"}`, `Consecutive failures: ${Number(f.consecutiveFailures) || 0}`, `Retrieval method: ${f.via || "Unknown"}`].join("\n");
   $("#feedErrorDialog").dataset.feed = id;
   $("#feedErrorDialog").showModal();
 }
@@ -1856,7 +1859,7 @@ function renderNav() {
     // A folder's chevron collapses its feeds (#175); the name still
     // opens the folder's merged list, as before.
     const collapsed = g ? collapsedFolders.has(g) : false;
-    const label = g ? `<div class="folder-head" data-drop-folder="${esc(g)}"><button type="button" class="folder-toggle" data-folder-toggle="${esc(g)}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Collapse"} folder ${esc(g)}"><span class="folder-chevron" aria-hidden="true">▾</span></button><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${fmtCount(folderUnread)}</span>` : ""}</button></div>` : (groupNames.length > 1 ? `<div class="feed-group" data-drop-folder="">Ungrouped</div>` : "");
+    const label = g ? `<div class="folder-head${collapsed ? " collapsed" : ""}" data-drop-folder="${esc(g)}"><button type="button" class="folder-toggle" data-folder-toggle="${esc(g)}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Collapse"} folder ${esc(g)}"><span class="folder-chevron" aria-hidden="true">▾</span></button><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${fmtCount(folderUnread)}</span>` : ""}</button></div>` : (groupNames.length > 1 ? `<div class="feed-group" data-drop-folder="">Ungrouped</div>` : "");
     const rows = groups[g].map(f => {
       const unreadCount = unreadByFeed.get(f.id) || 0;
       const err = f.error ? " feed-error" : "";
@@ -2040,7 +2043,7 @@ function renderList() {
     : state.view === "snoozed" ? "Articles waiting to come back."
     : state.view === "unread" ? "Stories you have not read yet."
     : state.view === "highlights" ? "Passages you highlighted, with your notes."
-    : state.view === "folder" ? `Every feed in “${state.folder}”, newest first.`
+    : state.view === "folder" ? ""
     : state.view === "savedSearch" ? "A saved filter, run over your library."
     : state.view === "tag" ? `Articles tagged “${state.tag}”.`
     : "";

@@ -61,3 +61,8 @@ test("mobile bottom reading progress stays on the viewport edge", () => {
   assert.ok(!css.includes("#readProgress.bottom{bottom:calc(56px + env(safe-area-inset-bottom))}"));
   assert.ok(css.includes("body:not(.mobile-bar-top) .reader-actions{position:fixed;left:0;right:0;bottom:0;z-index:30"));
 });
+
+test("OLED and pure white themes are selectable",()=>{assert.match(html,/option value="oled"/);assert.match(html,/option value="white"/);assert.match(css,/data-theme=oled[^]*--bg:#000000/);assert.match(css,/data-theme=white[^]*--bg:#ffffff/)});
+test("sidebar secondary navigation and compact rail are present",()=>{assert.match(html,/id="libraryMore"/);assert.match(html,/id="collapsedRail"/);assert.match(css,/folder-head\.collapsed/)});
+test("feed refresh diagnostics retain success and failure history",()=>{assert.match(app,/consecutiveFailures/);assert.match(app,/lastSuccess/);assert.match(app,/lastAttempt/)});
+test("folder list header omits repeated folder subtitle",()=>{assert.match(app,/state\.view === "folder" \? ""/)});
