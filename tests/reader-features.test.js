@@ -66,3 +66,8 @@ test("OLED and pure white themes are selectable",()=>{assert.match(html,/option 
 test("sidebar secondary navigation and compact rail are present",()=>{assert.match(html,/id="libraryMore"/);assert.match(html,/id="collapsedRail"/);assert.match(css,/folder-head\.collapsed/)});
 test("feed refresh diagnostics retain success and failure history",()=>{assert.match(app,/consecutiveFailures/);assert.match(app,/lastSuccess/);assert.match(app,/lastAttempt/)});
 test("folder list header omits repeated folder subtitle",()=>{assert.match(app,/state\.view === "folder" \? ""/)});
+
+test("complete backup validates and restores all application stores",()=>{assert.match(app,/function validateBackup\(/);assert.match(app,/BACKUP_STORES = \["items", "sync", "highlights"\]/);assert.match(app,/function restorePendingBackup\(/);assert.match(html,/id="backupRestoreMode"/)});
+test("OPML import previews duplicates before mutation",()=>{assert.match(app,/async function previewOPML\(/);assert.match(app,/repeated/);assert.match(html,/id="opmlPreviewConfirm"/)});
+test("reading queue is separate from saved and read state",()=>{assert.match(app,/async function toggleQueue\(/);assert.match(app,/queueOrder/);assert.match(app,/state.view === "queue"/);assert.match(html,/data-view="queue"/)});
+test("annotations can be exported as JSON and Markdown",()=>{assert.match(app,/function exportAnnotations\(/);assert.match(html,/id="exportAnnotationsJson"/);assert.match(html,/id="exportAnnotationsMarkdown"/)});

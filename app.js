@@ -64,9 +64,9 @@ const plainText = s => decodeHtml(stripTags(s));
 const icon = (name, cls) => `<svg class="ic${cls ? " " + cls : ""}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 /* Reader toolbar (#197): icon-only buttons, in an order the user can
    rearrange in Settings (stored in settings.toolbarOrder). */
-const TOOLBAR_KEYS = ["back", "save", "tags", "read", "fulltext", "listen", "note", "share", "snooze", "open", "close"];
+const TOOLBAR_KEYS = ["back", "save", "queue", "tags", "read", "fulltext", "listen", "note", "share", "snooze", "open", "close"];
 const TOOLBAR_DEFAULT = [...TOOLBAR_KEYS];
-const TOOLBAR_LABELS = { back: "Back", save: "Save", tags: "Add tags", read: "Mark read", fulltext: "Full article", listen: "Listen", note: "Add note", share: "Share", snooze: "Snooze", open: "Open original", close: "Close" };
+const TOOLBAR_LABELS = { back: "Back", save: "Save", queue: "Reading queue", tags: "Add tags", read: "Mark read", fulltext: "Full article", listen: "Listen", note: "Add note", share: "Share", snooze: "Snooze", open: "Open original", close: "Close" };
 function toolbarOrder() {
   return normalizeToolbarOrder(state.settings.toolbarOrder, TOOLBAR_KEYS, TOOLBAR_DEFAULT);
 }
@@ -77,6 +77,7 @@ function toolbarButtonHTML(key, x, ctx) {
   switch (key) {
     case "back": return `<button data-reader="back" class="reader-btn reader-back" title="Back to list" aria-label="Back to list">‹</button>`;
     case "save": return `<button data-reader="save" class="reader-btn" title="Save (s)" aria-label="${x.saved ? "Unsave article" : "Save article"}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button>`;
+    case "queue": return `<button data-reader="queue" class="reader-btn${x.queued ? " on" : ""}" title="${x.queued ? "Remove from reading queue" : "Add to reading queue"}" aria-label="${x.queued ? "Remove from reading queue" : "Add to reading queue"}" aria-pressed="${!!x.queued}">${icon("clock")}</button>`;
     case "tags": return `<button data-reader="tags" class="reader-btn" title="Add tags (T)" aria-label="Add tags" aria-expanded="${tagsExpandedId === x.id}">${icon("tag")}</button>`;
     case "read": return `<button data-reader="read" class="reader-btn" title="${x.read ? "Mark unread (m)" : "Mark read (m)"}" aria-label="${x.read ? "Mark unread" : "Mark read"}">${x.read ? "○" : "●"}</button>`;
     case "fulltext": return `<button data-reader="fulltext" class="reader-btn${fullTextActive ? " fulltext-active" : ""}${fullTextLoading ? " fulltext-loading" : ""}" title="${fullTextLoading ? "Loading full article…" : fullLabel + (canFull ? " (w)" : "")}" aria-label="${fullLabel}" aria-busy="${fullTextLoading}" ${canFull && !fullTextLoading ? "" : "disabled"}>${fullTextLoading ? '<span class="reader-spinner" aria-hidden="true"></span>' : icon("book-open")}</button>`;
@@ -1581,7 +1582,8 @@ async function saveItems(feed, items) {
       published: d ? d.toISOString() : null,
       image: x.image || old?.image || "",
       enclosure: x.enclosure || old?.enclosure || null,
-      read: old?.read || false, saved: old?.saved || false,
+      read: old?.read || false, readAt: old?.readAt || null, saved: old?.saved || false,
+      queued: !!old?.queued, queueOrder: old?.queueOrder ?? null,
       snoozedUntil: old?.snoozedUntil || null,
       tags: old?.tags || []
     };
@@ -1749,6 +1751,7 @@ function visible() {
   const mutedIds = new Set(state.feeds.filter(f => f.muted).map(f => f.id));
   const savedSearch = state.view === "savedSearch" ? state.savedSearches.find(v => v.id === state.savedSearch) : null;
   let a = state.items.filter(x => {
+    if (state.view === "queue") return !!x.queued;
     if (state.view === "snoozed") return isSnoozed(x);
     if (isSnoozed(x)) return false;
     if (state.view === "unread") return !x.read && !mutedIds.has(x.feedId);
@@ -1804,6 +1807,7 @@ function countableItems() {
   const mutedIds = new Set(state.feeds.filter(f => f.muted).map(f => f.id));
   let a = state.items.filter(x => !isSnoozed(x) && !mutedIds.has(x.feedId));
   if (state.settings.hideDuplicates !== false) a = dedupeItems(a);
+  if (state.view === "queue") a.sort((x, y) => (x.queueOrder ?? Number.MAX_SAFE_INTEGER) - (y.queueOrder ?? Number.MAX_SAFE_INTEGER));
   return a;
 }
 /* Collapsed feed folders (#175), persisted in localStorage so the
@@ -1823,6 +1827,7 @@ function renderNav() {
   $("#savedCount").textContent = fmtCount(state.items.filter(x => x.saved && !isSnoozed(x)).length);
   $("#snoozedCount").textContent = fmtCount(state.items.filter(isSnoozed).length);
   $("#highlightsCount").textContent = fmtCount(state.highlights.length);
+  const queueCount = $("#queueCount"); if (queueCount) queueCount.textContent = fmtCount(state.items.filter(x => x.queued).length);
   $$(".nav").forEach(b => {
     b.classList.toggle("active", b.dataset.view === state.view && state.view !== "feed");
     if (b.dataset.view === state.view && state.view !== "feed") b.setAttribute("aria-current", "true");
@@ -2025,7 +2030,7 @@ function renderHighlightsList() {
 }
 function renderList() {
   const a = visible();
-  const titles = { all: "All articles", unread: "Unread", saved: "Saved", snoozed: "Snoozed", highlights: "Highlights", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", folder: state.folder || "Folder", savedSearch: state.savedSearches.find(s => s.id === state.savedSearch)?.name || "Saved search", tag: state.tag ? "Tag: " + state.tag : "Tag" };
+  const titles = { all: "All articles", unread: "Unread", queue: "Reading queue", saved: "Saved", snoozed: "Snoozed", highlights: "Highlights", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", folder: state.folder || "Folder", savedSearch: state.savedSearches.find(s => s.id === state.savedSearch)?.name || "Saved search", tag: state.tag ? "Tag: " + state.tag : "Tag" };
   $("#heading").textContent = titles[state.view];
   $("#mobileTitle").textContent = titles[state.view];
   // The Highlights view (#116) lists the highlights themselves, newest
@@ -2040,6 +2045,7 @@ function renderList() {
   const fb = $("#filterMenuBtn");
   if (fb) fb.querySelector(".disclosure-label").textContent = ({ all: "All", today: "Today", week: "This week" }[state.filter] || "All");
   const base = state.view === "saved" ? "Articles you have kept for later."
+    : state.view === "queue" ? "Articles arranged for your next reading session."
     : state.view === "snoozed" ? "Articles waiting to come back."
     : state.view === "unread" ? "Stories you have not read yet."
     : state.view === "highlights" ? "Passages you highlighted, with your notes."
@@ -2070,7 +2076,8 @@ function renderList() {
     const thumb = feedCardImage(srcFeed) && x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : "";
     const rt = readingTimeText(x);
     const snoozeNote = state.view === "snoozed" && x.snoozedUntil ? ` · <span>Snoozed until ${esc(fmtDateTime(new Date(x.snoozedUntil)))}</span>` : "";
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}">${thumb}<div class="article-main"><h2>${esc(x.title)}</h2><div class="article-source">${fav ? `<img class="card-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span>${esc(feedTitle)}</span></div>${excerpt}<div class="article-bottom"><span>${showAuthor ? `${esc(x.author)} · ` : ""}<time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? ` · <span>${rt}</span>` : ""}${snoozeNote}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button>${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div></article>`;
+    const queueControls = state.view === "queue" ? `<button data-action="queue-up" data-id="${esc(x.id)}" title="Move up" aria-label="Move ${esc(x.title)} up">↑</button><button data-action="queue-down" data-id="${esc(x.id)}" title="Move down" aria-label="Move ${esc(x.title)} down">↓</button>` : "";
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}">${thumb}<div class="article-main"><h2>${esc(x.title)}</h2><div class="article-source">${fav ? `<img class="card-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span>${esc(feedTitle)}</span></div>${excerpt}<div class="article-bottom"><span>${showAuthor ? `${esc(x.author)} · ` : ""}<time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? ` · <span>${rt}</span>` : ""}${snoozeNote}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="queue" data-id="${esc(x.id)}" title="${x.queued ? "Remove from queue" : "Add to queue"}" aria-label="${x.queued ? "Remove from queue" : "Add to queue"}" aria-pressed="${!!x.queued}">${icon("clock")}</button>${queueControls}<button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button>${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div></article>`;
   }).join("") : (state.query || state.filter !== "all" ? `<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>No articles match${state.query ? " &quot;" + esc(state.query) + "&quot;" : ""}.</p><button class="primary" id="emptyClear">Clear search</button></div>` : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>');
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
@@ -2934,6 +2941,177 @@ function render() {
   const tl = $("#tagList");
   if (tl) tl.innerHTML = state.tags.map(t => `<option value="${esc(t)}">`).join("");
   if (!state.selected) $("#reader").innerHTML = '<div class="reader-empty">' + icon("rss", "big") + '<h2>Nothing open yet</h2><p>Pick an article from the list to read it here.</p><small>Tip: press ? any time to see keyboard shortcuts.</small></div>';
+}
+
+
+/* Queue state is independent of read/saved state and persists with each article. */
+async function toggleQueue(item) {
+  if (!item) return;
+  if (item.queued) { item.queued = false; item.queueOrder = null; }
+  else { item.queued = true; item.queueOrder = state.items.reduce((m, x) => Math.max(m, Number(x.queueOrder) || 0), 0) + 1; }
+  await put(item); render();
+  if (state.selected === item.id) renderReader(item);
+}
+async function moveQueueItem(item, direction) {
+  const queue = state.items.filter(x => x.queued).sort((a, b) => (a.queueOrder ?? 0) - (b.queueOrder ?? 0));
+  const i = queue.findIndex(x => x.id === item.id), j = i + direction;
+  if (i < 0 || j < 0 || j >= queue.length) return;
+  [queue[i], queue[j]] = [queue[j], queue[i]];
+  queue.forEach((x, n) => { x.queueOrder = n + 1; });
+  await putMany(queue); render();
+}
+
+/* Versioned local profile backup. */
+const BACKUP_FORMAT = "rss-reader-backup", BACKUP_STORES = ["items", "sync", "highlights"];
+let pendingBackup = null, pendingOpmlFile = null;
+function backupReadStore(name) {
+  return new Promise((resolve, reject) => {
+    const request = db.transaction(name, "readonly").objectStore(name).getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function exportBackup() {
+  try {
+    const indexedDBData = {};
+    for (const name of BACKUP_STORES) indexedDBData[name] = await backupReadStore(name);
+    const localData = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith("rss-reader.")) localData[key] = localStorage.getItem(key);
+    }
+    download(JSON.stringify({ format: BACKUP_FORMAT, version: 1, createdAt: new Date().toISOString(), localStorage: localData, indexedDB: indexedDBData }, null, 2), "rss-reader-backup.json", "application/json");
+    toast("Complete backup exported.");
+  } catch (error) { toast(`Backup failed: ${error.message || "storage error"}`); }
+}
+function validateBackup(data) {
+  if (!data || data.format !== BACKUP_FORMAT || data.version !== 1) throw Error("Unsupported backup format or version.");
+  if (!data.localStorage || typeof data.localStorage !== "object" || Array.isArray(data.localStorage)) throw Error("Backup local data is invalid.");
+  if (!data.indexedDB || typeof data.indexedDB !== "object") throw Error("Backup database data is missing.");
+  for (const name of BACKUP_STORES) if (!Array.isArray(data.indexedDB[name])) throw Error(`Backup store ${name} is invalid.`);
+  for (const [key, value] of Object.entries(data.localStorage)) {
+    if (!key.startsWith("rss-reader.") || typeof value !== "string") throw Error("Backup contains invalid local data.");
+    try { JSON.parse(value); } catch { throw Error(`Setting ${key} contains invalid JSON.`); }
+  }
+  for (const x of data.indexedDB.items) if (!x || typeof x.id !== "string") throw Error("Backup contains an invalid article.");
+  for (const x of data.indexedDB.highlights) if (!x || typeof x.id !== "string" || typeof x.itemId !== "string" || typeof x.text !== "string") throw Error("Backup contains an invalid highlight.");
+  for (const x of data.indexedDB.sync) if (!x || typeof x.key !== "string") throw Error("Backup contains an invalid sync record.");
+  return data;
+}
+async function previewBackup(file) {
+  try {
+    const data = validateBackup(JSON.parse(await file.text()));
+    pendingBackup = data;
+    const feeds = data.localStorage[K] ? JSON.parse(data.localStorage[K]).length : 0;
+    const notes = data.localStorage[NK] ? Object.keys(JSON.parse(data.localStorage[NK])).length : 0;
+    $("#backupRestoreSummary").textContent = `${feeds} feeds, ${data.indexedDB.items.length} articles, ${data.indexedDB.highlights.length} highlights, ${notes} article notes.`;
+    $("#backupRestoreDialog").showModal();
+  } catch (error) { pendingBackup = null; toast(`Backup rejected: ${error.message || "invalid file"}`); }
+}
+function mergeBackupRecords(current, incoming) {
+  const records = new Map();
+  for (const x of incoming) records.set(x.id ?? x.key ?? x.url ?? JSON.stringify(x), x);
+  for (const x of current) records.set(x.id ?? x.key ?? x.url ?? JSON.stringify(x), x);
+  return [...records.values()];
+}
+async function backupWriteStores(stores) {
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(BACKUP_STORES, "readwrite");
+    for (const name of BACKUP_STORES) {
+      const store = tx.objectStore(name); store.clear();
+      for (const record of stores[name]) store.put(record);
+    }
+    tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || Error("Restore transaction aborted."));
+  });
+}
+async function restorePendingBackup() {
+  if (!pendingBackup) return;
+  const incoming = pendingBackup, mode = $("#backupRestoreMode").value;
+  pendingBackup = null; $("#backupRestoreDialog").close();
+  try {
+    const oldStores = {}, oldLocal = {};
+    for (const name of BACKUP_STORES) oldStores[name] = await backupReadStore(name);
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith("rss-reader.")) oldLocal[key] = localStorage.getItem(key);
+    }
+    const stores = {};
+    for (const name of BACKUP_STORES) stores[name] = mode === "replace" ? incoming.indexedDB[name] : mergeBackupRecords(oldStores[name], incoming.indexedDB[name]);
+    const localData = { ...incoming.localStorage };
+    if (mode === "merge") for (const [key, value] of Object.entries(oldLocal)) {
+      if (key.endsWith("settings.v1") || key.endsWith("notes.v1")) {
+        try { localData[key] = JSON.stringify({ ...JSON.parse(localData[key] || "{}"), ...JSON.parse(value || "{}") }); } catch { localData[key] = value; }
+      } else if (localData[key] === undefined) localData[key] = value;
+      else {
+        try {
+          const a = JSON.parse(localData[key]), b = JSON.parse(value);
+          if (Array.isArray(a) && Array.isArray(b)) localData[key] = JSON.stringify(mergeBackupRecords(b, a));
+        } catch {}
+      }
+    }
+    await backupWriteStores(stores);
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key?.startsWith("rss-reader.")) localStorage.removeItem(key);
+      }
+      for (const [key, value] of Object.entries(localData)) localStorage.setItem(key, value);
+    } catch (error) {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key?.startsWith("rss-reader.")) localStorage.removeItem(key);
+      }
+      for (const [key, value] of Object.entries(oldLocal)) localStorage.setItem(key, value);
+      await backupWriteStores(oldStores);
+      throw error;
+    }
+    toast(`Backup ${mode === "replace" ? "restored" : "merged"}; reloading.`);
+    setTimeout(() => location.reload(), 700);
+  } catch (error) { toast(`Restore failed: ${error.message || "browser storage error"}`); }
+}
+
+/* Export highlights and article notes in structured and readable formats. */
+function exportAnnotations(format) {
+  const highlights = state.highlights.map(h => {
+    const item = state.items.find(x => x.id === h.itemId);
+    return { ...h, articleTitle: item?.title || "Article no longer in library", articleUrl: item?.url || "", feedTitle: item ? feedTitleFor(item) : "" };
+  });
+  const notes = Object.entries(articleNotes).map(([itemId, note]) => {
+    const item = state.items.find(x => x.id === itemId);
+    return { itemId, note, articleTitle: item?.title || "Article no longer in library", articleUrl: item?.url || "", feedTitle: item ? feedTitleFor(item) : "" };
+  });
+  if (format === "json") download(JSON.stringify({ format: "rss-reader-annotations", version: 1, exportedAt: new Date().toISOString(), highlights, notes }, null, 2), "rss-reader-annotations.json", "application/json");
+  else {
+    const blocks = [];
+    for (const h of highlights) blocks.push(`## ${h.articleTitle}\n\n> ${h.text}\n\n${h.note ? h.note + "\n\n" : ""}Source: ${h.articleUrl || "Unavailable"}\nFeed: ${h.feedTitle || "Unknown"}\nCreated: ${h.created ? new Date(h.created).toISOString() : "Unknown"}`);
+    for (const n of notes) blocks.push(`## ${n.articleTitle}\n\n${n.note}\n\nSource: ${n.articleUrl || "Unavailable"}\nFeed: ${n.feedTitle || "Unknown"}`);
+    download("# Article annotations\n\n" + (blocks.join("\n\n---\n\n") || "No annotations."), "rss-reader-annotations.md", "text/markdown");
+  }
+  toast(`Annotations exported as ${format.toUpperCase()}.`);
+}
+
+/* Parse and report OPML content before any feed is added. */
+async function previewOPML(file) {
+  try {
+    const doc = new DOMParser().parseFromString(await file.text(), "text/xml");
+    if (doc.querySelector("parsererror") || doc.documentElement.localName !== "opml") throw Error("Invalid OPML file.");
+    let total = 0, existing = 0, repeated = 0, invalid = 0;
+    const known = new Set(state.feeds.map(f => normalizeFeedUrl(f.url))), seen = new Set(), folders = new Set();
+    for (const outline of doc.querySelectorAll("outline[xmlUrl]")) {
+      total++;
+      let url;
+      try { url = normalizeFeedUrl(outline.getAttribute("xmlUrl")); } catch { invalid++; continue; }
+      if (known.has(url)) existing++;
+      else if (seen.has(url)) repeated++;
+      seen.add(url);
+      const parent = outline.parentElement;
+      if (parent?.localName === "outline") folders.add(parent.getAttribute("text") || parent.getAttribute("title") || "Unnamed folder");
+    }
+    pendingOpmlFile = file;
+    $("#opmlPreviewSummary").textContent = `${total} feeds, ${folders.size} folders, ${existing} already subscribed, ${repeated} duplicate entries, and ${invalid} invalid entries. No changes have been made.`;
+    $("#opmlPreviewDialog").showModal();
+  } catch (error) { pendingOpmlFile = null; toast(error.message || "Could not read OPML file."); }
 }
 
 /* ---------- folders & tags ---------- */
@@ -3869,6 +4047,8 @@ function bind() {
     if (feedMenu && !feedMenu.hidden && !e.target.closest("#feedMenu") && !e.target.closest("[data-feed-opts]")) closeFeedMenu();
     const scrim = e.target.closest("#scrim");
     if (scrim) { $("#sidebar").classList.remove("open"); scrim.classList.remove("show"); return; }
+    const queueReaderButton = e.target.closest('[data-reader="queue"]');
+    if (queueReaderButton && state.selected) { const item = selectedItem(); if (item) await toggleQueue(item); return; }
     const nav = e.target.closest("[data-view]");
     if (nav) { goView(nav.dataset.view); $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show"); return; }
     const tagBtn = e.target.closest("[data-tag]");
@@ -3920,8 +4100,11 @@ function bind() {
       if (x) {
         if (act.dataset.action === "share") { shareArticle(x); return; }
         if (act.dataset.action === "unsnooze") { await unsnoozeItem(x); return; }
+        if (act.dataset.action === "queue") { await toggleQueue(x); return; }
+        if (act.dataset.action === "queue-up" || act.dataset.action === "queue-down") { await moveQueueItem(x, act.dataset.action === "queue-up" ? -1 : 1); return; }
         const key = act.dataset.action === "save" ? "saved" : "read";
         x[key] = !x[key];
+        if (key === "read") x.readAt = x.read ? Date.now() : null;
         await put(x);
         render();
         // renderReader, not openItem: opening would mark an item read
@@ -4251,7 +4434,8 @@ function bind() {
   };
   $("#importOpml").onclick = () => $("#opmlFile").click();
   $("#exportOpml").onclick = exportOPML;
-  $("#opmlFile").onchange = e => { if (e.target.files[0]) importOPML(e.target.files[0]); e.target.value = ""; };
+  $("#opmlFile").onchange = e => { if (e.target.files[0]) previewOPML(e.target.files[0]); e.target.value = ""; };
+  $("#opmlPreviewConfirm").onclick = async () => { if (pendingOpmlFile) await importOPML(pendingOpmlFile); pendingOpmlFile = null; $("#opmlPreviewDialog").close(); };
   // The X and Cancel buttons are type="button" (not submit), so the
   // Add feed button is the form's only submit button and therefore
   // the one Enter submits with. They close the dialog explicitly
@@ -4296,6 +4480,12 @@ function bind() {
   $("#importSettings").onclick = () => $("#settingsFile").click();
   $("#checkUpdates").onclick = checkForUpdates;
   $("#settingsFile").onchange = e => { if (e.target.files[0]) importSettings(e.target.files[0]); e.target.value = ""; };
+  $("#exportBackup").onclick = exportBackup;
+  $("#importBackup").onclick = () => $("#backupFile").click();
+  $("#backupFile").onchange = e => { if (e.target.files[0]) previewBackup(e.target.files[0]); e.target.value = ""; };
+  $("#backupRestoreConfirm").onclick = restorePendingBackup;
+  $("#exportAnnotationsJson").onclick = () => exportAnnotations("json");
+  $("#exportAnnotationsMarkdown").onclick = () => exportAnnotations("markdown");
   $("#railSearch")?.addEventListener("click", () => $("#search").focus());
   $("#railRefresh")?.addEventListener("click", refresh);
   $("#menu").onclick = () => {
