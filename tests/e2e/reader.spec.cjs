@@ -89,7 +89,7 @@ test("collapsed sidebar rail works on desktop and mobile sidebar remains usable"
   } else {
     await page.locator("#menu").click();
     await expect(page.locator("#sidebar")).toHaveClass(/open/);
-    await page.locator('#sidebar [data-view="unread"]').click();
+    await page.locator('#sidebar button.nav[data-view="unread"]').click();
     await expect(page.locator("#heading")).toContainText("Unread");
     const dimensions = await page.evaluate(() => ({
       viewport: document.documentElement.clientWidth,
