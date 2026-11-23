@@ -655,7 +655,7 @@ function deleteMany(ids) { return runBatch("readwrite", s => { for (const id of 
    where the service worker can read them for background refresh.
    Fire-and-forget: a mirror failure must not break the UI. */
 function mirrorSync() {
-  const feeds = state.feeds.map(f => ({ id: f.id, url: f.url, title: f.title, via: f.via, wpRoot: f.wpRoot, site: f.site, refreshIntervalMinutes: Number(f.refreshIntervalMinutes) || 0, lastAttempt: f.lastAttempt || 0, lastSuccess: f.lastSuccess || 0, nextRefreshAt: f.nextRefreshAt || 0, consecutiveFailures: Number(f.consecutiveFailures) || 0 }));
+  const feeds = state.feeds.map(f => ({ id: f.id, url: f.url, title: f.title, via: f.via, wpRoot: f.wpRoot, site: f.site, refreshIntervalMinutes: Number(f.refreshIntervalMinutes) || 0, lastAttempt: f.lastAttempt || 0, lastSuccess: f.lastSuccess || 0, nextRefreshAt: f.nextRefreshAt || 0, consecutiveFailures: Number(f.consecutiveFailures) || 0, lastError: f.lastError || "" }));
   const settings = { notifyNew: !!state.settings.notifyNew, refreshIntervalMinutes: Number(state.settings.refreshIntervalMinutes) || 60 };
   runBatch("readwrite", s => {
     s.put({ key: "feeds", value: feeds });
