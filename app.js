@@ -2441,6 +2441,7 @@ async function loadFullText(item) {
    text stays stored on the item, so toggling back on is instant. */
 const fullOffIds = new Set();
 const loadingFullTextIds = new Set();
+const fullTextControllers = new Map();
 /* Whether the reader is showing fetched full text, and whether the feed
    content already IS the full article (nothing to load or toggle). */
 function fullTextState(x) {
