@@ -2141,7 +2141,7 @@ function renderList() {
   const fb = $("#filterMenuBtn");
   if (fb) fb.querySelector(".disclosure-label").textContent = ({ all: "All", today: "Today", week: "This week" }[state.filter] || "All");
   const base = state.view === "saved" ? "Articles you have kept for later."
-    : state.view === "queue" ? "Articles arranged for your next reading session."
+    : state.view === "queue" ? ""
     : state.view === "snoozed" ? "Articles waiting to come back."
      : state.view === "unread" ? ""
     : state.view === "highlights" ? "Passages you highlighted, with your notes."
