@@ -172,6 +172,7 @@ function feedMenuHTML(f) {
     `<button type="button" data-feed-opt="autofull" aria-pressed="${!!f.autoFull}">${f.autoFull ? "✓ " : ""}Full article: ${f.autoFull ? "Always fetch" : "Use RSS text"}</button>` +
     `<button type="button" data-feed-opt="layout">Layout for this feed</button>` +
     `<button type="button" data-feed-opt="interval">Refresh interval: ${interval ? interval + " min" : "Global default"}</button>` +
+    `<button type="button" data-feed-opt="health">Refresh diagnostics${f.lastErrorAt ? " · last error recorded" : ""}</button>` +
     `<button type="button" data-feed-opt="order">Order for this feed: ${orderLabel}</button>` +
     `<button type="button" data-feed-opt="unsub">${armed ? "Click again to unsubscribe" : "Unsubscribe"}</button>`;
 }
@@ -4633,6 +4634,7 @@ function bind() {
     const f = state.feeds.find(fe => fe.id === feedMenuFeedId);
     if (!f) { closeFeedMenu(); return; }
     const opt = b.dataset.feedOpt;
+    if (opt === "health") { closeFeedMenu(); showFeedError(f.id); return; }
     if (opt === "interval") {
       const choices = [0, 15, 30, 60, 180, 720, 1440], current = Number(f.refreshIntervalMinutes || 0);
       f.refreshIntervalMinutes = choices[(choices.indexOf(current) + 1) % choices.length];
