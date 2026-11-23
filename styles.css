@@ -343,3 +343,11 @@ dialog .x:focus:not(:focus-visible){outline:none;background:transparent;color:va
 .feed-row-wrap .feed-mute.on,.feed-row-wrap .feed-unsub.armed{display:inline-flex;opacity:1}
 .feed-row-wrap:focus-within .feed-mute,.feed-row-wrap:focus-within .feed-unsub,.feed-row-wrap:focus-within .feed-opts{display:inline-flex;opacity:1}
 dialog :focus:not(:focus-visible){outline:none;box-shadow:none}
+
+.activity-chart{display:flex;align-items:flex-end;gap:2px;height:64px;margin:8px 0 14px;overflow:hidden}.activity-day{flex:1;min-width:2px;height:100%;display:flex;align-items:flex-end;background:var(--panel2);border-radius:2px}.activity-day i{display:block;width:100%;min-height:2px;background:var(--accent);border-radius:2px 2px 0 0}
+.feed-row.feed-stale .feed-dot{background:var(--warn,#c28b32)}.health-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px}.health-row span:nth-child(2){flex:1;min-width:0}.health-dot{width:8px;height:8px;border-radius:50%;background:var(--ok,#55966b);flex:none}.health-dot.failing{background:var(--err)}.health-dot.stale{background:var(--warn,#c28b32)}
+.feed-row-wrap .feed-mute.on,.feed-row-wrap .feed-unsub.armed{display:inline-flex;opacity:1}
+.feed-row-wrap:focus-within .feed-mute,.feed-row-wrap:focus-within .feed-unsub,.feed-row-wrap:focus-within .feed-opts{display:inline-flex;opacity:1}
+dialog :focus:not(:focus-visible){outline:none;box-shadow:none}
+#backupRestoreDialog,#opmlPreviewDialog{width:min(520px,calc(100% - 28px))}
+#feedErrorText{white-space:pre-line}
