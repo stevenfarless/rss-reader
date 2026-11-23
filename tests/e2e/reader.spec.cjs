@@ -179,6 +179,9 @@ test("complete backup can be exported, previewed, and restored", async ({ page }
     page.locator("#exportBackup").click()
   ]);
   const buffer = await fs.readFile(await download.path());
+  await page.locator("#backupFile").setInputFiles({ name: "bad-backup.json", mimeType: "application/json", buffer: Buffer.from('{"format":"wrong","version":99}') });
+  await expect(page.locator("#toast")).toContainText("Unsupported backup format");
+  await expect(page.locator("#backupRestoreDialog")).not.toBeVisible();
   await page.locator("#backupFile").setInputFiles({
     name: "reader-backup.json",
     mimeType: "application/json",
