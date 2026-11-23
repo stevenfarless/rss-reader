@@ -81,6 +81,7 @@ test("OPML import previews existing subscriptions and can be cancelled", async (
   });
   await expect(page.locator("#opmlPreviewDialog")).toBeVisible();
   await expect(page.locator("#opmlPreviewSummary")).toContainText("already subscribed");
+  await expect(page.locator("#opmlPreviewSummary")).toContainText("invalid entries");
   await page.locator('#opmlPreviewDialog button[value="cancel"]').click();
   await expect(page.locator("#opmlPreviewDialog")).not.toBeVisible();
   await expect(page.locator("#feeds .feed-row")).toHaveCount(1);
@@ -383,4 +384,44 @@ test("mobile reader dialogs and toolbar remain within the viewport", async ({ pa
   await page.locator("#settings").click();
   const dialogWidth = await page.locator("#settingsDialog").evaluate(el => el.getBoundingClientRect().width);
   expect(dialogWidth).toBeLessThanOrEqual(bounds.viewport);
+});
+
+test("manual refresh fetches updated feed content immediately", async ({ page }) => {
+  await page.goto("/");
+  await addFixtureFeed(page);
+  const updatedFeed = feedXml.replace("</channel>", `<item><title>Newly published fixture</title><link>https://publisher.test/article-three</link><guid>fixture-article-three</guid><pubDate>Mon, 23 Nov 2026 11:00:00 GMT</pubDate><description>New content.</description></item></channel>`);
+  await page.route("https://feeds.test/rss.xml", route => route.fulfill({
+    status: 200, contentType: "application/rss+xml", headers: { "access-control-allow-origin": "*" }, body: updatedFeed
+  }));
+  await page.locator("#refresh").click();
+  await expect(page.locator("#articleList")).toContainText("Newly published fixture");
+  await expect(page.locator("#articleList [data-item]")).toHaveCount(3);
+});
+
+test("full-text reader renders Markdown returned by the reader service", async ({ page }) => {
+  await page.goto("/");
+  await addFixtureFeed(page);
+  await page.route("https://publisher.test/article-one", route => route.abort());
+  const markdown = `# Markdown full article
+
+This is a **bold paragraph** with ` + "`inline code`" + ` and a [source link](https://publisher.test/source).
+
+- First list item
+- Second list item
+
+```js
+const answer = 42;
+console.log(answer);
+```
+
+This final paragraph provides additional text so the reader service response is long enough to pass extraction checks and render as a complete article.
+`;
+  await page.route(/r\.jina\.ai/, route => route.fulfill({ status: 200, contentType: "text/plain", body: markdown }));
+  await page.locator("#articleList [data-item]").first().click();
+  await clickReaderAction(page, "fulltext");
+  await expect(page.locator("#body h1")).toContainText("Markdown full article");
+  await expect(page.locator("#body strong")).toContainText("bold paragraph");
+  await expect(page.locator("#body code")).toContainText("inline code");
+  await expect(page.locator("#body ul li")).toHaveCount(2);
+  await expect(page.locator("#body pre code")).toContainText("const answer = 42");
 });
