@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const fs = require("node:fs/promises");
 
 const feedXml = `<?xml version="1.0"?>
 <rss version="2.0"><channel>
@@ -128,4 +129,78 @@ test("shortcut coaching follows the active preset and respects suppression", asy
   await expect(page.locator("#shortcutCoach")).toBeHidden();
   await page.locator("#refresh").click();
   await expect(page.locator("#shortcutCoach")).toBeHidden();
+});
+
+test("queue supports reordering, selection, and bulk read/remove actions", async ({ page }) => {
+  await page.goto("/");
+  await addFixtureFeed(page);
+  const cards = page.locator("#articleList [data-item]");
+  await cards.nth(0).locator('[data-action="queue"]').click();
+  await cards.nth(1).locator('[data-action="queue"]').click();
+  await page.locator("#libraryMore summary").click();
+  await page.locator('#libraryMore [data-view="queue"]').click();
+  await expect(page.locator("#articleList [data-queue-select]")).toHaveCount(2);
+  await page.locator("#articleList [data-action='queue-up']").last().click();
+  await page.locator('#queueBulkBar [data-queue-bulk="select-all"]').click();
+  await expect(page.locator("#queueBulkBar")).toContainText("2 selected");
+  await page.locator('#queueBulkBar [data-queue-bulk="read"]').click();
+  await expect(page.locator("#articleList [data-action='read'][aria-pressed='true']")).toHaveCount(2);
+  await page.locator('#queueBulkBar [data-queue-bulk="select-all"]').click();
+  await page.locator('#queueBulkBar [data-queue-bulk="remove"]').click();
+  await expect(page.locator("#queueCount")).toHaveText("0");
+  await expect(page.locator("#articleList")).toContainText("No articles");
+});
+
+test("complete backup can be exported, previewed, and restored", async ({ page }) => {
+  await page.goto("/");
+  await addFixtureFeed(page);
+  await page.locator("#settings").click();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.locator("#exportBackup").click()
+  ]);
+  const buffer = await fs.readFile(await download.path());
+  await page.locator("#backupFile").setInputFiles({
+    name: "reader-backup.json",
+    mimeType: "application/json",
+    buffer
+  });
+  await expect(page.locator("#backupRestoreDialog")).toBeVisible();
+  await expect(page.locator("#backupRestoreSummary")).toContainText("2 articles");
+  await page.locator("#backupRestoreMode").selectOption("merge");
+  await page.locator("#backupRestoreConfirm").click();
+  await expect(page.locator("#feeds .feed-row")).toContainText("Fixture Feed");
+});
+
+test("annotation export selection dialog handles an empty library safely", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#settings").click();
+  await page.locator("#selectAnnotations").click();
+  await expect(page.locator("#annotationExportDialog")).toBeVisible();
+  await expect(page.locator("#annotationExportList")).toContainText("no highlights or notes");
+  await page.locator('#annotationExportDialog button[value="cancel"]').click();
+  await expect(page.locator("#annotationExportDialog")).not.toBeVisible();
+});
+
+test("nested OPML folder hierarchy is previewed and imported", async ({ page }) => {
+  await page.goto("/");
+  await page.route("https://nested-feed.test/rss.xml", route => route.fulfill({
+    status: 200,
+    contentType: "application/rss+xml",
+    headers: { "access-control-allow-origin": "*" },
+    body: feedXml
+  }));
+  const opml = `<?xml version="1.0"?><opml version="2.0"><body>
+    <outline text="Technology"><outline text="Local"><outline text="Nested feed" type="rss" xmlUrl="https://nested-feed.test/rss.xml"/></outline></outline>
+  </body></opml>`;
+  await page.locator("#opmlFile").setInputFiles({
+    name: "nested.opml",
+    mimeType: "text/xml",
+    buffer: Buffer.from(opml)
+  });
+  await expect(page.locator("#opmlPreviewDialog")).toBeVisible();
+  await expect(page.locator("#opmlPreviewDetails")).toContainText("Technology / Local");
+  await page.locator("#opmlPreviewConfirm").click();
+  await expect(page.locator("#feeds")).toContainText("Technology / Local");
+  await expect(page.locator("#feeds")).toContainText("Fixture Feed");
 });
