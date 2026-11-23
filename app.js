@@ -4296,6 +4296,8 @@ function bind() {
   $("#importSettings").onclick = () => $("#settingsFile").click();
   $("#checkUpdates").onclick = checkForUpdates;
   $("#settingsFile").onchange = e => { if (e.target.files[0]) importSettings(e.target.files[0]); e.target.value = ""; };
+  $("#railSearch")?.addEventListener("click", () => $("#search").focus());
+  $("#railRefresh")?.addEventListener("click", refresh);
   $("#menu").onclick = () => {
     const open = $("#sidebar").classList.toggle("open");
     $("#scrim").classList.toggle("show", open);
