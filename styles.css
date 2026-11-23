@@ -337,3 +337,5 @@ dialog .x:focus:not(:focus-visible){outline:none;background:transparent;color:va
 .list-heading>div:first-child:has(>#subtitle:empty) #subtitle{display:none}
 @media(min-width:821px){.layout{grid-template-columns:clamp(180px,var(--side-w,250px),420px) minmax(260px,clamp(260px,var(--list-w,390px),640px)) minmax(300px,1fr)}body.sidebar-collapsed .layout{grid-template-columns:52px minmax(260px,clamp(260px,calc(var(--list-w,390px) + var(--side-w,250px) - 52px),640px)) minmax(300px,1fr)}}
 .library-more[open] summary .disclosure-chevron{transform:rotate(180deg)}
+
+.feed-row.feed-stale .feed-dot{background:var(--warn,#c28b32)}.health-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px}.health-row span:nth-child(2){flex:1;min-width:0}.health-dot{width:8px;height:8px;border-radius:50%;background:var(--ok,#55966b);flex:none}.health-dot.failing{background:var(--err)}.health-dot.stale{background:var(--warn,#c28b32)}

@@ -1629,6 +1629,8 @@ function refreshIntervalFor(feed) { return Number(feed.refreshIntervalMinutes) |
 function shouldRefreshFeed(feed, now = Date.now()) { return !Number.isFinite(feed.nextRefreshAt) || !feed.nextRefreshAt || feed.nextRefreshAt <= now; }
 function refreshBackoffMinutes(feed) { return refreshIntervalFor(feed) * Math.min(2 ** (Number(feed.consecutiveFailures) || 0), 8); }
 async function refreshFeed(f) {
+  if (f.refreshing) return true;
+  f.refreshing = true;
   f.lastAttempt = Date.now();
   try {
     let loaded;
@@ -1657,7 +1659,7 @@ async function refreshFeed(f) {
     f.consecutiveFailures = (Number(f.consecutiveFailures) || 0) + 1;
     f.nextRefreshAt = Date.now() + refreshBackoffMinutes(f) * 60000;
     return false;
-  }
+  } finally { f.refreshing = false; }
 }
 /* A failed feed shows its full error with Retry and Unsubscribe (#162). */
 function showFeedError(id) {
@@ -1807,6 +1809,7 @@ function visible() {
     return (dy - dx) * (newest ? 1 : -1);
   });
   a = keyed.map(p => p[1]);
+  if (state.view === "queue") a.sort((x, y) => (x.queueOrder ?? Number.MAX_SAFE_INTEGER) - (y.queueOrder ?? Number.MAX_SAFE_INTEGER));
   // Duplicates are collapsed in the cross-feed lists only (#115): a
   // feed's own view shows its articles as they are, saved articles
   // are keepers, and snoozed articles are already one-per-time.
@@ -1832,6 +1835,21 @@ function saveCollapsedFolders() { try { localStorage.setItem(COLLAPSED_FOLDERS_K
 /* Counts in the sidebar cap at 999+, like Inoreader and Orpington (#177). */
 function fmtCount(n) { return n > 999 ? "999+" : String(n); }
 
+function feedHealthState(feed, now = Date.now()) {
+  if (feed.error || Number(feed.consecutiveFailures) > 0) return "failing";
+  if (!feed.lastSuccess || now - feed.lastSuccess > 48 * 60 * 60 * 1000) return "stale";
+  return "healthy";
+}
+function renderFeedHealth() {
+  const output = $("#feedHealthSummary");
+  if (!output) return;
+  const unhealthy = state.feeds.filter(feed => feedHealthState(feed) !== "healthy");
+  output.innerHTML = unhealthy.length ? unhealthy.map(feed => {
+    const status = feedHealthState(feed);
+    const reason = status === "failing" ? (feed.error || "Repeated refresh failures") : "No successful refresh in 48 hours";
+    return `<div class="health-row"><span class="health-dot ${status}" aria-hidden="true"></span><span>${esc(feedDisplayTitle(feed))} · ${esc(reason)}</span><button type="button" data-health-retry="${esc(feed.id)}" class="quiet">Retry</button></div>`;
+  }).join("") : `<p class="muted">${state.feeds.length ? "All subscriptions refreshed successfully within the last 48 hours." : "Add a feed to see its health here."}</p>`;
+}
 function renderNav() {
   const shown = countableItems();
   $("#allCount").textContent = fmtCount(shown.length);
@@ -1839,14 +1857,12 @@ function renderNav() {
   $("#savedCount").textContent = fmtCount(state.items.filter(x => x.saved && !isSnoozed(x)).length);
   $("#snoozedCount").textContent = fmtCount(state.items.filter(isSnoozed).length);
   $("#highlightsCount").textContent = fmtCount(state.highlights.length);
-  const queueCount = $("#queueCount"); if (queueCount) queueCount.textContent = fmtCount(state.items.filter(x => x.queued).length);
   $("#collapsedRail [data-view]").forEach(button => {
     const active = button.dataset.view === state.view && state.view !== "feed";
     button.classList.toggle("active", active);
     if (active) button.setAttribute("aria-current", "true"); else button.removeAttribute("aria-current");
   });
-  const queueCount = $("#queueCount"); if (queueCount) queueCount.textContent = fmtCount(state.items.filter(x => x.queued).length);
-  $$(".nav").forEach(b => {
+  $(".nav").forEach(b => {
     b.classList.toggle("active", b.dataset.view === state.view && state.view !== "feed");
     if (b.dataset.view === state.view && state.view !== "feed") b.setAttribute("aria-current", "true");
     else b.removeAttribute("aria-current");
@@ -1873,6 +1889,7 @@ function renderNav() {
   for (const x of state.items) {
     if (!x.read && !isSnoozed(x)) unreadByFeed.set(x.feedId, (unreadByFeed.get(x.feedId) || 0) + 1);
   }
+  renderFeedHealth();
   $("#feeds").innerHTML = state.feeds.length ? groupNames.map(g => {
     // Ungrouped feeds render last, after the folders; label them so they
     // are not misread as belonging to the folder above them.
@@ -1885,7 +1902,8 @@ function renderNav() {
     const label = g ? `<div class="folder-head${collapsed ? " collapsed" : ""}" data-drop-folder="${esc(g)}"><button type="button" class="folder-toggle" data-folder-toggle="${esc(g)}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Collapse"} folder ${esc(g)}"><span class="folder-chevron" aria-hidden="true">▾</span></button><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${fmtCount(folderUnread)}</span>` : ""}</button></div>` : (groupNames.length > 1 ? `<div class="feed-group" data-drop-folder="">Ungrouped</div>` : "");
     const rows = groups[g].map(f => {
       const unreadCount = unreadByFeed.get(f.id) || 0;
-      const err = f.error ? " feed-error" : "";
+      const health = feedHealthState(f);
+      const err = f.error ? " feed-error" : health === "stale" ? " feed-stale" : "";
       const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id;
       // The site's own favicon marks the row; if it fails to load the
       // dot comes back (the img hides itself and unhides the dot).
@@ -4350,6 +4368,14 @@ function bind() {
   });
   // Feed-error dialog (#162): Retry reloads that feed; Unsubscribe uses
   // the same two-step arming as the sidebar ×.
+  $("#feedHealthSummary")?.addEventListener("click", async e => {
+    const button = e.target.closest("[data-health-retry]");
+    if (!button) return;
+    const feed = state.feeds.find(f => f.id === button.dataset.healthRetry);
+    if (!feed) return;
+    button.disabled = true; button.textContent = "Retrying…";
+    await refreshFeed(feed); saveFeeds(); mirrorSync(); render();
+  });
   $("#feedErrorRetry").onclick = async () => {
     const id = $("#feedErrorDialog").dataset.feed;
     const f = state.feeds.find(v => v.id === id);
@@ -4923,7 +4949,7 @@ async function init() {
     // the list is never silently days old.
     if (state.feeds.length) {
       const newest = state.items.reduce((m, x) => Math.max(m, dateSortKey(x) ?? 0), 0);
-      if (!state.items.length || Date.now() - newest > 30 * 60 * 1000) refresh();
+      if (!state.items.length || Date.now() - newest > 30 * 60 * 1000) refresh({ force: false });
     }
   }
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {

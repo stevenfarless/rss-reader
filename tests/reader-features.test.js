@@ -69,3 +69,7 @@ test("folder list header omits repeated folder subtitle",()=>{assert.match(app,/
 
 test("per-feed intervals inherit the global default and use bounded failure backoff",()=>{assert.match(app,/function refreshIntervalFor\(/);assert.match(app,/function shouldRefreshFeed\(/);assert.match(app,/Math\.min\(2 \*\* \(Number\(feed\.consecutiveFailures\)/);assert.match(app,/data-feed-opt="interval"/);assert.match(sw,/feed\.nextRefreshAt/)});
 test("service worker stores per-feed scheduling and refresh history",()=>{assert.match(app,/refreshIntervalMinutes: Number\(f\.refreshIntervalMinutes\)/);assert.match(sw,/await swPutAll\(db, "sync"/)});
+
+test("queue order is applied independently of publication date",()=>{assert.match(app,/state\.view === "queue"\) a\.sort\(\(x, y\) => \(x\.queueOrder/)});
+test("feed health identifies failing and stale feeds and offers retry",()=>{assert.match(app,/function feedHealthState\(/);assert.match(app,/data-health-retry/);assert.match(html,/id="feedHealthSummary"/)});
+test("refresh requests for the same feed cannot overlap",()=>{assert.match(app,/if \(f\.refreshing\) return true/);assert.match(app,/finally \{ f\.refreshing = false; \}/)});
