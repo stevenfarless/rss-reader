@@ -2111,7 +2111,7 @@ function renderList() {
     : state.view === "highlights" ? "Passages you highlighted, with your notes."
     : state.view === "folder" ? ""
     : state.view === "savedSearch" ? "A saved filter, run over your library."
-    : state.view === "tag" ? `Articles tagged “${state.tag}”.`
+    : state.view === "tag" ? ""
     : "";
   const upd = state.lastRefresh ? "Updated " + new Date(state.lastRefresh).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
   // The All view has no description to show — the subtitle is just the
