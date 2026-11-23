@@ -1631,9 +1631,9 @@ async function saveItems(feed, items) {
   }
 }
 
-function refreshIntervalFor(feed) { return Number(feed.refreshIntervalMinutes) || Number(state.settings.refreshIntervalMinutes) || 60; }
-function shouldRefreshFeed(feed, now = Date.now()) { return !Number.isFinite(feed.nextRefreshAt) || !feed.nextRefreshAt || feed.nextRefreshAt <= now; }
-function refreshBackoffMinutes(feed) { return refreshIntervalFor(feed) * Math.min(2 ** (Number(feed.consecutiveFailures) || 0), 8); }
+function refreshIntervalFor(feed) { return getFeedRefreshInterval(feed, state.settings); }
+function shouldRefreshFeed(feed, now = Date.now()) { return isFeedRefreshDue(feed, now); }
+function refreshBackoffMinutes(feed) { return getFeedBackoffMinutes(feed, state.settings); }
 async function refreshFeed(f) {
   if (f.refreshing) return true;
   f.refreshing = true;
@@ -1841,11 +1841,7 @@ function saveCollapsedFolders() { try { localStorage.setItem(COLLAPSED_FOLDERS_K
 /* Counts in the sidebar cap at 999+, like Inoreader and Orpington (#177). */
 function fmtCount(n) { return n > 999 ? "999+" : String(n); }
 
-function feedHealthState(feed, now = Date.now()) {
-  if (feed.error || Number(feed.consecutiveFailures) > 0) return "failing";
-  if (!feed.lastSuccess || now - feed.lastSuccess > 48 * 60 * 60 * 1000) return "stale";
-  return "healthy";
-}
+function feedHealthState(feed, now = Date.now()) { return getFeedHealthState(feed, now); }
 function renderFeedHealth() {
   const output = $("#feedHealthSummary");
   if (!output) return;
@@ -3039,20 +3035,7 @@ async function exportBackup() {
     toast("Complete backup exported.");
   } catch (error) { toast(`Backup failed: ${error.message || "storage error"}`); }
 }
-function validateBackup(data) {
-  if (!data || data.format !== BACKUP_FORMAT || data.version !== 1) throw Error("Unsupported backup format or version.");
-  if (!data.localStorage || typeof data.localStorage !== "object" || Array.isArray(data.localStorage)) throw Error("Backup local data is invalid.");
-  if (!data.indexedDB || typeof data.indexedDB !== "object") throw Error("Backup database data is missing.");
-  for (const name of BACKUP_STORES) if (!Array.isArray(data.indexedDB[name])) throw Error(`Backup store ${name} is invalid.`);
-  for (const [key, value] of Object.entries(data.localStorage)) {
-    if (!key.startsWith("rss-reader.") || typeof value !== "string") throw Error("Backup contains invalid local data.");
-    try { JSON.parse(value); } catch { throw Error(`Setting ${key} contains invalid JSON.`); }
-  }
-  for (const x of data.indexedDB.items) if (!x || typeof x.id !== "string") throw Error("Backup contains an invalid article.");
-  for (const x of data.indexedDB.highlights) if (!x || typeof x.id !== "string" || typeof x.itemId !== "string" || typeof x.text !== "string") throw Error("Backup contains an invalid highlight.");
-  for (const x of data.indexedDB.sync) if (!x || typeof x.key !== "string") throw Error("Backup contains an invalid sync record.");
-  return data;
-}
+function validateBackup(data) { return migrateBackupDocument(data); }
 async function previewBackup(file) {
   try {
     const data = validateBackup(JSON.parse(await file.text()));
@@ -3091,27 +3074,16 @@ async function restorePendingBackup() {
       const key = localStorage.key(i);
       if (key?.startsWith("rss-reader.")) oldLocal[key] = localStorage.getItem(key);
     }
-    const stores = {};
-    for (const name of BACKUP_STORES) stores[name] = mode === "replace" ? incoming.indexedDB[name] : mergeBackupRecords(oldStores[name], incoming.indexedDB[name]);
-    const localData = { ...incoming.localStorage };
-    if (mode === "merge") for (const [key, value] of Object.entries(oldLocal)) {
-      if (key.endsWith("settings.v1") || key.endsWith("notes.v1")) {
-        try { localData[key] = JSON.stringify({ ...JSON.parse(localData[key] || "{}"), ...JSON.parse(value || "{}") }); } catch { localData[key] = value; }
-      } else if (localData[key] === undefined) localData[key] = value;
-      else {
-        try {
-          const a = JSON.parse(localData[key]), b = JSON.parse(value);
-          if (Array.isArray(a) && Array.isArray(b)) localData[key] = JSON.stringify(mergeBackupRecords(b, a));
-        } catch {}
-      }
-    }
-    await backupWriteStores(stores);
+    const merged = mode === "merge"
+      ? mergeBackupDocument({ localStorage: oldLocal, indexedDB: oldStores }, incoming)
+      : { localStorage: { ...incoming.localStorage }, indexedDB: incoming.indexedDB };
+    await backupWriteStores(merged.indexedDB);
     try {
       for (let i = localStorage.length - 1; i >= 0; i--) {
         const key = localStorage.key(i);
         if (key?.startsWith("rss-reader.")) localStorage.removeItem(key);
       }
-      for (const [key, value] of Object.entries(localData)) localStorage.setItem(key, value);
+      for (const [key, value] of Object.entries(merged.localStorage)) localStorage.setItem(key, value);
     } catch (error) {
       for (let i = localStorage.length - 1; i >= 0; i--) {
         const key = localStorage.key(i);
@@ -3121,12 +3093,12 @@ async function restorePendingBackup() {
       await backupWriteStores(oldStores);
       throw error;
     }
-    toast(`Backup ${mode === "replace" ? "restored" : "merged"}; reloading.`);
+    toast(`Backup ${mode === "replace" ? "restored" : "merged"}; ${merged.conflicts?.total || 0} existing records kept. Reloading.`);
     setTimeout(() => location.reload(), 700);
   } catch (error) { toast(`Restore failed: ${error.message || "browser storage error"}`); }
 }
 
-/* Export highlights and article notes in structured and readable formats. */
+/* Export highlights and article notes in structured and readable formats. *//* Export highlights and article notes in structured and readable formats. */
 function exportAnnotations(format) {
   const highlights = state.highlights.map(h => {
     const item = state.items.find(x => x.id === h.itemId);
@@ -3160,8 +3132,10 @@ async function previewOPML(file) {
       if (known.has(url)) existing++;
       else if (seen.has(url)) repeated++;
       seen.add(url);
-      const parent = outline.parentElement;
-      if (parent?.localName === "outline") folders.add(parent.getAttribute("text") || parent.getAttribute("title") || "Unnamed folder");
+      const ancestors = [];
+      for (let parent = outline.parentElement; parent?.localName === "outline"; parent = parent.parentElement) ancestors.unshift(parent.getAttribute("text") || parent.getAttribute("title") || "");
+      const folderPath = getOpmlFolderPath(ancestors);
+      if (folderPath) folders.add(folderPath);
     }
     pendingOpmlFile = file;
     $("#opmlPreviewSummary").textContent = `${total} feeds, ${folders.size} folders, ${existing} already subscribed, ${repeated} duplicate entries, and ${invalid} invalid entries. No changes have been made.`;
@@ -3173,14 +3147,9 @@ async function previewOPML(file) {
 /* Storage management (#212). Saved, queued, highlighted, and annotated
    articles are protected from age-based cleanup by default. */
 function cleanupCandidates(days) {
-  if (!days) return [];
-  const cutoff = Date.now() - days * 86400000;
   const protectedIds = new Set(state.highlights.map(h => h.itemId));
   for (const itemId of Object.keys(articleNotes)) if (articleNotes[itemId]) protectedIds.add(itemId);
-  return state.items.filter(item => {
-    const published = item.published ? Date.parse(item.published) : NaN;
-    return !item.saved && !item.queued && !protectedIds.has(item.id) && Number.isFinite(published) && published < cutoff;
-  });
+  return getRetentionCandidates(state.items, Number(days), protectedIds);
 }
 async function updateStorageEstimate() {
   const output = $("#storageEstimate");
@@ -3229,37 +3198,21 @@ function updateReadingStats() {
   const output = $("#readingStats"), chart = $("#readingActivityChart");
   if (!output) return;
   const range = Number($("#statsRange")?.value || 30);
-  const today = new Date(), start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - range + 1);
-  const byDay = new Map(), byFeed = new Map();
-  for (const item of state.items) {
-    if (!Number.isFinite(item.readAt)) continue;
-    const date = new Date(item.readAt);
-    if (date < start || date > today) continue;
-    const key = localDayKey(date);
-    byDay.set(key, (byDay.get(key) || 0) + 1);
-    byFeed.set(item.feedId, (byFeed.get(item.feedId) || 0) + 1);
-  }
-  const total = [...byDay.values()].reduce((sum, count) => sum + count, 0);
-  const queue = state.items.filter(x => x.queued);
-  const mostActiveId = [...byFeed.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-  const mostActive = state.feeds.find(f => f.id === mostActiveId);
-  const activeDays = new Set(byDay.keys());
-  let streak = 0, cursor = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  if (!activeDays.has(localDayKey(cursor))) cursor.setDate(cursor.getDate() - 1);
-  while (activeDays.has(localDayKey(cursor))) { streak++; cursor.setDate(cursor.getDate() - 1); }
-  output.textContent = `${total} articles marked read in ${range} days across ${activeDays.size} active days. Current streak: ${streak} days. Queue: ${queue.filter(x => x.read).length}/${queue.length} read. Most active feed: ${mostActive?.title || "No activity"}.`;
+  const stats = calculateReadingActivity(state.items, range, Date.now());
+  const queue = state.items.filter(x => x.queued), saved = state.items.filter(x => x.saved).length;
+  const topFeed = state.feeds.find(f => f.id === stats.mostActiveFeedId);
+  output.textContent = `${stats.total} articles marked read in ${range} days across ${stats.activeDays} active days. Current streak: ${stats.streak} days. Saved: ${saved}. Queue: ${queue.filter(x => x.read).length}/${queue.length} read. Most active feed: ${topFeed?.title || "No activity"}.`;
   if (chart) {
-    const days = [];
-    for (let offset = range - 1; offset >= 0; offset--) {
-      const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - offset);
-      days.push({ key: localDayKey(date), label: date.toLocaleDateString([], { month: "short", day: "numeric" }) });
+    const days = [], [year, month, day] = stats.startKey.split("-").map(Number);
+    for (let offset = 0; offset < range; offset++) {
+      const date = new Date(Date.UTC(year, month - 1, day + offset));
+      const key = date.toISOString().slice(0, 10);
+      const label = new Date(key + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" });
+      days.push({ key, label, count: stats.byDay[key] || 0 });
     }
-    const max = Math.max(1, ...days.map(d => byDay.get(d.key) || 0));
-    chart.innerHTML = days.map(d => {
-      const count = byDay.get(d.key) || 0;
-      return `<div class="activity-day" title="${esc(d.label)}: ${count} articles"><i style="height:${Math.max(2, count / max * 100)}%"></i></div>`;
-    }).join("");
-    chart.setAttribute("aria-label", `${total} articles marked read over ${range} days`);
+    const max = Math.max(1, ...days.map(d => d.count));
+    chart.innerHTML = days.map(d => `<div class="activity-day" title="${esc(d.label)}: ${d.count} articles"><i style="height:${Math.max(2, d.count / max * 100)}%"></i></div>`).join("");
+    chart.setAttribute("aria-label", `${stats.total} articles marked read over ${range} days`);
   }
 }
 
@@ -3289,20 +3242,13 @@ function shortcutActionForPointer(target) {
   else if (control.id) candidates = actionMap[`id:${control.id}`] || [];
   else if (control.matches(".article[data-item]")) candidates = ["openSelected"];
   if (!candidates.length) return null;
-  const preset = PRESETS[shortcutPreset()] || PRESETS.inoreader;
-  for (const action of candidates) {
-    const key = Object.entries(preset.keys).find(([, mapped]) => mapped === action)?.[0];
-    if (key && ACTION_LABELS[action]) return { action, key };
-  }
-  return null;
+  return getShortcutForAction(shortcutPreset(), candidates);
 }
 function showShortcutCoach(action, key) {
-  if (state.settings.shortcutCoaching === false) return;
   const dismissed = state.settings.shortcutCoachDismissed || [];
-  if (dismissed.includes(action)) return;
   const cooldown = Number(state.settings.shortcutCoachCooldown) || 60;
-  const lastShown = Number(localStorage.getItem(SHORTCUT_COACH_LAST_KEY) || 0);
-  if (Date.now() - lastShown < cooldown * 1000) return;
+  const now = Date.now(), lastShown = Number(localStorage.getItem(SHORTCUT_COACH_LAST_KEY) || 0);
+  if (!shouldShowShortcutCoach({ trusted: true, detail: 1, pointerFine: true, enabled: state.settings.shortcutCoaching, dismissed, action, lastShownAt: lastShown, now, cooldownSeconds: cooldown })) return;
   const panel = $("#shortcutCoach");
   if (!panel) return;
   lastCoachedAction = action;
@@ -3757,8 +3703,9 @@ async function importOPML(file) {
     try { url = normalizeFeedUrl(rawUrl); } catch { skipped++; continue; }
     if (state.feeds.some(f => sameFeedUrl(f.url, url)) || seenBatch.has(url)) { skipped++; continue; }
     seenBatch.add(url);
-    const parent = o.parentElement;
-    const group = parent && parent.localName === "outline" ? (parent.getAttribute("text") || parent.getAttribute("title") || "") : "";
+    const ancestors = [];
+    for (let parent = o.parentElement; parent?.localName === "outline"; parent = parent.parentElement) ancestors.unshift(parent.getAttribute("text") || parent.getAttribute("title") || "");
+    const group = getOpmlFolderPath(ancestors);
     jobs.push(async () => {
       try {
         const loaded = await loadFeedFromUrl(url);
