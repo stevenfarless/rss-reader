@@ -204,3 +204,171 @@ test("nested OPML folder hierarchy is previewed and imported", async ({ page }) 
   await expect(page.locator("#feeds")).toContainText("Technology / Local");
   await expect(page.locator("#feeds")).toContainText("Fixture Feed");
 });
+
+test("feed can be renamed and unsubscribed without removing unrelated subscriptions", async ({ page }) => {
+  await page.goto("/");
+  await addFixtureFeed(page);
+  await page.locator("#feeds [data-feed-opts]").first().click();
+  await page.locator('#feedMenu [data-feed-opt="rename"]').click();
+  await expect(page.locator("#feedRenameDialog")).toBeVisible();
+  await page.locator("#feedRenameInput").fill("Renamed fixture");
+  await page.locator("#feedRenameSave").click();
+  await expect(page.locator("#feeds")).toContainText("Renamed fixture");
+  await page.locator("#feeds [data-unsub]").first().click();
+  await page.locator("#feeds [data-unsub].armed").first().click();
+  await expect(page.locator("#feeds .feed-row")).toHaveCount(0);
+});
+
+test("settings export and import restore a prior theme and reject malformed files", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#settings").click();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.locator("#exportSettings").click()
+  ]);
+  const buffer = await fs.readFile(await download.path());
+  await page.locator("#themeSelect").selectOption("oled");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "oled");
+  await page.locator("#settingsFile").setInputFiles({
+    name: "reader-settings.json",
+    mimeType: "application/json",
+    buffer
+  });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.locator("#settingsFile").setInputFiles({
+    name: "invalid-settings.json",
+    mimeType: "application/json",
+    buffer: Buffer.from('{"format":"wrong","version":99}')
+  });
+  await expect(page.locator("#toast")).toContainText("Unsupported settings file");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+});
+
+test("keyboard preset help reflects the active preset", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#settings").click();
+  await page.locator("#shortcutPresetSelect").selectOption("feedly");
+  await page.locator("#settingsDialog .x").click();
+  await page.locator("#shortcutHelp").click();
+  await expect(page.locator("#helpDialog")).toBeVisible();
+  await expect(page.locator("#helpPresetNote")).toContainText("Feedly");
+  await expect(page.locator("#helpRows")).toContainText("Save");
+  await page.locator('#helpDialog button[value="cancel"]').click();
+});
+
+test("reader sanitizes rich HTML while preserving tables, code, and images", async ({ page }) => {
+  const richXml = `<?xml version="1.0"?><rss version="2.0"><channel>
+    <title>Rich Fixture</title><link>https://publisher.test/</link><description>Rich content</description>
+    <item><title>Rich article</title><link>https://publisher.test/rich</link><guid>rich-1</guid>
+      <description><![CDATA[
+        <p>Safe paragraph with <strong>bold text</strong> and <em>emphasis</em>.</p>
+        <table><thead><tr><th>Column</th></tr></thead><tbody><tr><td>Cell content</td></tr></tbody></table>
+        <pre><code>const answer = 42;</code></pre>
+        <img src="https://publisher.test/image.png" alt="Fixture image">
+        <script>window.__rssReaderInjected = true;</script>
+      ]]></description>
+    </item>
+  </channel></rss>`;
+  await page.route("https://rich-feed.test/rss.xml", route => route.fulfill({
+    status: 200, contentType: "application/rss+xml", headers: { "access-control-allow-origin": "*" }, body: richXml
+  }));
+  await page.goto("/");
+  await page.locator("#add").click();
+  await page.locator("#feedSearchInput").fill("https://rich-feed.test/rss.xml");
+  await page.locator("#saveFeed").click();
+  await expect(page.locator("#articleList [data-item]")).toHaveCount(1);
+  await page.locator("#articleList [data-item]").click();
+  await expect(page.locator("#body strong")).toContainText("bold text");
+  await expect(page.locator("#body table td")).toContainText("Cell content");
+  await expect(page.locator("#body pre code")).toContainText("const answer = 42");
+  await expect(page.locator("#body img")).toHaveAttribute("alt", "Fixture image");
+  await expect(page.locator("#body script")).toHaveCount(0);
+  expect(await page.evaluate(() => window.__rssReaderInjected)).toBeUndefined();
+});
+
+test("full article loading succeeds and reports failures", async ({ page }) => {
+  await page.goto("/");
+  await addFixtureFeed(page);
+  await page.route("https://publisher.test/article-one", route => route.fulfill({
+    status: 200,
+    contentType: "text/html",
+    body: "<!doctype html><html><body><article><h1>Full article fixture</h1><p>Full article body with enough text to verify extraction and rendering.</p></article></body></html>"
+  }));
+  await page.locator("#articleList [data-item]").first().click();
+  await page.locator('#reader [data-reader="fulltext"]').click();
+  await expect(page.locator("#body")).toContainText("Full article fixture");
+  await expect(page.locator("#reader [data-reader='fulltext']")).toHaveAttribute("aria-busy", "false");
+
+  await page.reload();
+  await addFixtureFeed(page);
+  await page.route("https://publisher.test/article-one", route => route.abort());
+  await page.route(/r\.jina\.ai/, route => route.fulfill({ status: 502, body: "unavailable" }));
+  await page.route(/api\.allorigins\.win/, route => route.fulfill({ status: 502, body: "unavailable" }));
+  await page.locator("#articleList [data-item]").first().click();
+  await page.locator('#reader [data-reader="fulltext"]').click();
+  await expect(page.locator("#toast")).toContainText("Full text unavailable");
+});
+
+test("full article loading can be cancelled while a publisher request is pending", async ({ page }) => {
+  await page.goto("/");
+  await addFixtureFeed(page);
+  await page.route("https://publisher.test/article-one", async route => {
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    try { await route.fulfill({ status: 200, contentType: "text/html", body: "<article><p>Late response.</p></article>" }); } catch {}
+  });
+  await page.locator("#articleList [data-item]").first().click();
+  const fullTextButton = page.locator('#reader [data-reader="fulltext"]');
+  await fullTextButton.click();
+  await expect(fullTextButton).toHaveAttribute("aria-busy", "true");
+  await fullTextButton.click();
+  await expect(fullTextButton).toHaveAttribute("aria-busy", "false");
+  await expect(page.locator("#toast")).toContainText("cancelled");
+});
+
+test("highlight, note, and tag data survive reload", async ({ page }) => {
+  await page.goto("/");
+  await addFixtureFeed(page);
+  await page.locator("#articleList [data-item]").first().click();
+  await page.evaluate(() => {
+    const target = document.querySelector("#body p");
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await expect(page.locator("#hlBtn")).toBeVisible();
+  await page.locator("#hlBtn").click();
+  await expect(page.locator("#hlDialog")).toBeVisible();
+  await page.locator("#hlNote").fill("Keep this passage");
+  await page.locator("#hlSave").click();
+  await page.locator('#reader [data-reader="note"]').click();
+  await page.locator("#articleNoteText").fill("Article note persists");
+  await page.locator("#articleNoteSave").click();
+  await page.locator('#reader [data-reader="tags"]').click();
+  await page.locator("#tagInput").fill("research");
+  await page.locator("#tagAddBtn").click();
+  await page.reload();
+  await expect(page.locator("#feeds .feed-row")).toContainText("Fixture Feed");
+  await page.locator("#articleList [data-item]").first().click();
+  await expect(page.locator("#reader")).toContainText("Keep this passage");
+  await expect(page.locator("#reader")).toContainText("Article note persists");
+  await expect(page.locator("#reader")).toContainText("research");
+});
+
+test("mobile reader dialogs and toolbar remain within the viewport", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium-mobile", "Mobile viewport assertion only.");
+  await page.goto("/");
+  await addFixtureFeed(page);
+  await page.locator("#articleList [data-item]").first().click();
+  const bounds = await page.evaluate(() => {
+    const viewport = document.documentElement.clientWidth;
+    const toolbar = document.querySelector(".reader-actions");
+    return { viewport, document: document.documentElement.scrollWidth, toolbar: toolbar?.scrollWidth || 0, toolbarClient: toolbar?.clientWidth || 0 };
+  });
+  expect(bounds.document).toBeLessThanOrEqual(bounds.viewport + 1);
+  expect(bounds.toolbar).toBeLessThanOrEqual(bounds.toolbarClient + 1);
+  await page.locator("#settings").click();
+  const dialogWidth = await page.locator("#settingsDialog").evaluate(el => el.getBoundingClientRect().width);
+  expect(dialogWidth).toBeLessThanOrEqual(bounds.viewport);
+});
