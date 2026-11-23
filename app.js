@@ -4007,7 +4007,7 @@ function markReadAdvance() {
   // Feedly x: mark the selected article read and move to the next.
   const sel = selectedItem();
   if (!sel) return;
-  if (!sel.read) { sel.read = true; put(sel); }
+  if (!sel.read) { sel.read = true; sel.readAt = Date.now(); put(sel); }
   render();
   moveSelection(1);
 }
@@ -4015,7 +4015,7 @@ function markUnreadSkip() {
   // BazQux L: mark the selected article unread and move to the next.
   const sel = selectedItem();
   if (!sel) return;
-  if (sel.read) { sel.read = false; put(sel); }
+  if (sel.read) { sel.read = false; sel.readAt = null; put(sel); }
   render();
   moveSelection(1);
 }
@@ -4063,13 +4063,13 @@ function selectParentFolder() {
 function toggleReadNext() {
   const sel = selectedItem();
   if (!sel) return;
-  sel.read = !sel.read; put(sel); render(); renderReader(sel);
+  sel.read = !sel.read; sel.readAt = sel.read ? Date.now() : null; put(sel); render(); renderReader(sel);
   moveSelection(1);
 }
 function toggleReadPrev() {
   const sel = selectedItem();
   if (!sel) return;
-  sel.read = !sel.read; put(sel); render(); renderReader(sel);
+  sel.read = !sel.read; sel.readAt = sel.read ? Date.now() : null; put(sel); render(); renderReader(sel);
   moveSelection(-1);
 }
 function openBackgroundTab() {
@@ -4217,7 +4217,7 @@ async function markVisibleRead() {
   await putMany(targets);
   render();
   toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} read.`, { label: "Undo", fn: async () => {
-    for (const x of targets) x.read = false;
+    for (const x of targets) { x.read = false; x.readAt = null; }
     await putMany(targets);
     render();
   } });
@@ -4233,7 +4233,7 @@ async function markFeedRead(feedId) {
   await putMany(targets);
   render();
   toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} in “${feed?.title || "feed"}” read.`, { label: "Undo", fn: async () => {
-    for (const x of targets) x.read = false;
+    for (const x of targets) { x.read = false; x.readAt = null; }
     await putMany(targets);
     render();
   } });
@@ -4267,7 +4267,7 @@ async function markAboveBelow(which) {
   await putMany(targets);
   render();
   toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} ${which} read.`, { label: "Undo", fn: async () => {
-    for (const x of targets) x.read = false;
+    for (const x of targets) { x.read = false; x.readAt = null; }
     await putMany(targets);
     render();
   } });
