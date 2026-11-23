@@ -5,6 +5,7 @@ const app = readFileSync(new URL("../app.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const sw = readFileSync(new URL("../sw.js", import.meta.url), "utf8");
+const utils = readFileSync(new URL("../utils.js", import.meta.url), "utf8");
 test("full article loading and per-feed mode", () => {
   assert.match(app, /loadingFullTextIds/);
   assert.match(app, /fulltext-active/);
@@ -68,7 +69,7 @@ test("sidebar secondary navigation and compact rail are present",()=>{assert.mat
 test("feed refresh diagnostics retain success and failure history",()=>{assert.match(app,/consecutiveFailures/);assert.match(app,/lastSuccess/);assert.match(app,/lastAttempt/)});
 test("folder list header omits repeated folder subtitle",()=>{assert.match(app,/state\.view === "folder" \? ""/)});
 
-test("per-feed intervals inherit the global default and use bounded failure backoff",()=>{assert.match(app,/function refreshIntervalFor\(/);assert.match(app,/function shouldRefreshFeed\(/);assert.match(app,/Math\.min\(2 \*\* \(Number\(feed\.consecutiveFailures\)/);assert.match(app,/data-feed-opt="interval"/);assert.match(sw,/feed\.nextRefreshAt/)});
+test("per-feed intervals inherit the global default and use bounded failure backoff",()=>{assert.match(app,/function refreshIntervalFor\(/);assert.match(app,/function shouldRefreshFeed\(/);assert.match(app,/function refreshBackoffMinutes\(feed\) \{ return getFeedBackoffMinutes\(feed, state\.settings\); \}/);assert.match(utils,/function getFeedBackoffMinutes\(/);assert.match(utils,/Math\.min\(2 \*\* Math\.max\(0, Number\(feed\?\.consecutiveFailures\)/);assert.match(app,/data-feed-opt="interval"/);assert.match(sw,/feed\.nextRefreshAt/)});
 test("service worker stores per-feed scheduling and refresh history",()=>{assert.match(app,/refreshIntervalMinutes: Number\(f\.refreshIntervalMinutes\)/);assert.match(sw,/await swPutAll\(db, "sync"/)});
 
 test("queue order is applied independently of publication date",()=>{assert.match(app,/state\.view === "queue"\) a\.sort\(\(x, y\) => \(x\.queueOrder/)});
