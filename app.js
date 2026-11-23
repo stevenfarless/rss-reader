@@ -3085,7 +3085,11 @@ async function previewBackup(file) {
     pendingBackup = data;
     const feeds = data.localStorage[K] ? JSON.parse(data.localStorage[K]).length : 0;
     const notes = data.localStorage[NK] ? Object.keys(JSON.parse(data.localStorage[NK])).length : 0;
-    $("#backupRestoreSummary").textContent = `${feeds} feeds, ${data.indexedDB.items.length} articles, ${data.indexedDB.highlights.length} highlights, ${notes} article notes.`;
+    const currentStores = {}, currentLocal = {};
+    for (const name of BACKUP_STORES) currentStores[name] = await backupReadStore(name);
+    for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i); if (key?.startsWith("rss-reader.")) currentLocal[key] = localStorage.getItem(key); }
+    const conflicts = mergeBackupDocument({ localStorage: currentLocal, indexedDB: currentStores }, data).conflicts.total;
+    $("#backupRestoreSummary").textContent = `Created ${new Date(data.createdAt).toLocaleString()}: ${feeds} feeds, ${data.indexedDB.items.length} articles, ${data.indexedDB.highlights.length} highlights, ${notes} article notes. Merge would encounter ${conflicts} conflicts; current browser records take priority.`;
     $("#backupRestoreDialog").showModal();
   } catch (error) { pendingBackup = null; toast(`Backup rejected: ${error.message || "invalid file"}`); }
 }
@@ -3189,21 +3193,28 @@ async function previewOPML(file) {
     const doc = new DOMParser().parseFromString(await file.text(), "text/xml");
     if (doc.querySelector("parsererror") || doc.documentElement.localName !== "opml") throw Error("Invalid OPML file.");
     let total = 0, existing = 0, repeated = 0, invalid = 0;
-    const known = new Set(state.feeds.map(f => normalizeFeedUrl(f.url))), seen = new Set(), folders = new Set();
+    const known = new Set(state.feeds.map(f => normalizeFeedUrl(f.url))), seen = new Set(), folders = new Set(), invalidEntries = [];
     for (const outline of doc.querySelectorAll("outline[xmlUrl]")) {
       total++;
+      const label = outline.getAttribute("text") || outline.getAttribute("title") || outline.getAttribute("xmlUrl") || "Untitled feed";
       let url;
-      try { url = normalizeFeedUrl(outline.getAttribute("xmlUrl")); } catch { invalid++; continue; }
-      if (known.has(url)) existing++;
-      else if (seen.has(url)) repeated++;
+      try { url = normalizeFeedUrl(outline.getAttribute("xmlUrl")); }
+      catch (error) { invalid++; invalidEntries.push(`${label}: ${error.message || "invalid URL"}`); continue; }
+      if (seen.has(url)) repeated++;
+      else if (known.has(url)) existing++;
       seen.add(url);
       const ancestors = [];
       for (let parent = outline.parentElement; parent?.localName === "outline"; parent = parent.parentElement) ancestors.unshift(parent.getAttribute("text") || parent.getAttribute("title") || "");
       const folderPath = getOpmlFolderPath(ancestors);
       if (folderPath) folders.add(folderPath);
     }
+    const willAdd = Math.max(0, total - existing - repeated - invalid);
     pendingOpmlFile = file;
-    $("#opmlPreviewSummary").textContent = `${total} feeds, ${folders.size} folders, ${existing} already subscribed, ${repeated} duplicate entries, and ${invalid} invalid entries. No changes have been made.`;
+    $("#opmlPreviewSummary").textContent = `${total} feeds found; ${willAdd} new feeds to add; ${existing} already subscribed; ${repeated} duplicate entries; ${invalid} invalid entries. No changes have been made.`;
+    const detailLines = [];
+    if (folders.size) detailLines.push(`Folder paths: ${[...folders].join("; ")}`);
+    if (invalidEntries.length) detailLines.push(`Invalid entries: ${invalidEntries.slice(0, 5).join("; ")}`);
+    $("#opmlPreviewDetails").textContent = detailLines.join("\n") || "No folders or invalid entries found.";
     $("#opmlPreviewDialog").showModal();
   } catch (error) { pendingOpmlFile = null; toast(error.message || "Could not read OPML file."); }
 }
