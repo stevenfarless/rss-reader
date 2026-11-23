@@ -166,10 +166,12 @@ let feedMenuFeedId = null;
 function feedMenuHTML(f) {
   const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id;
   const orderLabel = !f.sort || f.sort === "global" ? "Use global" : f.sort === "newest" ? "Newest" : "Oldest";
+  const interval = Number(f.refreshIntervalMinutes || 0);
   return `<button type="button" data-feed-opt="rename">Rename</button>` +
     `<button type="button" data-feed-opt="open">Open site</button>` +
     `<button type="button" data-feed-opt="autofull" aria-pressed="${!!f.autoFull}">${f.autoFull ? "✓ " : ""}Full article: ${f.autoFull ? "Always fetch" : "Use RSS text"}</button>` +
     `<button type="button" data-feed-opt="layout">Layout for this feed</button>` +
+    `<button type="button" data-feed-opt="interval">Refresh interval: ${interval ? interval + " min" : "Global default"}</button>` +
     `<button type="button" data-feed-opt="order">Order for this feed: ${orderLabel}</button>` +
     `<button type="button" data-feed-opt="unsub">${armed ? "Click again to unsubscribe" : "Unsubscribe"}</button>`;
 }
@@ -491,6 +493,7 @@ function validateSettings(d) {
   if (typeof d.sidebarCollapsed === "boolean") next.sidebarCollapsed = d.sidebarCollapsed;
   if (typeof d.sidebarWidth === "number" && d.sidebarWidth >= 180 && d.sidebarWidth <= 420) next.sidebarWidth = d.sidebarWidth;
   if (typeof d.listWidth === "number" && d.listWidth >= 260 && d.listWidth <= 640) next.listWidth = d.listWidth;
+  if ([15, 30, 60, 180, 720, 1440].includes(d.refreshIntervalMinutes)) next.refreshIntervalMinutes = d.refreshIntervalMinutes;
   if ([0, 30, 90, 180, 365].includes(d.retentionDays)) next.retentionDays = d.retentionDays;
   if (d.sort === "newest" || d.sort === "oldest") next.sort = d.sort;
   if (["all", "today", "week"].includes(d.filter)) next.filter = d.filter;
@@ -631,8 +634,8 @@ function deleteMany(ids) { return runBatch("readwrite", s => { for (const id of 
    where the service worker can read them for background refresh.
    Fire-and-forget: a mirror failure must not break the UI. */
 function mirrorSync() {
-  const feeds = state.feeds.map(f => ({ id: f.id, url: f.url, title: f.title, via: f.via, wpRoot: f.wpRoot, site: f.site }));
-  const settings = { notifyNew: !!state.settings.notifyNew };
+  const feeds = state.feeds.map(f => ({ id: f.id, url: f.url, title: f.title, via: f.via, wpRoot: f.wpRoot, site: f.site, refreshIntervalMinutes: Number(f.refreshIntervalMinutes) || 0, lastAttempt: f.lastAttempt || 0, lastSuccess: f.lastSuccess || 0, nextRefreshAt: f.nextRefreshAt || 0, consecutiveFailures: Number(f.consecutiveFailures) || 0 }));
+  const settings = { notifyNew: !!state.settings.notifyNew, refreshIntervalMinutes: Number(state.settings.refreshIntervalMinutes) || 60 };
   runBatch("readwrite", s => {
     s.put({ key: "feeds", value: feeds });
     s.put({ key: "settings", value: settings });
@@ -710,6 +713,7 @@ function readSettingsFromDialog() {
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
     sidebarCollapsed: state.settings.sidebarCollapsed || false,
     sidebarWidth: state.settings.sidebarWidth, listWidth: state.settings.listWidth,
+    refreshIntervalMinutes: Number($("#refreshIntervalSelect")?.value) || 60,
     retentionDays: Number($("#retentionSelect")?.value) || 0,
     // Sort and filter are set elsewhere (the sort button, the filter
     // pills) and must survive a settings save, or a trip through
@@ -1621,6 +1625,9 @@ async function saveItems(feed, items) {
   }
 }
 
+function refreshIntervalFor(feed) { return Number(feed.refreshIntervalMinutes) || Number(state.settings.refreshIntervalMinutes) || 60; }
+function shouldRefreshFeed(feed, now = Date.now()) { return !Number.isFinite(feed.nextRefreshAt) || !feed.nextRefreshAt || feed.nextRefreshAt <= now; }
+function refreshBackoffMinutes(feed) { return refreshIntervalFor(feed) * Math.min(2 ** (Number(feed.consecutiveFailures) || 0), 8); }
 async function refreshFeed(f) {
   f.lastAttempt = Date.now();
   try {
@@ -1638,6 +1645,7 @@ async function refreshFeed(f) {
     }
     f.title = loaded.parsed.title || f.title;
     f.lastSuccess = Date.now(); f.lastError = ""; f.consecutiveFailures = 0;
+    f.nextRefreshAt = f.lastSuccess + refreshIntervalFor(f) * 60000;
     f.error = "";
     f.via = loaded.via;
     f.wpRoot = loaded.wpRoot || f.wpRoot || "";
@@ -1647,6 +1655,7 @@ async function refreshFeed(f) {
   } catch (e) {
     f.error = classifyError(e); f.lastError = f.error; f.lastErrorAt = Date.now();
     f.consecutiveFailures = (Number(f.consecutiveFailures) || 0) + 1;
+    f.nextRefreshAt = Date.now() + refreshBackoffMinutes(f) * 60000;
     return false;
   }
 }
@@ -1658,7 +1667,7 @@ function showFeedError(id) {
   $("#feedErrorDialog").dataset.feed = id;
   $("#feedErrorDialog").showModal();
 }
-async function refresh() {
+async function refresh(options = {}) {
   if (!state.feeds.length) { toast("Add a feed first."); return; }
   const now = Date.now();
   if (now - refreshAt < 2000) return; // debounce repeated refreshes (incl. holding "r")
@@ -1672,18 +1681,19 @@ async function refresh() {
     // concurrent requests, and the burst is what gets the shared
     // helper (rss2json) rate-limited by publishers. Five at a time
     // is far gentler and still fast enough.
-    const results = new Array(state.feeds.length);
+    const force = options.force !== false;
+    const targets = force ? [...state.feeds] : state.feeds.filter(f => shouldRefreshFeed(f));
+    if (!targets.length) { toast("All feeds are within their refresh intervals."); return; }
+    const results = new Array(targets.length);
     let next = 0;
     const REFRESH_CONCURRENCY = 5;
-    await Promise.all(Array.from({ length: Math.min(REFRESH_CONCURRENCY, state.feeds.length) }, async () => {
-      while (next < state.feeds.length) {
-        const i = next++;
-        results[i] = await refreshFeed(state.feeds[i]);
-      }
+    await Promise.all(Array.from({ length: Math.min(REFRESH_CONCURRENCY, targets.length) }, async () => {
+      while (next < targets.length) { const i = next++; results[i] = await refreshFeed(targets[i]); }
     }));
     const ok = results.filter(Boolean).length;
-    const failed = state.feeds.filter((f, i) => !results[i]).map(f => f.title);
+    const failed = targets.filter((f, i) => !results[i]).map(f => f.title);
     saveFeeds();
+    mirrorSync();
     // Rules (#109) can add tags to new articles; keep the tag list
     // current after a refresh.
     syncTags();
@@ -1691,9 +1701,9 @@ async function refresh() {
     state.lastRefresh = Date.now();
     try { localStorage.setItem(LR, String(state.lastRefresh)); } catch {}
     render();
-    toast(ok === state.feeds.length
-      ? `Refreshed ${ok} of ${state.feeds.length} feeds.`
-      : `Refreshed ${ok} of ${state.feeds.length} feeds. Failed: ${failed.join(", ")}.`);
+    toast(ok === targets.length
+      ? `Refreshed ${ok} of ${targets.length} feeds.`
+      : `Refreshed ${ok} of ${targets.length} feeds. Failed: ${failed.join(", ")}.`);
   } finally {
     btn.disabled = false;
     btn.removeAttribute("aria-busy");
@@ -3717,6 +3727,7 @@ function showSettings() {
   $("#progressSelect").value = state.settings.progressPosition || "bottom";
   $("#mobileBarSelect").value = state.settings.mobileReaderBar || "bottom";
   $("#shortcutPresetSelect").value = state.settings.shortcutPreset || "inoreader";
+  if ($("#refreshIntervalSelect")) $("#refreshIntervalSelect").value = String(state.settings.refreshIntervalMinutes || 60);
   if ($("#retentionSelect")) $("#retentionSelect").value = String(state.settings.retentionDays || 0);
   updateStorageEstimate(); updateCleanupPreview(); updateReadingStats();
   $("#cardExcerptSelect").value = state.settings.cardExcerpt || "full";
@@ -4418,6 +4429,13 @@ function bind() {
     const f = state.feeds.find(fe => fe.id === feedMenuFeedId);
     if (!f) { closeFeedMenu(); return; }
     const opt = b.dataset.feedOpt;
+    if (opt === "interval") {
+      const choices = [0, 15, 30, 60, 180, 720, 1440], current = Number(f.refreshIntervalMinutes || 0);
+      f.refreshIntervalMinutes = choices[(choices.indexOf(current) + 1) % choices.length];
+      saveFeeds(); mirrorSync(); renderFeedMenu();
+      toast(`Refresh interval: ${f.refreshIntervalMinutes ? f.refreshIntervalMinutes + " minutes" : "global default"}.`);
+      return;
+    }
     if (opt === "rename") { closeFeedMenu(); showFeedRenameDialog(f); return; }
     if (opt === "open") { closeFeedMenu(); window.open(f.site || f.url, "_blank", "noopener"); return; }
     if (opt === "autofull") { f.autoFull = !f.autoFull; saveFeeds(); renderFeedMenu(); toast(`Auto full article ${f.autoFull ? "on" : "off"} for ${feedDisplayTitle(f)}.`); return; }

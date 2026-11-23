@@ -1,4 +1,4 @@
-const CACHE = "rss-reader-shell-v59";
+const CACHE = "rss-reader-shell-v60";
 const RUNTIME_CACHE = "rss-reader-runtime-v7";
 const RUNTIME_MAX = 50;
 const FILES = ["./", "./index.html", "./styles.css", "./markdown.js", "./purify.min.js", "./utils.js", "./readability.js", "./app.js", "./manifest.webmanifest", "./assets/icon.svg", "./assets/icon-192.png", "./assets/icon-512.png", "./assets/icon-maskable-512.png", "./assets/apple-touch-icon.png", "./fonts/GentiumBookPlus-Regular.woff2", "./fonts/GentiumBookPlus-Bold.woff2", "./fonts/GentiumBookPlus-Italic.woff2", "./fonts/GentiumBookPlus-BoldItalic.woff2", "./fonts/InterVariable.woff2", "./fonts/InterVariable-Italic.woff2", "./fonts/NunitoVariable.woff2", "./fonts/NunitoVariable-Italic.woff2", "./fonts/Ubuntu-Regular.woff2", "./fonts/Ubuntu-Bold.woff2", "./fonts/Ubuntu-Italic.woff2", "./fonts/Ubuntu-BoldItalic.woff2"];
@@ -325,8 +325,11 @@ async function swRefreshFeeds() {
   try {
     const feedsRec = await swGet(db, "sync", "feeds");
     const settingsRec = await swGet(db, "sync", "settings");
-    const feeds = feedsRec?.value || [];
+    const allFeeds = feedsRec?.value || [];
     const settings = settingsRec?.value || {};
+    if (!allFeeds.length) return;
+    const now = Date.now();
+    const feeds = allFeeds.filter(feed => !feed.nextRefreshAt || feed.nextRefreshAt <= now);
     if (!feeds.length) return;
     let newCount = 0;
     const newByFeed = [];
@@ -346,11 +349,19 @@ async function swRefreshFeeds() {
       try {
         const items = await swLoadFeed(feed, settings);
         const added = await swSaveItems(db, feed, items);
+        feed.lastAttempt = Date.now(); feed.lastSuccess = feed.lastAttempt; feed.consecutiveFailures = 0;
+        const interval = Number(feed.refreshIntervalMinutes) || Number(settings.refreshIntervalMinutes) || 60;
+        feed.nextRefreshAt = feed.lastAttempt + interval * 60000;
         if (added > 0) { newCount += added; newByFeed.push({ title: feed.title, count: added }); }
       } catch (e) {
-        // One feed failing must not stop the others.
+        feed.lastAttempt = Date.now(); feed.consecutiveFailures = (Number(feed.consecutiveFailures) || 0) + 1;
+        const interval = Number(feed.refreshIntervalMinutes) || Number(settings.refreshIntervalMinutes) || 60;
+        feed.nextRefreshAt = feed.lastAttempt + interval * Math.min(2 ** feed.consecutiveFailures, 8) * 60000;
       }
     });
+    const updated = new Map(allFeeds.map(feed => [feed.id, feed]));
+    for (const feed of feeds) updated.set(feed.id, feed);
+    await swPutAll(db, "sync", [{ key: "feeds", value: [...updated.values()] }]);
     if (newCount > 0 && settings.notifyNew) {
       await self.registration.showNotification("RSS Reader", {
         body: newByFeed.length === 1

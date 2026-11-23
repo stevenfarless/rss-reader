@@ -66,3 +66,6 @@ test("OLED and pure white themes are selectable",()=>{assert.match(html,/option 
 test("sidebar secondary navigation and compact rail are present",()=>{assert.match(html,/id="libraryMore"/);assert.match(html,/id="collapsedRail"/);assert.match(css,/folder-head\.collapsed/)});
 test("feed refresh diagnostics retain success and failure history",()=>{assert.match(app,/consecutiveFailures/);assert.match(app,/lastSuccess/);assert.match(app,/lastAttempt/)});
 test("folder list header omits repeated folder subtitle",()=>{assert.match(app,/state\.view === "folder" \? ""/)});
+
+test("per-feed intervals inherit the global default and use bounded failure backoff",()=>{assert.match(app,/function refreshIntervalFor\(/);assert.match(app,/function shouldRefreshFeed\(/);assert.match(app,/Math\.min\(2 \*\* \(Number\(feed\.consecutiveFailures\)/);assert.match(app,/data-feed-opt="interval"/);assert.match(sw,/feed\.nextRefreshAt/)});
+test("service worker stores per-feed scheduling and refresh history",()=>{assert.match(app,/refreshIntervalMinutes: Number\(f\.refreshIntervalMinutes\)/);assert.match(sw,/await swPutAll\(db, "sync"/)});
