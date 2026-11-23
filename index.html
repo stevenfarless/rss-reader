@@ -42,7 +42,7 @@
 <div class="feed-head" id="savedSearchesHead"><span class="side-label">SAVED SEARCHES</span></div><div id="savedSearches" class="tag-list"><p class="muted">Save a search to keep it here.</p></div>
 </aside>
 <div class="rail-flyout" id="railFlyout" hidden aria-label="Tags and saved searches"></div>
-<div class="splitter" id="splitSide" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" aria-valuemin="180" aria-valuemax="420" aria-valuenow="230" tabindex="0"></div>
+<div class="splitter" id="splitSide" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" aria-valuemin="180" aria-valuemax="420" aria-valuenow="250" tabindex="0"></div>
 <div id="scrim" class="scrim" aria-hidden="true"></div>
 <main class="list-pane">
 <div class="mobile-bar"><button id="menu" aria-label="Open menu"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button><span id="mobileTitle">All articles</span><button id="mobileAdd" aria-label="Add feed">+</button></div>
@@ -51,7 +51,7 @@
 <div id="queueBulkBar" class="queue-bulk-bar" hidden aria-label="Reading queue bulk actions"></div>
 <div id="articleList" class="article-list"><div class="empty"><div class="empty-mark">R</div><h2>Your reading starts here.</h2><p>Add a feed to begin. A feed is a website, blog, or podcast that publishes new posts — add your favorites and new articles will show up here on their own.</p><button id="firstAdd" class="primary">Add your first feed</button></div></div>
 </main>
-<div class="splitter" id="splitList" role="separator" aria-orientation="vertical" aria-label="Resize article list" aria-valuemin="320" aria-valuemax="640" aria-valuenow="430" tabindex="0"></div>
+<div class="splitter" id="splitList" role="separator" aria-orientation="vertical" aria-label="Resize article list" aria-valuemin="260" aria-valuemax="640" aria-valuenow="390" tabindex="0"></div>
 <article class="reader" id="reader"><div class="reader-empty"><svg class="ic big" aria-hidden="true"><use href="#i-rss"/></svg><h2>Nothing open yet</h2><p>Pick an article from the list to read it here.</p><small>Tip: press ? any time to see keyboard shortcuts.</small></div></article>
 </div>
 <dialog id="feedDialog" aria-labelledby="feedDialogTitle"><form id="feedForm" method="dialog"><button type="button" class="x" value="cancel" aria-label="Close" formnovalidate><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button><p class="eyebrow">SUBSCRIPTIONS</p><h2 id="feedDialogTitle">Add a feed</h2><p>Type a feed or website address to add it directly, or type a publication, podcast, or topic to search feed directories. Not sure what to type? Try the name of a newspaper, blog, or podcast — or paste any website address.</p><label for="feedSearchInput">Feed, website, publication, or topic</label><input id="feedSearchInput" type="search" autocomplete="off" placeholder="example.com/feed.xml, example.org, or a podcast name"><p id="feedSearchStatus" class="discovery-status" role="status" aria-live="polite">Type an address to add it, or a name or topic to search.</p><p class="discovery-privacy">Addresses are fetched directly; searches go to public feed directories. Your subscriptions remain in this browser.</p><div id="feedSearchResults" class="discovery-results"></div><p id="feedError" class="error" role="alert"></p><div class="dialog-actions"><button type="button" value="cancel" class="quiet" formnovalidate>Cancel</button><button id="saveFeed" value="default" class="primary">Add feed</button></div></form></dialog>
