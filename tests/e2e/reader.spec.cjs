@@ -317,6 +317,7 @@ test("full article loading succeeds and reports failures", async ({ page }) => {
   await page.route("https://publisher.test/article-one", route => route.fulfill({
     status: 200,
     contentType: "text/html",
+    headers: { "access-control-allow-origin": "*" },
     body: "<!doctype html><html><body><article><h1>Full article fixture</h1><p>Full article body with enough text to verify extraction and rendering. This publisher page contains several sentences about the topic, its background, the reported findings, and the practical details that readers need. The text is deliberately long enough to exercise the full article extraction path instead of relying on the short feed excerpt.</p><p>A second paragraph confirms that the extracted article body keeps its structure and remains available after the local IndexedDB write completes.</p></article></body></html>"
   }));
   await page.locator("#articleList [data-item]").nth(1).click();
@@ -429,7 +430,7 @@ test("full-text reader renders Markdown returned by the reader service", async (
     "",
     "This final paragraph provides additional text so the reader service response is long enough to pass extraction checks and render as a complete article."
   ].join("\n");
-  await page.route(/r\.jina\.ai/, route => route.fulfill({ status: 200, contentType: "text/plain", body: markdown }));
+  await page.route(/r\.jina\.ai/, route => route.fulfill({ status: 200, contentType: "text/plain", headers: { "access-control-allow-origin": "*" }, body: markdown }));
   await page.locator("#articleList [data-item]").first().click();
   await clickReaderAction(page, "fulltext");
   await expect(page.locator("#body h1")).toContainText("Markdown full article");
