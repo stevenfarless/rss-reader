@@ -129,7 +129,7 @@ test("service worker installs and the reader shell can start offline", async ({ 
   await page.reload();
   await expect(page.locator("#sidebar")).toBeVisible();
   const cacheNames = await page.evaluate(() => caches.keys());
-  expect(cacheNames.some(name => name.startsWith("rss-reader-shell-v"))).toBe(true);
+  expect(cacheNames).toContain("rss-reader-shell-v62");
 });
 
 test("shortcut coaching follows the active preset and respects suppression", async ({ page }, testInfo) => {
@@ -218,6 +218,9 @@ test("nested OPML folder hierarchy is previewed and imported", async ({ page }) 
   await expect(page.locator("#opmlPreviewDialog")).toBeVisible();
   await expect(page.locator("#opmlPreviewDetails")).toContainText("Technology / Local");
   await page.locator("#opmlPreviewConfirm").click();
+  await expect(page.locator("#feeds")).toContainText("Technology / Local");
+  await expect(page.locator("#feeds")).toContainText("Fixture Feed");
+  await page.reload();
   await expect(page.locator("#feeds")).toContainText("Technology / Local");
   await expect(page.locator("#feeds")).toContainText("Fixture Feed");
 });
