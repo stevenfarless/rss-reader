@@ -4,10 +4,14 @@
   "version": "1.8.24",
   "description": "Client-only RSS reader hosted on GitHub Pages",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "test:e2e": "playwright test"
   },
   "license": "GPL-3.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
   }
 }
