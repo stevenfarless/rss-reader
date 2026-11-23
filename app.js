@@ -3142,7 +3142,7 @@ async function restorePendingBackup() {
 }
 
 /* Export highlights and article notes in structured and readable formats. *//* Export highlights and article notes in structured and readable formats. */
-function exportAnnotations(format) {
+function exportAnnotations(format, selectedKeys = null) {
   const highlights = state.highlights.map(h => {
     const item = state.items.find(x => x.id === h.itemId);
     return { ...h, articleTitle: item?.title || "Article no longer in library", articleUrl: item?.url || "", feedTitle: item ? (state.feeds.find(f => f.id === item.feedId)?.customTitle || state.feeds.find(f => f.id === item.feedId)?.title || "") : "" };
@@ -3151,14 +3151,36 @@ function exportAnnotations(format) {
     const item = state.items.find(x => x.id === itemId);
     return { itemId, note, articleTitle: item?.title || "Article no longer in library", articleUrl: item?.url || "", feedTitle: item ? (state.feeds.find(f => f.id === item.feedId)?.customTitle || state.feeds.find(f => f.id === item.feedId)?.title || "") : "" };
   });
-  if (format === "json") download(JSON.stringify({ format: "rss-reader-annotations", version: 1, exportedAt: new Date().toISOString(), highlights, notes }, null, 2), "rss-reader-annotations.json", "application/json");
+  const selected = selectAnnotationEntries(highlights, notes, selectedKeys);
+  const chosenHighlights = selected.highlights, chosenNotes = selected.notes;
+  if (selectedKeys && !chosenHighlights.length && !chosenNotes.length) { toast("Select at least one annotation to export."); return; }
+  if (format === "json") download(JSON.stringify({ format: "rss-reader-annotations", version: 1, selection: selectedKeys ? "selected" : "all", exportedAt: new Date().toISOString(), highlights: chosenHighlights, notes: chosenNotes }, null, 2), "rss-reader-annotations.json", "application/json");
   else {
     const blocks = [];
-    for (const h of highlights) blocks.push(`## ${h.articleTitle}\n\n> ${h.text}\n\n${h.note ? h.note + "\n\n" : ""}Source: ${h.articleUrl ? `[${h.articleUrl}](${h.articleUrl})` : "Unavailable"}\nFeed: ${h.feedTitle || "Unknown"}\nCreated: ${(h.createdAt || h.created) ? new Date(h.createdAt || h.created).toISOString() : "Unknown"}`);
-    for (const n of notes) blocks.push(`## ${n.articleTitle}\n\n${n.note}\n\nSource: ${n.articleUrl ? `[${n.articleUrl}](${n.articleUrl})` : "Unavailable"}\nFeed: ${n.feedTitle || "Unknown"}`);
+    for (const h of chosenHighlights) blocks.push(`## ${h.articleTitle}\n\n> ${h.text}\n\n${h.note ? h.note + "\n\n" : ""}Source: ${h.articleUrl ? `[${h.articleUrl}](${h.articleUrl})` : "Unavailable"}\nFeed: ${h.feedTitle || "Unknown"}\nCreated: ${(h.createdAt || h.created) ? new Date(h.createdAt || h.created).toISOString() : "Unknown"}`);
+    for (const n of chosenNotes) blocks.push(`## ${n.articleTitle}\n\n${n.note}\n\nSource: ${n.articleUrl ? `[${n.articleUrl}](${n.articleUrl})` : "Unavailable"}\nFeed: ${n.feedTitle || "Unknown"}`);
     download("# Article annotations\n\n" + (blocks.join("\n\n---\n\n") || "No annotations."), "rss-reader-annotations.md", "text/markdown");
   }
   toast(`Annotations exported as ${format.toUpperCase()}.`);
+}
+
+
+function openAnnotationExportDialog() {
+  const list = $("#annotationExportList");
+  const highlights = state.highlights.map(h => {
+    const item = state.items.find(x => x.id === h.itemId);
+    return { key: `highlight:${h.id}`, label: `Highlight · ${item?.title || "Article no longer in library"} · ${h.text || ""}` };
+  });
+  const notes = Object.entries(articleNotes).map(([itemId, note]) => {
+    const item = state.items.find(x => x.id === itemId);
+    return { key: `note:${itemId}`, label: `Note · ${item?.title || "Article no longer in library"} · ${note}` };
+  });
+  const entries = [...highlights, ...notes];
+  list.innerHTML = entries.length ? entries.map(entry => `<label class="annotation-export-row"><input type="checkbox" data-annotation-key="${esc(entry.key)}" checked><span>${esc(entry.label)}</span></label>`).join("") : '<p class="muted">There are no highlights or notes to export.</p>';
+  $("#annotationExportDialog").showModal();
+}
+function selectedAnnotationKeys() {
+  return [...$("#annotationExportList").querySelectorAll("[data-annotation-key]:checked")].map(input => input.dataset.annotationKey);
 }
 
 /* Parse and report OPML content before any feed is added. */
@@ -4673,6 +4695,7 @@ function bind() {
   $("#importOpml").onclick = () => $("#opmlFile").click();
   $("#exportOpml").onclick = exportOPML;
   $("#opmlFile").onchange = e => { if (e.target.files[0]) previewOPML(e.target.files[0]); e.target.value = ""; };
+  $("#annotationExportDialog").addEventListener("click", e => { if (e.target.closest('button[value="cancel"]')) $("#annotationExportDialog").close(); });
   $("#opmlPreviewDialog").addEventListener("click", e => { if (e.target.closest('button[value="cancel"]')) { pendingOpmlFile = null; $("#opmlPreviewDialog").close(); } });
   $("#backupRestoreDialog").addEventListener("click", e => { if (e.target.closest('button[value="cancel"]')) { pendingBackup = null; $("#backupRestoreDialog").close(); } });
   $("#opmlPreviewConfirm").onclick = async () => { if (pendingOpmlFile) await importOPML(pendingOpmlFile); pendingOpmlFile = null; $("#opmlPreviewDialog").close(); };
@@ -4726,6 +4749,14 @@ function bind() {
   $("#backupRestoreConfirm").onclick = restorePendingBackup;
   $("#exportAnnotationsJson").onclick = () => exportAnnotations("json");
   $("#exportAnnotationsMarkdown").onclick = () => exportAnnotations("markdown");
+  $("#selectAnnotations").onclick = openAnnotationExportDialog;
+  $("#annotationExportDialog").addEventListener("click", e => {
+    if (e.target.closest('button[value="cancel"]')) { $("#annotationExportDialog").close(); return; }
+    const select = e.target.closest("[data-annotation-select]");
+    if (select) { $("#annotationExportList").querySelectorAll("[data-annotation-key]").forEach(input => { input.checked = select.dataset.annotationSelect === "all"; }); return; }
+    const exportButton = e.target.closest("[data-annotation-export]");
+    if (exportButton) { const keys = selectedAnnotationKeys(); if (!keys.length) { toast("Select at least one annotation to export."); return; } exportAnnotations(exportButton.dataset.annotationExport, keys); $("#annotationExportDialog").close(); }
+  });
   $("#cleanupArticles").onclick = cleanupOldArticles;
   $("#retentionSelect").onchange = updateCleanupPreview;
   $("#statsRange").onchange = updateReadingStats;
