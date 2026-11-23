@@ -5147,6 +5147,7 @@ async function init() {
     }
   }
   render();
+  if (opened) scheduleFeedRefresh();
   if (!opened) {
     toast("Could not open browser storage. Your articles are unavailable.", { label: "Retry", fn: () => location.reload() });
   } else {
