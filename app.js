@@ -1864,6 +1864,8 @@ function toggleRailFlyout(kind) {
   flyout.innerHTML = `<div class="rail-flyout-head"><strong>${heading}</strong><button type="button" id="railFlyoutClose" aria-label="Close">×</button></div>` +
     (entries.length ? source.innerHTML : `<p class="muted">No ${kind === "tags" ? "tags" : "saved searches"} yet.</p>`);
   flyout.hidden = false;
+  $("#railTags")?.setAttribute("aria-expanded", String(kind === "tags"));
+  $("#railSavedSearches")?.setAttribute("aria-expanded", String(kind !== "tags"));
 }
 
 function renderNav() {
@@ -1874,6 +1876,10 @@ function renderNav() {
   $("#snoozedCount").textContent = fmtCount(state.items.filter(isSnoozed).length);
   $("#highlightsCount").textContent = fmtCount(state.highlights.length);
   $("#queueCount").textContent = fmtCount(state.items.filter(x => x.queued).length);
+  const railCounts = { railAllCount: state.items.length, railUnreadCount: state.items.filter(x => !x.read).length, railQueueCount: state.items.filter(x => x.queued).length, railSavedCount: state.items.filter(x => x.saved).length, railSnoozedCount: state.items.filter(isSnoozed).length, railHighlightsCount: state.highlights.length };
+  for (const [id, count] of Object.entries(railCounts)) { const badge = $("#"+id); if (badge) { badge.textContent = count > 99 ? "99+" : String(count); badge.hidden = count === 0; } }
+  $("#railTags")?.classList.toggle("active", state.view === "tag");
+  $("#railSavedSearches")?.classList.toggle("active", state.view === "savedSearch");
   $("#collapsedRail [data-view]").forEach(button => {
     const active = button.dataset.view === state.view && state.view !== "feed";
     button.classList.toggle("active", active);
@@ -4780,15 +4786,15 @@ function bind() {
   $("#railTags")?.addEventListener("click", () => toggleRailFlyout("tags"));
   $("#railSavedSearches")?.addEventListener("click", () => toggleRailFlyout("searches"));
   $("#railFlyout")?.addEventListener("click", e => {
-    if (e.target.closest("#railFlyoutClose")) { $("#railFlyout").hidden = true; return; }
+    if (e.target.closest("#railFlyoutClose")) { $("#railFlyout").hidden = true; $("#railTags")?.setAttribute("aria-expanded","false"); $("#railSavedSearches")?.setAttribute("aria-expanded","false"); return; }
     const tag = e.target.closest("[data-tag]");
-    if (tag) { $("#railFlyout").hidden = true; goTag(tag.dataset.tag); return; }
+    if (tag) { $("#railFlyout").hidden = true; $("#railTags")?.setAttribute("aria-expanded","false"); $("#railSavedSearches")?.setAttribute("aria-expanded","false"); goTag(tag.dataset.tag); return; }
     const saved = e.target.closest("[data-saved-search]");
-    if (saved) { $("#railFlyout").hidden = true; goSavedSearch(saved.dataset.savedSearch); }
+    if (saved) { $("#railFlyout").hidden = true; $("#railTags")?.setAttribute("aria-expanded","false"); $("#railSavedSearches")?.setAttribute("aria-expanded","false"); goSavedSearch(saved.dataset.savedSearch); }
   });
   document.addEventListener("click", e => {
     const flyout = $("#railFlyout");
-    if (flyout && !flyout.hidden && !flyout.contains(e.target) && !e.target.closest("#railTags,#railSavedSearches")) flyout.hidden = true;
+    if (flyout && !flyout.hidden && !flyout.contains(e.target) && !e.target.closest("#railTags,#railSavedSearches")) { flyout.hidden = true; $("#railTags")?.setAttribute("aria-expanded","false"); $("#railSavedSearches")?.setAttribute("aria-expanded","false"); }
   });
   bindShortcutCoaching();
   $("#menu").onclick = () => {
