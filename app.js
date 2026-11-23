@@ -1880,12 +1880,12 @@ function renderNav() {
   for (const [id, count] of Object.entries(railCounts)) { const badge = $("#"+id); if (badge) { badge.textContent = count > 99 ? "99+" : String(count); badge.hidden = count === 0; } }
   $("#railTags")?.classList.toggle("active", state.view === "tag");
   $("#railSavedSearches")?.classList.toggle("active", state.view === "savedSearch");
-  $("#collapsedRail [data-view]").forEach(button => {
+  $$("#collapsedRail [data-view]").forEach(button => {
     const active = button.dataset.view === state.view && state.view !== "feed";
     button.classList.toggle("active", active);
     if (active) button.setAttribute("aria-current", "true"); else button.removeAttribute("aria-current");
   });
-  $(".nav").forEach(b => {
+  $$(".nav").forEach(b => {
     b.classList.toggle("active", b.dataset.view === state.view && state.view !== "feed");
     if (b.dataset.view === state.view && state.view !== "feed") b.setAttribute("aria-current", "true");
     else b.removeAttribute("aria-current");
