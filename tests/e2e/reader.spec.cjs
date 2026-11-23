@@ -416,7 +416,7 @@ test("full-text reader renders Markdown returned by the reader service", async (
     "```",
     "",
     "This final paragraph provides additional text so the reader service response is long enough to pass extraction checks and render as a complete article."
-  ].join("\\n");
+  ].join("\n");
   await page.route(/r\.jina\.ai/, route => route.fulfill({ status: 200, contentType: "text/plain", body: markdown }));
   await page.locator("#articleList [data-item]").first().click();
   await clickReaderAction(page, "fulltext");
