@@ -2143,7 +2143,7 @@ function renderList() {
   const base = state.view === "saved" ? "Articles you have kept for later."
     : state.view === "queue" ? "Articles arranged for your next reading session."
     : state.view === "snoozed" ? "Articles waiting to come back."
-    : state.view === "unread" ? "Stories you have not read yet."
+     : state.view === "unread" ? ""
     : state.view === "highlights" ? "Passages you highlighted, with your notes."
     : state.view === "folder" ? ""
     : state.view === "savedSearch" ? "A saved filter, run over your library."
