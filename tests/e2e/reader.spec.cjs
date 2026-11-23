@@ -457,12 +457,12 @@ test("feed health diagnostics preserve the last error and recover after retry", 
   }));
   await page.locator("#refresh").click();
   await page.locator("#settings").click();
-  await expect(page.locator("#feedHealthSummary")).toContainText("Temporary upstream failure");
+  await expect(page.locator("#feedHealthSummary")).toContainText("503");
   await page.locator("#settingsDialog .x").click();
   await page.locator("#feeds [data-feed-opts]").first().click();
   await page.locator('#feedMenu [data-feed-opt="health"]').click();
   await expect(page.locator("#feedErrorDialog")).toBeVisible();
-  await expect(page.locator("#feedErrorText")).toContainText("Temporary upstream failure");
+  await expect(page.locator("#feedErrorText")).toContainText("503");
   await page.route("https://feeds.test/rss.xml", route => route.fulfill({
     status: 200, contentType: "application/rss+xml", headers: { "access-control-allow-origin": "*" }, body: feedXml
   }));
