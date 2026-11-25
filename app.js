@@ -3466,7 +3466,7 @@ async function importSettings(file) {
   } catch (e) { toast(e.message); }
 }
 let pendingOPMLFile = null;
-let coachLastShown = new Map(), pointerActivation = null, coachLastAnyShown = 0, coachTimer = null;
+let pointerActivation = null, coachTimer = null;
 async function exportCompleteBackup(){try{const d={format:"rss-reader-backup",version:1,exportedAt:new Date().toISOString(),profile:{feeds:state.feeds,folders:state.folders,tags:state.tags,savedSearches:state.savedSearches,rules:state.rules,settings:state.settings,notes:articleNotes,collapsedFolders:[...collapsedFolders],lastRefresh:state.lastRefresh||0},items:await dbAll(),highlights:await hlAll()};download(JSON.stringify(d,null,2),"rss-reader-backup.json","application/json");toast("Complete profile backup exported.");}catch(e){toast("Backup export failed: "+e.message);}}
 function validateCompleteBackup(d){if(!d||d.format!=="rss-reader-backup"||d.version!==1||!d.profile||!Array.isArray(d.profile.feeds)||!Array.isArray(d.items)||!Array.isArray(d.highlights)||!d.profile.settings||typeof d.profile.settings!=="object")throw Error("Unsupported or incomplete backup file.");if(!d.profile.feeds.every(x=>x&&typeof x.id==="string"&&typeof x.url==="string")||!d.items.every(x=>x&&typeof x.id==="string"&&typeof x.feedId==="string")||!d.highlights.every(x=>x&&typeof x.id==="string"&&typeof x.itemId==="string"))throw Error("Backup contains invalid records.");return d;}
 async function importCompleteBackup(file) {
