@@ -27,6 +27,8 @@ jobs:
       - name: Verify release version
         id: version
         shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
 
@@ -39,8 +41,8 @@ jobs:
           fi
 
           previous_version=""
-          if git cat-file -e HEAD^:package.json 2>/dev/null; then
-            previous_version="$(git show HEAD^:package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).version))')"
+          if git cat-file -e "$BEFORE_SHA:package.json" 2>/dev/null; then
+            previous_version="$(git show "$BEFORE_SHA:package.json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).version))')"
           fi
 
           if [[ "$version" == "$previous_version" ]]; then
