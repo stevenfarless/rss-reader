@@ -475,3 +475,46 @@ test("backup restore can merge subscriptions without replacing the current profi
   const restoredFeeds = await page.evaluate(() => JSON.parse(localStorage.getItem("rss-reader.feeds.v1") || "[]"));
   expect(restoredFeeds.map(feed => feed.title)).toEqual(expect.arrayContaining(["Existing Feed", "Backup Feed"]));
 });
+
+
+test("Vim preset navigates panes and preserves the focused pane after reload", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => {
+    localStorage.setItem("rss-reader.settings.v1", JSON.stringify({
+      shortcutPreset: "vim",
+      vimPane: "list"
+    }));
+  });
+  await page.goto("/");
+  await expect(page.locator("body")).toHaveClass(/vim-navigation-enabled/);
+  await expect(page.locator("body")).toHaveAttribute("data-vim-pane", "list");
+
+  await page.locator(".list-pane").click({ position: { x: 20, y: 20 } });
+  await page.keyboard.press("l");
+  await expect(page.locator("body")).toHaveAttribute("data-vim-pane", "article");
+  await page.keyboard.press("h");
+  await expect(page.locator("body")).toHaveAttribute("data-vim-pane", "list");
+  await page.keyboard.press("h");
+  await expect(page.locator("body")).toHaveAttribute("data-vim-pane", "sidebar");
+
+  await page.reload();
+  await expect(page.locator("body")).toHaveClass(/vim-navigation-enabled/);
+  await expect(page.locator("body")).toHaveAttribute("data-vim-pane", "sidebar");
+
+  const handledKeys = await page.evaluate(() => {
+    window.__vimHandledKeys = [];
+    window.addEventListener("keydown", event => {
+      if (["j", "k", "d", "u", "g"].includes(event.key)) {
+        window.__vimHandledKeys.push({ key: event.key, prevented: event.defaultPrevented });
+      }
+    });
+  });
+  await page.keyboard.press("j");
+  await page.keyboard.press("k");
+  await page.keyboard.press("d");
+  await page.keyboard.press("u");
+  await page.keyboard.press("g");
+  const results = await page.evaluate(() => window.__vimHandledKeys);
+  expect(results).toHaveLength(5);
+  expect(results.every(result => result.prevented)).toBe(true);
+});
