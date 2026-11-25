@@ -3500,6 +3500,7 @@ async function importCompleteBackup(file) {
 
   let previousItems;
   let previousHighlights;
+  let transactionCommitted = false;
   try {
     previousItems = await dbAll();
     previousHighlights = await hlAll();
@@ -3523,6 +3524,7 @@ async function importCompleteBackup(file) {
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error("Restore transaction aborted."));
     });
+    transactionCommitted = true;
 
     if (replace) {
       state.feeds = [...profile.feeds];
@@ -3566,18 +3568,20 @@ async function importCompleteBackup(file) {
   } catch (error) {
     console.error(error);
     try {
-      const rollback = db.transaction(["items", "highlights"], "readwrite");
-      const itemStore = rollback.objectStore("items");
-      const highlightStore = rollback.objectStore("highlights");
-      itemStore.clear();
-      highlightStore.clear();
-      for (const item of previousItems || []) itemStore.put(item);
-      for (const highlight of previousHighlights || []) highlightStore.put(highlight);
-      await new Promise((resolve, reject) => {
-        rollback.oncomplete = resolve;
-        rollback.onerror = () => reject(rollback.error);
-        rollback.onabort = () => reject(rollback.error || new Error("Rollback aborted."));
-      });
+      if (transactionCommitted) {
+        const rollback = db.transaction(["items", "highlights"], "readwrite");
+        const itemStore = rollback.objectStore("items");
+        const highlightStore = rollback.objectStore("highlights");
+        itemStore.clear();
+        highlightStore.clear();
+        for (const item of previousItems || []) itemStore.put(item);
+        for (const highlight of previousHighlights || []) highlightStore.put(highlight);
+        await new Promise((resolve, reject) => {
+          rollback.oncomplete = resolve;
+          rollback.onerror = () => reject(rollback.error);
+          rollback.onabort = () => reject(rollback.error || new Error("Rollback aborted."));
+        });
+      }
       for (const [key, value] of previousStorage) {
         if (value === null) localStorage.removeItem(key);
         else localStorage.setItem(key, value);
