@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.9.6] - 2026-11-25
+
+### Fixed
+- Let the article list expand into the space freed by collapsing the sidebar, while preserving the reader's minimum width and preventing horizontal overflow.
+- Added a browser regression test for collapsed-sidebar pane sizing.
+
 ## [1.9.2] - 2026-11-25
 
 ### Fixed
