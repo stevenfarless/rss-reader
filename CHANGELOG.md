@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.9] - 2026-11-25
+
+### Fixed
+- Add an OPML import selection list with all eligible feeds selected by default and controls to select or clear feeds individually or in bulk.
+- Keep the article-list column at its configured width when collapsing the sidebar, shifting the article list and reader left and giving the reader the freed width.
+- Update browser regression tests for the intended collapsed layout and OPML selection behavior.
+
+
 ## [1.9.8] - 2026-11-25
 
 ### Fixed
