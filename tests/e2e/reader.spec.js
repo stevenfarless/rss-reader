@@ -39,6 +39,38 @@ test("collapsing the sidebar expands the article list into the freed space", asy
     .toBeLessThanOrEqual(await page.locator(".layout").evaluate(el => el.clientWidth));
 });
 
+test("the article list can be resized narrower after the sidebar collapses", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => {
+    localStorage.setItem("rss-reader.settings.v1", JSON.stringify({
+      sidebarWidth: 250,
+      listWidth: 400
+    }));
+  });
+  await page.goto("/");
+  await page.locator("#sideToggle").click();
+  await expect(page.locator("body")).toHaveClass(/sidebar-collapsed/);
+
+  const list = page.locator(".list-pane");
+  const splitter = page.locator("#splitList");
+  const before = await list.evaluate(el => el.getBoundingClientRect().width);
+  const handle = await splitter.boundingBox();
+  expect(handle).not.toBeNull();
+
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2 - 250, handle.y + 300, { steps: 10 });
+  await page.mouse.up();
+
+  const after = await list.evaluate(el => el.getBoundingClientRect().width);
+  const reader = await page.locator("#reader").evaluate(el => el.getBoundingClientRect());
+  expect(after).toBeLessThan(before - 100);
+  expect(after).toBeGreaterThanOrEqual(280);
+  expect(reader.width).toBeGreaterThan(320);
+  expect(await list.evaluate(el => getComputedStyle(el.parentElement).gridTemplateColumns))
+    .not.toContain("478px");
+});
+
 test("shortcut coaching stays disabled on mobile while remaining enabled on desktop", async ({ browser }) => {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
