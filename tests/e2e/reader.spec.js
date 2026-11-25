@@ -297,6 +297,7 @@ test("backup restore can replace the existing profile", async ({ page }) => {
   }])));
   await page.reload();
   await page.locator("#settings").click();
+  page.once("dialog", dialog => dialog.accept());
   await page.locator("#backupFile").setInputFiles({
     name: "replace-backup.json",
     mimeType: "application/json",
@@ -308,7 +309,6 @@ test("backup restore can replace the existing profile", async ({ page }) => {
       highlights: []
     }))
   });
-  page.once("dialog", dialog => dialog.accept());
   await expect(page.locator("#toast")).toContainText("Backup restored");
   await expect(page.locator("#feeds")).not.toContainText("Existing Feed");
 });
@@ -330,6 +330,11 @@ test("backup restore can merge subscriptions without replacing the current profi
   }])));
   await page.reload();
   await page.locator("#settings").click();
+  let prompt = 0;
+  page.on("dialog", dialog => {
+    if (prompt++ === 0) dialog.dismiss();
+    else dialog.accept();
+  });
   await page.locator("#backupFile").setInputFiles({
     name: "merge-backup.json",
     mimeType: "application/json",
@@ -355,11 +360,6 @@ test("backup restore can merge subscriptions without replacing the current profi
       items: [],
       highlights: []
     }))
-  });
-  let prompt = 0;
-  page.on("dialog", dialog => {
-    if (prompt++ === 0) dialog.dismiss();
-    else dialog.accept();
   });
   await expect(page.locator("#toast")).toContainText("Backup restored");
   await expect(page.locator("#feeds")).toContainText("Existing Feed");
