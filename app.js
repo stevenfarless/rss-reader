@@ -1503,7 +1503,7 @@ async function addFeed(raw) {
   if (dup) throw Error(`You already subscribe to this feed (“${dup.title}”).`);
   const feed = {
     id: id(), url: loaded.url, title: loaded.parsed.title, site: loaded.parsed.site,
-    added: new Date().toISOString(), error: "", via: loaded.via, wpRoot: loaded.wpRoot || "", group: ""
+    added: new Date().toISOString(), error: "", via: loaded.via, wpRoot: loaded.wpRoot || "", group: "", lastAttempt: Date.now(), lastSuccess: Date.now(), retrievalPath: loaded.via, consecutiveFailures: 0
   };
   state.feeds.push(feed);
   saveFeeds();
@@ -3393,7 +3393,7 @@ async function importOPML(file) {
         const loaded = await loadFeedFromUrl(url);
         const feed = {
           id: id(), url: loaded.url, title: loaded.parsed.title, site: loaded.parsed.site,
-          added: new Date().toISOString(), error: "", via: loaded.via, wpRoot: loaded.wpRoot || "", group
+          added: new Date().toISOString(), error: "", via: loaded.via, wpRoot: loaded.wpRoot || "", group, lastAttempt: Date.now(), lastSuccess: Date.now(), retrievalPath: loaded.via, consecutiveFailures: 0
         };
         state.feeds.push(feed);
         await saveItems(feed, loaded.parsed.items);
@@ -4679,7 +4679,7 @@ async function init() {
     // the list is never silently days old.
     if (state.feeds.length) {
       const newest = state.items.reduce((m, x) => Math.max(m, dateSortKey(x) ?? 0), 0);
-      if (!state.items.length || Date.now() - newest > 30 * 60 * 1000) refresh(true);
+      if (!state.items.length || Date.now() - newest > (Number(state.settings.globalRefreshMinutes) || 30) * 60000) refresh(true);
     }
   }
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
