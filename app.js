@@ -3509,14 +3509,33 @@ function showFeedHealth() {
   }
   $("#feedHealthDialog").showModal();
 }
-function showReadingStats(days=30){
-  const read=state.items.filter(x=>x.read);
-  const recent=read.filter(x=>x.readAt&&(days===0||Date.now()-x.readAt<=days*86400000));
-  const daily=new Map();
-  for(const x of recent){const key=new Date(x.readAt).toLocaleDateString();daily.set(key,(daily.get(key)||0)+1);}
-  const rows=[...daily.entries()].sort((a,b)=>new Date(a[0])-new Date(b[0])).slice(-30);
-  const period=days===0?"all recorded history":"the last "+days+" days";
-  $("#statsBody").innerHTML="<p>"+state.items.length+" cached articles</p><p>"+read.length+" currently marked read</p><p>"+recent.length+" articles marked read during "+period+"</p><p>"+state.items.filter(x=>x.saved).length+" saved · "+state.items.filter(x=>x.queued).length+" queued · "+state.highlights.length+" highlights</p><p class=\"muted\">Historical activity is available only for items with a recorded read timestamp.</p>"+(rows.length?rows.map(x=>"<p>"+esc(x[0])+": "+x[1]+"</p>").join(""):"<p>No timestamped reading activity for this period.</p>");
+function showReadingStats(days = 30) {
+  const read = state.items.filter(item => item.read);
+  const recent = read.filter(item => item.readAt && (days === 0 || Date.now() - item.readAt <= days * 86400000));
+  const daily = new Map();
+  const byFeed = new Map();
+  for (const item of recent) {
+    const day = new Date(item.readAt).toLocaleDateString();
+    daily.set(day, (daily.get(day) || 0) + 1);
+    const feed = state.feeds.find(entry => entry.id === item.feedId);
+    const name = feed?.title || item.feedTitle || "Unknown feed";
+    byFeed.set(name, (byFeed.get(name) || 0) + 1);
+  }
+  const rows = [...daily.entries()].sort((a,b) => new Date(a[0]) - new Date(b[0])).slice(-30);
+  const topFeeds = [...byFeed.entries()].sort((a,b) => b[1] - a[1]).slice(0,5);
+  const period = days === 0 ? "all recorded history" : "the last " + days + " days";
+  const queued = state.items.filter(item => item.queued);
+  const completedQueue = queued.filter(item => item.read).length;
+  $("#statsBody").innerHTML =
+    "<p>" + state.items.length + " cached articles</p>" +
+    "<p>" + read.length + " currently marked read</p>" +
+    "<p>" + recent.length + " articles marked read during " + period + "</p>" +
+    "<p>" + state.items.filter(item => item.saved).length + " saved · " + queued.length + " queued · " + completedQueue + " queued and read · " + state.highlights.length + " highlights</p>" +
+    "<p class=\"muted\">Period totals use local read timestamps. Older read states without timestamps are excluded.</p>" +
+    "<h3>Reading activity by day</h3>" +
+    (rows.length ? rows.map(row => "<p>" + esc(row[0]) + ": " + row[1] + "</p>").join("") : "<p>No timestamped reading activity for this period.</p>") +
+    "<h3>Most-read feeds</h3>" +
+    (topFeeds.length ? topFeeds.map(row => "<p>" + esc(row[0]) + ": " + row[1] + "</p>").join("") : "<p>No feed-level reading history for this period.</p>");
   $("#statsDialog").showModal();
 }
 function previewOPML(file) {
