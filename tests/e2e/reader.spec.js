@@ -75,6 +75,8 @@ test("reading queue persists article ordering in the local library", async ({ pa
   await expect(page.locator("#queueCount")).toHaveText("1");
   await page.locator('#sidebar > .nav[data-view="queue"]').click();
   await expect(page.locator("#articleList")).toContainText("Fixture Article");
+  await page.locator("#removeQueue").click();
+  await expect(page.locator("#queueCount")).toHaveText("0");
 });
 
 test("OPML import displays a preview before changing subscriptions", async ({ page }) => {
