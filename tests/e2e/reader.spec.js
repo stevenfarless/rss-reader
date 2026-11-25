@@ -518,4 +518,26 @@ test("Vim preset navigates panes and preserves the focused pane after reload", a
   const results = await page.evaluate(() => window.__vimHandledKeys);
   expect(results).toHaveLength(5);
   expect(results.every(result => result.prevented)).toBe(true);
+
+  // Escape leaves an input in the current pane. A second Escape in
+  // Normal mode moves focus to the sidebar; D toggles its collapsed state.
+  await page.locator(".list-pane").click({ position: { x: 20, y: 20 } });
+  await page.locator("#search").focus();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#search")).not.toBeFocused();
+  await expect(page.locator("body")).toHaveAttribute("data-vim-pane", "list");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("body")).toHaveAttribute("data-vim-pane", "sidebar");
+  await expect(page.locator("#shortcutBar")).toBeVisible();
+  await expect(page.locator("#shortcutBar")).toContainText("D");
+  await page.keyboard.press("D");
+  await expect(page.locator("body")).toHaveClass(/sidebar-collapsed/);
+  await page.keyboard.press("D");
+  await expect(page.locator("body")).not.toHaveClass(/sidebar-collapsed/);
+
+  // The persistent reference strip can be disabled independently.
+  await page.locator("#settings").click();
+  await page.locator("#shortcutBarToggle").uncheck();
+  await expect(page.locator("#shortcutBar")).toBeHidden();
+  await page.locator("#settingsDialog .x").click();
 });
