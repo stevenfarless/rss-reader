@@ -3557,12 +3557,35 @@ function previewOPML(file) {
     $("#opmlPreviewDialog").showModal();
   }).catch(error => toast("Could not read OPML file: " + error.message));
 }
+function showShortcutCoach(action, label, shortcut) {
+  let suppressed = [];
+  try { suppressed = JSON.parse(localStorage.getItem("rss-reader.shortcut-coach-suppressed.v1") || "[]"); } catch {}
+  if (suppressed.includes(action)) return;
+  const el = $("#toast");
+  el.replaceChildren(document.createTextNode(label + " · Shortcut: " + shortcut));
+  const dismiss = document.createElement("button");
+  dismiss.type = "button"; dismiss.textContent = "Dismiss";
+  dismiss.onclick = () => el.classList.remove("show");
+  const suppress = document.createElement("button");
+  suppress.type = "button"; suppress.textContent = "Don’t show again";
+  suppress.onclick = () => {
+    const next = [...new Set([...suppressed, action])];
+    try { localStorage.setItem("rss-reader.shortcut-coach-suppressed.v1", JSON.stringify(next)); } catch {}
+    el.classList.remove("show");
+  };
+  el.append(dismiss, suppress);
+  el.classList.add("show");
+  clearTimeout(timer);
+  timer = setTimeout(() => el.classList.remove("show"), 7000);
+}
 function coachShortcut(e){
   if(!state.settings.shortcutCoaching||e.detail===0||!pointerActivation||Date.now()-pointerActivation.at>1200||!["mouse","pen"].includes(pointerActivation.type))return;
-  const t=e.target.closest?.("[data-action],[data-reader],[data-view],#refresh,#settings,#add");if(!t)return;let action=null,label="";
-  if(t.dataset.action==="save"||t.dataset.reader==="save"){action="save";label="Save article";}else if(t.dataset.action==="read"||t.dataset.reader==="read"){action="toggleRead";label="Toggle read state";}else if(t.dataset.view==="all"){action="allView";label="All articles";}else if(t.dataset.view==="unread"){action="unreadView";label="Unread";}else if(t.id==="refresh"||t.hasAttribute("data-rail-refresh")){action="refresh";label="Refresh feeds";}else if(t.id==="add"){action="addFeed";label="Add feed";}else if(t.id==="settings"){action="goPrefs";label="Settings";}if(!action)return;
+  const t=e.target.closest?.("[data-action],[data-reader],[data-view],#refresh,#settings,#add,#search");if(!t)return;let action=null,label="";
+  if(t.dataset.action==="save"||t.dataset.reader==="save"){action="save";label="Save article";}else if(t.dataset.action==="read"||t.dataset.reader==="read"){action="toggleRead";label="Toggle read state";}else if(t.dataset.view==="all"){action="allView";label="All articles";}else if(t.dataset.view==="unread"){action="unreadView";label="Unread";}else if(t.id==="refresh"||t.hasAttribute("data-rail-refresh")){action="refresh";label="Refresh feeds";}else if(t.id==="add"){action="addFeed";label="Add feed";}else if(t.id==="settings"||t.id==="railSettings"){action="goPrefs";label="Settings";}else if(t.id==="search"){action="search";label="Search";}if(!action)return;
+  if(t.dataset.id && state.selected !== t.dataset.id)return;
   const p=PRESETS[shortcutPreset()]||PRESETS.inoreader,entry=Object.entries(p.keys).find(x=>x[1]===action);if(!entry)return;
-  const now=Date.now();if(now-(coachLastShown.get(action)||0)<60000)return;coachLastShown.set(action,now);toast(label+" · Shortcut: "+entry[0].split(" ").map(displayDesc).join(" then "));
+  const now=Date.now();if(now-(coachLastShown.get(action)||0)<60000)return;coachLastShown.set(action,now);
+  showShortcutCoach(action,label,entry[0].split(" ").map(displayDesc).join(" then "));
 }
 function toolbarOrderFromDialog() {
   const items = [...document.querySelectorAll("#toolbarOrderList [data-tb-key]")];
