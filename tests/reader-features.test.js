@@ -38,6 +38,12 @@ test("Vim-like navigation is optional and persistent", () => {
   assert.match(css, /\.shortcut-bar/);
 });
 
+test("OPML selection controls query all eligible feed checkboxes", () => {
+  assert.match(app, /\$\$\("#opmlFeedSelection input\[data-opml-feed\]:checked"\)\.length/);
+  assert.match(app, /\$\$\("#opmlFeedSelection input\[data-opml-feed\]:not\(:disabled\)"\)\.forEach/);
+  assert.match(app, /\$\$\("#opmlFeedSelection input\[data-opml-feed\]:checked"\)\.map/);
+});
+
 test("Vim is a keyboard shortcut preset", () => {
   const utils = readFileSync(new URL("../utils.js", import.meta.url), "utf8");
   assert.match(utils, /PRESETS\.vim = \{ name: "Vim"/);
