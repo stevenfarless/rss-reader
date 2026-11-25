@@ -110,12 +110,13 @@ test("shortcut coaching and statistics are available from settings", async ({ pa
   await page.locator("#saveSettings").click();
   await page.locator("#add").click();
   await expect(page.locator("#shortcutCoach")).toContainText("Add feed");
-  await expect(page.locator("#shortcutCoach")).toContainText("No keyboard shortcut assigned");
+  await expect(page.locator("#shortcutCoach")).toContainText("Shortcut: a");
   await page.locator("#feedDialog .x").click();
 
   await page.locator("#settings").click();
   await page.locator("#openStats").click();
   await expect(page.locator("#statsDialog")).toBeVisible();
+  await expect(page.locator("#shortcutCoach")).toContainText("No keyboard shortcut assigned");
   await page.locator("#statsRange").selectOption("7");
   await expect(page.locator("#statsBody")).toContainText("the last 7 days");
 });
