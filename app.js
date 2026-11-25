@@ -3758,13 +3758,16 @@ function coachShortcut(e) {
   if (!state.settings.shortcutCoaching ||
       !isShortcutCoachPointerEvent(e, pointerActivation)) return;
 
-  const target = e.target?.closest?.("button,a,[role='button'],summary,input[type='button'],input[type='submit'],input[type='reset'],[data-action],[data-reader],[data-view]");
+  const target = e.target?.closest?.("button,a,[role='button'],summary,input[type='search'],input[type='button'],input[type='submit'],input[type='reset'],[data-action],[data-reader],[data-view],[data-rail-next-unread],[data-rail-search],[data-rail-refresh]");
   if (!target || target.closest("#shortcutCoach")) return;
 
   const readerAction = target.dataset.reader;
   const appAction = target.dataset.action;
   const view = target.dataset.view;
-  let action = readerAction || appAction || view || target.id || "";
+  let action = target.dataset.shortcutAction || readerAction || appAction || view ||
+    (target.hasAttribute("data-rail-next-unread") ? "nextUnread" :
+      target.hasAttribute("data-rail-search") ? "search" :
+        target.hasAttribute("data-rail-refresh") ? "refresh" : target.id) || "";
   let label = target.getAttribute("aria-label") ||
     target.getAttribute("title") ||
     target.textContent?.replace(/\s+/g, " ").trim() ||
@@ -3788,7 +3791,13 @@ function coachShortcut(e) {
     add: ["addFeed", "Add feed"],
     settings: ["goPrefs", "Settings"],
     railSettings: ["goPrefs", "Settings"],
-    search: ["search", "Search"]
+    search: ["search", "Search"],
+    sideToggle: ["sidebarToggle", "Toggle sidebar"],
+    home: ["allView", "All articles"],
+    back: ["closeReader", "Back to list"],
+    mobileAdd: ["addFeed", "Add feed"],
+    firstAdd: ["addFeed", "Add feed"],
+    organize: ["goOrganize", "Folders and tags"]
   };
   const known = knownActions[action] || knownActions[target.id];
   if (known) [action, label] = known;
