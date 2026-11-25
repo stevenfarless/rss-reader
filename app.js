@@ -31,13 +31,13 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.24";
+const APP_VERSION = "1.9.0";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null, savedSearch: null,
   folders: [], tags: [], savedSearches: [], rules: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader" }
+  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 250, listWidth: 400, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader", shortcutCoaching: false, retentionDays: 0 }
 };
 let db, timer, pendingSeq = null, pendingSeqTimer = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null;
 /* Text-to-speech state (#105): the article being read, its sentence
@@ -489,7 +489,9 @@ function validateSettings(d) {
   if (typeof d.notifyNew === "boolean") next.notifyNew = d.notifyNew;
   if (typeof d.sidebarCollapsed === "boolean") next.sidebarCollapsed = d.sidebarCollapsed;
   if (typeof d.sidebarWidth === "number" && d.sidebarWidth >= 180 && d.sidebarWidth <= 420) next.sidebarWidth = d.sidebarWidth;
-  if (typeof d.listWidth === "number" && d.listWidth >= 320 && d.listWidth <= 640) next.listWidth = d.listWidth;
+  if (typeof d.listWidth === "number" && d.listWidth >= 280 && d.listWidth <= 640) next.listWidth = d.listWidth;
+  if (typeof d.shortcutCoaching === "boolean") next.shortcutCoaching = d.shortcutCoaching;
+  if ([0,30,90,180,365].includes(Number(d.retentionDays))) next.retentionDays = Number(d.retentionDays);
   if (d.sort === "newest" || d.sort === "oldest") next.sort = d.sort;
   if (["all", "today", "week"].includes(d.filter)) next.filter = d.filter;
   if (Array.isArray(d.toolbarOrder)) {
@@ -706,6 +708,8 @@ function readSettingsFromDialog() {
     vimPane: state.settings.vimPane || "list",
     cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
+    shortcutCoaching: $("#shortcutCoachingToggle").checked,
+    retentionDays: Number($("#retentionDaysSelect").value),
     sidebarCollapsed: state.settings.sidebarCollapsed || false,
     sidebarWidth: state.settings.sidebarWidth, listWidth: state.settings.listWidth,
     // Sort and filter are set elsewhere (the sort button, the filter
@@ -783,7 +787,7 @@ function applySettings() {
   // Keep the browser chrome (status bar, task switcher) on the same
   // color as the theme, so the theme never flashes the wrong color.
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = t === "light" ? "#f4f2ec" : "#171916";
+  if (meta) meta.content = t === "light" ? "#f4f2ec" : t === "white" ? "#ffffff" : "#000000";
   document.documentElement.dataset.width = state.settings.width;
   document.documentElement.dataset.size = state.settings.size;
   // Reader typography (#111): serif/comfortable are the defaults, so
@@ -818,8 +822,8 @@ function applySidebarCollapsed() {
    The splitter handles are absolutely positioned in .layout and placed
    from the panes' actual rects, so they stay on the boundary even when
    the grid clamps a column on a narrow viewport. */
-const SIDE_W = { min: 180, max: 420, def: 230 };
-const LIST_W = { min: 320, max: 640, def: 430 };
+const SIDE_W = { min: 180, max: 420, def: 250 };
+const LIST_W = { min: 280, max: 640, def: 400 };
 function clampW(v, r) { return Math.min(r.max, Math.max(r.min, Math.round(v) || r.def)); }
 function applyPaneWidths() {
   const side = clampW(state.settings.sidebarWidth, SIDE_W);
@@ -1581,7 +1585,7 @@ async function saveItems(feed, items) {
       published: d ? d.toISOString() : null,
       image: x.image || old?.image || "",
       enclosure: x.enclosure || old?.enclosure || null,
-      read: old?.read || false, saved: old?.saved || false,
+      read: old?.read || false, readAt: old?.readAt || null, saved: old?.saved || false, queued: old?.queued || false, queueOrder: old?.queueOrder || 0,
       snoozedUntil: old?.snoozedUntil || null,
       tags: old?.tags || []
     };
@@ -1618,6 +1622,7 @@ async function saveItems(feed, items) {
 }
 
 async function refreshFeed(f) {
+  f.lastAttempt = Date.now();
   try {
     let loaded;
     if (f.via === "wp" && f.wpRoot) {
@@ -1633,13 +1638,15 @@ async function refreshFeed(f) {
     }
     f.title = loaded.parsed.title || f.title;
     f.error = "";
+    f.lastSuccess = Date.now(); f.consecutiveFailures = 0; f.lastError = ""; f.retrievalPath = loaded.via;
     f.via = loaded.via;
     f.wpRoot = loaded.wpRoot || f.wpRoot || "";
     if (loaded.url) f.url = loaded.url;
     await saveItems(f, loaded.parsed.items);
     return true;
   } catch (e) {
-    f.error = classifyError(e);
+    f.error = classifyError(e); f.lastError = f.error;
+    f.consecutiveFailures = (Number(f.consecutiveFailures) || 0) + 1;
     return false;
   }
 }
@@ -1651,7 +1658,7 @@ function showFeedError(id) {
   $("#feedErrorDialog").dataset.feed = id;
   $("#feedErrorDialog").showModal();
 }
-async function refresh() {
+async function refresh(automatic = false) {
   if (!state.feeds.length) { toast("Add a feed first."); return; }
   const now = Date.now();
   if (now - refreshAt < 2000) return; // debounce repeated refreshes (incl. holding "r")
@@ -1665,17 +1672,19 @@ async function refresh() {
     // concurrent requests, and the burst is what gets the shared
     // helper (rss2json) rate-limited by publishers. Five at a time
     // is far gentler and still fast enough.
-    const results = new Array(state.feeds.length);
+    const eligibleFeeds = state.feeds.filter(f => !automatic || !f.refreshMinutes || Date.now() - (f.lastAttempt || 0) >= f.refreshMinutes * 60000);
+    if (!eligibleFeeds.length) { toast("All feeds are within their refresh interval."); return; }
+    const results = new Array(eligibleFeeds.length);
     let next = 0;
     const REFRESH_CONCURRENCY = 5;
-    await Promise.all(Array.from({ length: Math.min(REFRESH_CONCURRENCY, state.feeds.length) }, async () => {
-      while (next < state.feeds.length) {
+    await Promise.all(Array.from({ length: Math.min(REFRESH_CONCURRENCY, eligibleFeeds.length) }, async () => {
+      while (next < eligibleFeeds.length) {
         const i = next++;
-        results[i] = await refreshFeed(state.feeds[i]);
+        results[i] = await refreshFeed(eligibleFeeds[i]);
       }
     }));
     const ok = results.filter(Boolean).length;
-    const failed = state.feeds.filter((f, i) => !results[i]).map(f => f.title);
+    const failed = eligibleFeeds.filter((f, i) => !results[i]).map(f => f.title);
     saveFeeds();
     // Rules (#109) can add tags to new articles; keep the tag list
     // current after a refresh.
@@ -1684,9 +1693,9 @@ async function refresh() {
     state.lastRefresh = Date.now();
     try { localStorage.setItem(LR, String(state.lastRefresh)); } catch {}
     render();
-    toast(ok === state.feeds.length
-      ? `Refreshed ${ok} of ${state.feeds.length} feeds.`
-      : `Refreshed ${ok} of ${state.feeds.length} feeds. Failed: ${failed.join(", ")}.`);
+    toast(ok === eligibleFeeds.length
+      ? `Refreshed ${ok} of ${eligibleFeeds.length} feeds.`
+      : `Refreshed ${ok} of ${eligibleFeeds.length} feeds. Failed: ${failed.join(", ")}.`);
   } finally {
     btn.disabled = false;
     btn.removeAttribute("aria-busy");
@@ -1747,6 +1756,7 @@ function visible() {
   const savedSearch = state.view === "savedSearch" ? state.savedSearches.find(v => v.id === state.savedSearch) : null;
   let a = state.items.filter(x => {
     if (state.view === "snoozed") return isSnoozed(x);
+    if (state.view === "queue") return !!x.queued;
     if (isSnoozed(x)) return false;
     if (state.view === "unread") return !x.read && !mutedIds.has(x.feedId);
     if (state.view === "saved") return x.saved;
@@ -1820,6 +1830,9 @@ function renderNav() {
   $("#savedCount").textContent = fmtCount(state.items.filter(x => x.saved && !isSnoozed(x)).length);
   $("#snoozedCount").textContent = fmtCount(state.items.filter(isSnoozed).length);
   $("#highlightsCount").textContent = fmtCount(state.highlights.length);
+  const queueCount = $("#queueCount"); if (queueCount) queueCount.textContent = fmtCount(state.items.filter(x => x.queued).length);
+  const moreCount = $("#libraryMoreCount"); if (moreCount) moreCount.textContent = fmtCount(state.items.filter(x => x.saved || isSnoozed(x)).length + state.highlights.length);
+  $("#libraryMore")?.querySelector("summary")?.classList.toggle("active", ["saved","snoozed","highlights"].includes(state.view));
   $$(".nav").forEach(b => {
     b.classList.toggle("active", b.dataset.view === state.view && state.view !== "feed");
     if (b.dataset.view === state.view && state.view !== "feed") b.setAttribute("aria-current", "true");
@@ -2022,7 +2035,7 @@ function renderHighlightsList() {
 }
 function renderList() {
   const a = visible();
-  const titles = { all: "All articles", unread: "Unread", saved: "Saved", snoozed: "Snoozed", highlights: "Highlights", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", folder: state.folder || "Folder", savedSearch: state.savedSearches.find(s => s.id === state.savedSearch)?.name || "Saved search", tag: state.tag ? "Tag: " + state.tag : "Tag" };
+  const titles = { all: "All articles", unread: "Unread", queue: "Reading queue", saved: "Saved", snoozed: "Snoozed", highlights: "Highlights", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", folder: state.folder || "Folder", savedSearch: state.savedSearches.find(s => s.id === state.savedSearch)?.name || "Saved search", tag: state.tag ? "Tag: " + state.tag : "Tag" };
   $("#heading").textContent = titles[state.view];
   $("#mobileTitle").textContent = titles[state.view];
   // The Highlights view (#116) lists the highlights themselves, newest
@@ -2036,11 +2049,12 @@ function renderList() {
   // The filter menu button shows the active filter (#175).
   const fb = $("#filterMenuBtn");
   if (fb) fb.querySelector(".disclosure-label").textContent = ({ all: "All", today: "Today", week: "This week" }[state.filter] || "All");
-  const base = state.view === "saved" ? "Articles you have kept for later."
+  const base = state.view === "queue" ? "Articles arranged for your next reading session."
+    : state.view === "saved" ? "Articles you have kept for later."
     : state.view === "snoozed" ? "Articles waiting to come back."
     : state.view === "unread" ? "Stories you have not read yet."
     : state.view === "highlights" ? "Passages you highlighted, with your notes."
-    : state.view === "folder" ? `Every feed in “${state.folder}”, newest first.`
+    : state.view === "folder" ? ""
     : state.view === "savedSearch" ? "A saved filter, run over your library."
     : state.view === "tag" ? `Articles tagged “${state.tag}”.`
     : "";
@@ -3439,6 +3453,9 @@ function showSettings() {
   $("#hideDuplicatesToggle").checked = state.settings.hideDuplicates !== false;
   $("#backgroundSyncToggle").checked = !!state.settings.backgroundSync;
   $("#notifyNewToggle").checked = !!state.settings.notifyNew;
+  $("#shortcutCoachingToggle").checked = !!state.settings.shortcutCoaching;
+  $("#retentionDaysSelect").value = String(state.settings.retentionDays || 0);
+  updateStorageUsage();
   // App updates (#144): the running version, and the last check result
   // (an update waiting shows here as well as in the banner).
   const av = $("#appVersion");
@@ -4599,7 +4616,7 @@ async function init() {
     // the list is never silently days old.
     if (state.feeds.length) {
       const newest = state.items.reduce((m, x) => Math.max(m, dateSortKey(x) ?? 0), 0);
-      if (!state.items.length || Date.now() - newest > 30 * 60 * 1000) refresh();
+      if (!state.items.length || Date.now() - newest > 30 * 60 * 1000) refresh(true);
     }
   }
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
