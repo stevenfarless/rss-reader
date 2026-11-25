@@ -3957,7 +3957,7 @@ async function markAboveBelow(which) {
 function bind() {
   document.addEventListener("pointerdown", e => { pointerActivation = { type:e.pointerType, at:Date.now() }; }, true);
   document.addEventListener("click", e => coachShortcut(e), true);
-  document.addEventListener("click", async e => { const retry = e.target.closest("[data-health-retry]"); if (!retry) return; const feed = state.feeds.find(x => x.id === retry.dataset.healthRetry); if (!feed) return; retry.disabled = true; await refreshFeed(feed); saveFeeds(); render(); showFeedHealth(); });
+  document.addEventListener("click", async e => { const retry = e.target.closest("[data-health-retry]"); if (!retry) return; const feed = state.feeds.find(x => x.id === retry.dataset.healthRetry); if (!feed) return; retry.disabled = true; await refreshFeed(feed); saveFeeds(); render(); $("#feedHealthDialog").close(); showFeedHealth(); });
   document.addEventListener("click", async e => {
     // The snooze menu closes on any click outside it or its button.
     // Remember whether it was open first: the snooze button toggles
