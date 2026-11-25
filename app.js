@@ -1628,6 +1628,8 @@ async function saveItems(feed, items) {
 }
 
 async function refreshFeed(f) {
+  if (f.refreshing) return false;
+  f.refreshing = true;
   f.lastAttempt = Date.now();
   try {
     let loaded;
@@ -1657,6 +1659,8 @@ async function refreshFeed(f) {
     const backoff = Math.min(24 * 60 * 60 * 1000, 5 * 60 * 1000 * (2 ** Math.min(8, f.consecutiveFailures - 1)));
     f.nextRetryAt = Date.now() + backoff;
     return false;
+  } finally {
+    f.refreshing = false;
   }
 }
 /* A failed feed shows its full error with Retry and Unsubscribe (#162). */
