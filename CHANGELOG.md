@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.11] - 2026-11-25
+
+### Fixed
+- Close the Settings dialog before opening the OPML import preview, avoiding nested modal dialog failures.
+- Assert that Vim pane focus is written to settings before testing restoration after reload.
+
+
 ## [1.9.10] - 2026-11-25
 
 ### Fixed
