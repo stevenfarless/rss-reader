@@ -37,7 +37,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.9.7";
+const APP_VERSION = "1.9.8";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -820,6 +820,14 @@ function applySettings() {
 function applySidebarCollapsed() {
   const collapsed = !!state.settings.sidebarCollapsed;
   document.body.classList.toggle("sidebar-collapsed", collapsed);
+  if (collapsed) {
+    document.documentElement.style.setProperty(
+      "--collapsed-list-extra",
+      Math.max(0, state.settings.sidebarWidth - 52) + "px"
+    );
+  } else {
+    document.documentElement.style.removeProperty("--collapsed-list-extra");
+  }
   const btn = $("#sideToggle");
   if (!btn) return;
   btn.setAttribute("aria-expanded", String(!collapsed));
@@ -870,6 +878,12 @@ function bindSplitter(el, kind) {
   const key = kind === "side" ? "sidebarWidth" : "listWidth";
   el.addEventListener("pointerdown", e => {
     if (e.button !== 0) return;
+    if (kind === "list" && document.body.classList.contains("sidebar-collapsed")) {
+      // Once the user manually resizes the collapsed layout, treat the
+      // chosen width as the actual list width instead of adding the
+      // sidebar's freed space on top of it.
+      document.documentElement.style.setProperty("--collapsed-list-extra", "0px");
+    }
     e.preventDefault();
     el.setPointerCapture(e.pointerId);
     el.classList.add("dragging");
