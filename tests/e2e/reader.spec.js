@@ -480,10 +480,12 @@ test("backup restore can merge subscriptions without replacing the current profi
 test("Vim preset navigates panes and preserves the focused pane after reload", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => {
-    localStorage.setItem("rss-reader.settings.v1", JSON.stringify({
-      shortcutPreset: "vim",
-      vimPane: "list"
-    }));
+    if (!localStorage.getItem("rss-reader.settings.v1")) {
+      localStorage.setItem("rss-reader.settings.v1", JSON.stringify({
+        shortcutPreset: "vim",
+        vimPane: "list"
+      }));
+    }
   });
   await page.goto("/");
   await expect(page.locator("body")).toHaveClass(/vim-navigation-enabled/);
