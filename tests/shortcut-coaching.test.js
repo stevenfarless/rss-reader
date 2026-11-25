@@ -12,7 +12,9 @@ const {
 
 test("shortcut lookup follows the active preset instead of a duplicate mapping", () => {
   assert.equal(findShortcutForAction("inoreader", "save"), "s");
-  assert.equal(findShortcutForAction("feedly", "save"), "t");
+  assert.equal(findShortcutForAction("feedly", "save"), "s");
+  assert.equal(findShortcutForAction("inoreader", "folderToggle"), "Shift+x");
+  assert.equal(findShortcutForAction("feedly", "folderToggle"), "e");
   assert.equal(findShortcutForAction("inoreader", "toggleRead"), "m");
   assert.equal(findShortcutForAction("unknown", "save"), null);
   assert.equal(findShortcutForAction("inoreader", "notAnAction"), null);
