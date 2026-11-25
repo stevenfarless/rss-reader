@@ -31,6 +31,11 @@ test("Vim-like navigation is optional and persistent", () => {
   assert.match(html, /id="shortcutHelp"/);
   assert.match(app, /shortcutHelp.*showHelp/);
   assert.match(css, /vim-navigation-enabled/);
+  assert.match(app, /key === "D" && pane === "sidebar"/);
+  assert.match(app, /active\.blur\(\)/);
+  assert.match(html, /id="shortcutBarToggle"/);
+  assert.match(app, /function renderShortcutBar\(\)/);
+  assert.match(css, /\.shortcut-bar/);
 });
 
 test("Vim is a keyboard shortcut preset", () => {
