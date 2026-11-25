@@ -4963,6 +4963,10 @@ function bind() {
     // Escape leaves an editing field first. A second Escape in Normal
     // mode moves focus to the sidebar, where global navigation lives.
     if (shortcutPreset() === "vim" && e.key === "Escape" && !dialogOpen) {
+      clearTimeout(vimPendingGTimer);
+      vimPendingG = false;
+      clearTimeout(pendingSeqTimer);
+      pendingSeq = null;
       if (editable) {
         e.preventDefault();
         active.blur();
