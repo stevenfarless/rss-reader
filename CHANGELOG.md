@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.10] - 2026-11-25
+
+### Fixed
+- Preserve the selected Vim navigation pane when settings are validated and restored after reload.
+- Add browser coverage for Vim preset activation, pane switching, keyboard handling, and persisted pane focus.
+
+
 ## [1.9.9] - 2026-11-25
 
 ### Fixed
