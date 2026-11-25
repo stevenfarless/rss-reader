@@ -2497,7 +2497,7 @@ function renderReader(x) {
   const tagsRowHTML = ((x.tags || []).length || tagsOpen) ? `<div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<span id="tagInputWrap" ${tagsOpen ? "" : "hidden"}><input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></span></div>` : "";
   const hasNote = !!getArticleNote(x.id);
   const readerFeedTitle = f ? feedDisplayTitle(f) : x.feedTitle;
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span title="${esc(readerFeedTitle)}" aria-label="${esc(readerFeedTitle)}">${esc(readerFeedTitle)}</span><div class="reader-actions">${toolbarOrder().map(k => toolbarButtonHTML(k, x, {fullLabel, canListen, canFull, hasNote})).join("")}</div></div>${tagsRowHTML}${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${articleNoteHTML(x)}${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span title="${esc(readerFeedTitle)}" aria-label="${esc(readerFeedTitle)}">${esc(readerFeedTitle)}</span><div class="reader-actions">${toolbarOrder().map(k => toolbarButtonHTML(k, x, {fullLabel, canListen, canFull, hasNote})).join("")}<button type="button" class="reader-btn" data-reader="queue" title="${x.queued ? "Remove from queue" : "Add to reading queue"}" aria-label="${x.queued ? "Remove from reading queue" : "Add to reading queue"}" aria-pressed="${!!x.queued}">${x.queued ? "☷" : "＋"}</button></div></div>${tagsRowHTML}${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${articleNoteHTML(x)}${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
   setupReaderToolbarOverflow();
   const tagAdd = $("#tagAddBtn");
   if (tagAdd) tagAdd.onclick = () => { const x = selectedItem(); const inp = $("#tagInput"); if (x && inp) addTagToItem(x, inp.value); };
@@ -3444,6 +3444,29 @@ async function importCompleteBackup(file){let d;try{d=validateCompleteBackup(JSO
 function exportAnnotations(format){const byId=new Map(state.items.map(x=>[x.id,x]));const rows=[...state.highlights.map(h=>{const x=byId.get(h.itemId)||{};return {type:"highlight",title:x.title||"",url:x.url||"",feed:x.feedTitle||"",text:h.text||h.quote||"",note:h.note||"",createdAt:h.created||null,updatedAt:h.updated||null};}),...Object.entries(articleNotes).map(([id,note])=>{const x=byId.get(id)||{};return {type:"note",title:x.title||"",url:x.url||"",feed:x.feedTitle||"",note,createdAt:null,updatedAt:null};})];if(format==="json"){download(JSON.stringify({format:"rss-reader-annotations",version:1,annotations:rows},null,2),"rss-reader-annotations.json","application/json");return;}const md=rows.map(x=>"## "+(x.title||"Untitled article")+"\n\nSource: "+(x.url||"Unavailable")+"\n\nFeed: "+(x.feed||"Unknown")+"\n\n"+(x.createdAt?"Created: "+new Date(x.createdAt).toISOString()+"\n\n":"")+(x.updatedAt?"Updated: "+new Date(x.updatedAt).toISOString()+"\n\n":"")+(x.text?"> "+x.text+"\n\n":"")+(x.note||"")).join("\n---\n\n");download(md,"rss-reader-annotations.md","text/markdown");}
 async function updateStorageUsage(){const el=$("#storageUsage");if(!el)return;if(!navigator.storage?.estimate){el.textContent="Storage usage estimates are unavailable.";return;}try{const d=await navigator.storage.estimate(),fmt=n=>n<1048576?Math.round(n/1024)+" KB":(n/1048576).toFixed(1)+" MB";el.textContent="Approximate browser storage: "+fmt(d.usage||0)+" used of "+(d.quota?fmt(d.quota):"unknown quota")+". ";}catch{el.textContent="Storage usage could not be read.";}}
 async function previewRetentionCleanup(){const days=Number(state.settings.retentionDays)||0;if(!days){toast("Choose an article retention period in Settings first.");return;}const protectedIds=new Set([...state.highlights.map(x=>x.itemId),...Object.keys(articleNotes)]),cutoff=Date.now()-days*86400000;const old=state.items.filter(x=>{const t=dateSortKey(x);return t&&t<cutoff&&!x.saved&&!x.queued&&!protectedIds.has(x.id);});if(!old.length){toast("No unprotected articles are older than the selected period.");return;}if(!confirm("Remove "+old.length+" old articles? Saved, queued, highlighted, and noted articles are protected."))return;const ids=old.map(x=>x.id),set=new Set(ids);await deleteMany(ids);state.items=state.items.filter(x=>!set.has(x.id));render();updateStorageUsage();toast("Removed "+ids.length+" old articles.");}
+function showFeedHealth() {
+  const now = Date.now();
+  const unhealthy = state.feeds.map(feed => {
+    const interval = (Number(feed.refreshMinutes) || Number(state.settings.globalRefreshMinutes) || 30) * 60000;
+    const stale = !!feed.lastSuccess && now - feed.lastSuccess > interval * 3;
+    const failed = !!feed.error;
+    const status = failed ? "Failing" : stale ? "Stale" : feed.lastSuccess ? "Healthy" : "No refresh history";
+    return { feed, stale, failed, status };
+  }).filter(x => x.failed || x.stale || !x.feed.lastSuccess);
+  if (!unhealthy.length) {
+    $("#feedHealthList").innerHTML = "<p>All subscriptions have a recent successful refresh.</p>";
+  } else {
+    $("#feedHealthList").innerHTML = unhealthy.map(({feed,stale,failed,status}) =>
+      '<section class="health-row"><strong>' + esc(feed.title || feed.url) + '</strong><p>' + status +
+      (feed.lastSuccess ? ' · Last success: ' + esc(new Date(feed.lastSuccess).toLocaleString()) : ' · No successful refresh recorded') +
+      (feed.lastAttempt ? ' · Last attempt: ' + esc(new Date(feed.lastAttempt).toLocaleString()) : '') +
+      (feed.consecutiveFailures ? ' · Failures: ' + Number(feed.consecutiveFailures) : '') +
+      '</p>' + (feed.error ? '<p class="muted">' + esc(feed.error) + '</p>' : '') +
+      '<button type="button" class="quiet" data-health-retry="' + esc(feed.id) + '">Retry feed</button></section>'
+    ).join("");
+  }
+  $("#feedHealthDialog").showModal();
+}
 function showReadingStats(days=30){
   const read=state.items.filter(x=>x.read);
   const recent=read.filter(x=>x.readAt&&(days===0||Date.now()-x.readAt<=days*86400000));
@@ -3934,6 +3957,7 @@ async function markAboveBelow(which) {
 function bind() {
   document.addEventListener("pointerdown", e => { pointerActivation = { type:e.pointerType, at:Date.now() }; }, true);
   document.addEventListener("click", e => coachShortcut(e), true);
+  document.addEventListener("click", async e => { const retry = e.target.closest("[data-health-retry]"); if (!retry) return; const feed = state.feeds.find(x => x.id === retry.dataset.healthRetry); if (!feed) return; retry.disabled = true; await refreshFeed(feed); saveFeeds(); render(); showFeedHealth(); });
   document.addEventListener("click", async e => {
     // The snooze menu closes on any click outside it or its button.
     // Remember whether it was open first: the snooze button toggles
@@ -4074,6 +4098,7 @@ function bind() {
       const x = selectedItem();
       if (!x) return;
       if (ra.dataset.reader === "save") { x.saved = !x.saved; await put(x); openItem(x.id); return; }
+      if (ra.dataset.reader === "queue") { x.queued = !x.queued; x.queueOrder = x.queued ? Date.now() : 0; await put(x); renderNav(); renderList(); renderReader(x); toast(x.queued ? "Added to reading queue." : "Removed from reading queue."); return; }
       if (ra.dataset.reader === "read") { x.read = !x.read; x.readAt = x.read ? Date.now() : null; await put(x); renderNav(); renderList(); renderReader(x); toast(x.read ? "Article marked read." : "Article marked unread."); return; }
       if (ra.dataset.reader === "listen") { if (tts?.itemId === x.id) stopTTS(); else startTTS(x); return; }
       if (ra.dataset.reader === "share") { shareArticle(x); return; }
@@ -4400,6 +4425,8 @@ function bind() {
   $("#backupFile").onchange = e => { if (e.target.files[0]) importCompleteBackup(e.target.files[0]); e.target.value = ""; };
   $("#exportAnnotationsJSON").onclick = () => exportAnnotations("json"); $("#exportAnnotationsMarkdown").onclick = () => exportAnnotations("markdown");
   $("#previewCleanup").onclick = previewRetentionCleanup; $("#openStats").onclick = showReadingStats;
+  $("#openFeedHealth").onclick = showFeedHealth;
+  $("#feedHealthClose").onclick = $("#feedHealthDone").onclick = () => $("#feedHealthDialog").close();
   $("#statsClose").onclick = $("#statsDone").onclick = () => $("#statsDialog").close();
   $("#statsRange").onchange = e => { $("#statsDialog").close(); showReadingStats(Number(e.target.value)); };
   $("#libraryMore").addEventListener("toggle", () => { try { localStorage.setItem("rss-reader.library-more-open", $("#libraryMore").open ? "1" : "0"); } catch {} });
