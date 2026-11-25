@@ -3545,31 +3545,45 @@ function previewOPML(file) {
       toast("Invalid OPML file.");
       return;
     }
-    const feeds = [...doc.querySelectorAll("outline[xmlUrl]")];
+    const entries = [];
+    const folderPaths = new Set();
+    const walk = (parent, path = []) => {
+      for (const outline of [...parent.children].filter(node => node.localName === "outline")) {
+        const title = outline.getAttribute("title") || outline.getAttribute("text") || outline.getAttribute("xmlUrl") || "Untitled";
+        const url = outline.getAttribute("xmlUrl");
+        if (url) entries.push({ outline, path, title, url });
+        else {
+          const nextPath = [...path, title];
+          folderPaths.add(nextPath.join(" / "));
+          walk(outline, nextPath);
+        }
+      }
+    };
+    walk(doc.querySelector("body") || doc.documentElement);
     const seen = new Set();
     const duplicates = [];
     const invalid = [];
-    for (const outline of feeds) {
-      const label = outline.getAttribute("title") || outline.getAttribute("text") || outline.getAttribute("xmlUrl");
+    for (const entry of entries) {
       try {
-        const url = normalizeFeedUrl(outline.getAttribute("xmlUrl"));
-        if (seen.has(url) || state.feeds.some(feed => sameFeedUrl(feed.url, url))) duplicates.push(label + " — " + url);
+        const url = normalizeFeedUrl(entry.url);
+        if (seen.has(url) || state.feeds.some(feed => sameFeedUrl(feed.url, url))) {
+          duplicates.push((entry.path.length ? entry.path.join(" / ") + " / " : "") + entry.title + " — " + url);
+        }
         seen.add(url);
-      } catch {
-        invalid.push(label + " — " + (outline.getAttribute("xmlUrl") || "missing URL"));
+      } catch (error) {
+        invalid.push(entry.title + " — " + entry.url + " (" + (error.message || "invalid URL") + ")");
       }
     }
-    const folders = [...new Set([...doc.querySelectorAll("outline:not([xmlUrl])")]
-      .map(outline => outline.getAttribute("text") || outline.getAttribute("title") || "")
-      .filter(Boolean))];
-    const folderText = folders.length ? "Folders:\n" + folders.join("\n") : "No named folders.";
+    const folders = [...folderPaths];
+    const folderText = folders.length ? "Folder hierarchy:\n" + folders.join("\n") : "No named folders.";
     const duplicateText = duplicates.length ? "Duplicates to skip:\n" + duplicates.slice(0, 12).join("\n") : "No duplicate feeds.";
     const invalidText = invalid.length ? "Invalid URLs to skip:\n" + invalid.slice(0, 12).join("\n") : "No invalid feed URLs.";
-    const feedText = "Feed entries:\n" + feeds.slice(0, 12).map(outline =>
-      outline.getAttribute("title") || outline.getAttribute("text") || outline.getAttribute("xmlUrl")
+    const feedText = "Feed entries:\n" + entries.slice(0, 12).map(entry =>
+      (entry.path.length ? entry.path.join(" / ") + " / " : "") + entry.title
     ).join("\n");
     $("#opmlPreviewSummary").textContent =
-      feeds.length + (feeds.length === 1 ? " feed entry" : " feed entries") + " and " + folders.length + (folders.length === 1 ? " folder" : " folders") + " found. " +
+      entries.length + (entries.length === 1 ? " feed entry" : " feed entries") + " and " +
+      folders.length + (folders.length === 1 ? " folder" : " folders") + " found. " +
       duplicates.length + " duplicates and " + invalid.length + " invalid URLs will be skipped.";
     $("#opmlPreviewDetails").textContent = [folderText, duplicateText, invalidText, feedText].join("\n\n");
     pendingOPMLFile = file;
