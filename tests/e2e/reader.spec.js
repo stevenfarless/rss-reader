@@ -519,6 +519,7 @@ test("Vim preset navigates panes and preserves the focused pane after reload", a
   await page.keyboard.press("g");
   const results = await page.evaluate(() => window.__vimHandledKeys);
   expect(results).toHaveLength(5);
+  console.log("Vim key handling:", JSON.stringify(results));
   expect(results.every(result => result.prevented)).toBe(true);
 
   // Escape leaves an input in the current pane. A second Escape in
