@@ -37,13 +37,13 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.9.11";
+const APP_VERSION = "1.9.12";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null, savedSearch: null,
   folders: [], tags: [], savedSearches: [], rules: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 250, listWidth: 400, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader", shortcutCoaching: false, retentionDays: 0, retentionCount: 0, globalRefreshMinutes: 30 }
+  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 250, listWidth: 400, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader", shortcutCoaching: false, shortcutBar: true, retentionDays: 0, retentionCount: 0, globalRefreshMinutes: 30 }
 };
 let db, timer, pendingSeq = null, pendingSeqTimer = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null, automaticRefreshTimer = null;
 /* Text-to-speech state (#105): the article being read, its sentence
@@ -500,6 +500,7 @@ function validateSettings(d) {
   if (typeof d.listWidth === "number" && d.listWidth >= 280 && d.listWidth <= 640) next.listWidth = d.listWidth;
   if (["sidebar", "list", "article"].includes(d.vimPane)) next.vimPane = d.vimPane;
   if (typeof d.shortcutCoaching === "boolean") next.shortcutCoaching = d.shortcutCoaching;
+  if (typeof d.shortcutBar === "boolean") next.shortcutBar = d.shortcutBar;
   if ([0,30,90,180,365].includes(Number(d.retentionDays))) next.retentionDays = Number(d.retentionDays);
   if ([0,250,500,1000,2500,5000].includes(Number(d.retentionCount))) next.retentionCount = Number(d.retentionCount);
   if ([15,30,60,180,360,720,1440].includes(Number(d.globalRefreshMinutes))) next.globalRefreshMinutes = Number(d.globalRefreshMinutes);
@@ -720,6 +721,7 @@ function readSettingsFromDialog() {
     cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
     shortcutCoaching: $("#shortcutCoachingToggle").checked,
+    shortcutBar: $("#shortcutBarToggle").checked,
     retentionDays: Number($("#retentionDaysSelect").value),
     retentionCount: Number($("#retentionCountSelect").value),
     globalRefreshMinutes: Number($("#globalRefreshMinutesSelect").value),
@@ -814,6 +816,7 @@ function applySettings() {
   applyVimPaneFocus();
   applySidebarCollapsed();
   applyPaneWidths();
+  renderShortcutBar();
 }
 /* Sidebar collapse: the sidebar becomes a 52px rail holding only the
    toggle (top left), so the list and reader get the full width. The
@@ -929,6 +932,7 @@ function bindSplitters() {
   window.addEventListener("resize", () => {
     positionSplitters();
     if (!isShortcutCoachingAvailable()) $("#shortcutCoach")?.classList.remove("show");
+    renderShortcutBar();
   });
 }
 
@@ -3882,6 +3886,7 @@ function showSettings() {
   $("#backgroundSyncToggle").checked = !!state.settings.backgroundSync;
   $("#notifyNewToggle").checked = !!state.settings.notifyNew;
   $("#shortcutCoachingToggle").checked = !!state.settings.shortcutCoaching;
+  $("#shortcutBarToggle").checked = state.settings.shortcutBar !== false;
   $("#retentionDaysSelect").value = String(state.settings.retentionDays || 0);
   $("#retentionCountSelect").value = String(state.settings.retentionCount || 0);
   $("#globalRefreshMinutesSelect").value = String(state.settings.globalRefreshMinutes || 30);
@@ -3950,15 +3955,59 @@ function renderHelpRows() {
     ["g g / G", "Top / bottom of the focused pane"],
     ["Enter", "Open selected article; expand or collapse selected folder"],
     ["Space / Shift+Space", "Page down / up in the focused pane"],
+    ["Esc", "Exit an input; press again to focus the sidebar"],
+    ["D", "Collapse or expand the sidebar while the sidebar is focused"],
     ["q", "Close article and return focus to the article list"]
   ].map(([keys, action]) => `<tr><td>${esc(keys)}</td><td>${esc(action)}</td></tr>`).join("") : "";
   if (tbody) tbody.innerHTML = body + vimRows;
   const note = $("#helpPresetNote");
-  if (note) note.textContent = `Preset: ${preset.name}. Change it in Settings under Keyboard shortcuts. ${shortcutPreset() === "vim" ? "Vim pane navigation is enabled." : "Vim pane navigation is available as a shortcut mode."} Quick access (.) is not built yet.`;
+  if (note) note.textContent = `Preset: ${preset.name}. Change it in Settings under Keyboard shortcuts. ${shortcutPreset() === "vim" ? "Use Esc to leave an input and return to navigation; press Esc again to focus the sidebar. D toggles the sidebar while it is focused." : "The shortcut strip at the bottom shows commonly used keys. Turn it off in Settings if you prefer."}`;
 }
 
 
 function shortcutPreset() { return state.settings.shortcutPreset || "inoreader"; }
+/* Persistent shortcut reference strip. Keep the list short enough to scan
+   at a glance; the help dialog remains the complete reference. */
+function renderShortcutBar() {
+  const bar = $("#shortcutBar");
+  if (!bar) return;
+  const visible = state.settings.shortcutBar !== false &&
+    window.matchMedia("(min-width: 821px)").matches;
+  bar.hidden = !visible;
+  document.body.classList.toggle("shortcut-bar-visible", visible);
+  if (!visible) return;
+
+  const items = shortcutPreset() === "vim"
+    ? [
+        ["Esc", "Exit input / focus sidebar"],
+        ["h / l", "Switch panes"],
+        ["j / k", "Move"],
+        ["D", "Toggle sidebar"],
+        ["Enter", "Open"],
+        ["q", "Close article"],
+        ["?", "All shortcuts"]
+      ]
+    : (() => {
+        const preset = PRESETS[shortcutPreset()] || PRESETS.inoreader;
+        const shortcuts = [
+          ["search", "Search"],
+          ["nextOpen", "Next article"],
+          ["prevOpen", "Previous article"],
+          ["openSelected", "Open article"],
+          ["toggleRead", "Mark read"],
+          ["save", "Save article"],
+          ["help", "All shortcuts"]
+        ];
+        return shortcuts.flatMap(([action, label]) => {
+          const key = Object.keys(preset.keys).find(desc => preset.keys[desc] === action);
+          return key ? [[key.split(" ").map(displayDesc).join(" then "), label]] : [];
+        });
+      })();
+
+  bar.innerHTML = items.map(([key, label]) =>
+    `<span class="shortcut-bar-item"><kbd>${esc(key)}</kbd><span>${esc(label)}</span></span>`
+  ).join("");
+}
 /* ---------- shortcut actions (#185) ----------
    The preset maps above name these actions; each one is a small
    function over the existing helpers. Actions that need an article
@@ -4858,6 +4907,11 @@ function bind() {
       vimPendingGTimer = setTimeout(() => { vimPendingG = false; }, 1000);
       e.preventDefault(); return true;
     }
+    if (key === "D" && pane === "sidebar" && !e.ctrlKey && !e.altKey) {
+      toggleSidebar();
+      setVimPaneFocus("sidebar");
+      e.preventDefault(); return true;
+    }
     if ((key === "h" || key === "l") && !pendingSeq) {
       const panes = ["sidebar", "list", "article"];
       setVimPaneFocus(panes[Math.max(0, Math.min(2, panes.indexOf(pane) + (key === "h" ? -1 : 1)))]);
@@ -4902,8 +4956,26 @@ function bind() {
     });
   }
   document.onkeydown = e => {
-    const tag = document.activeElement?.tagName;
-    if (["INPUT", "SELECT", "TEXTAREA"].includes(tag) || $("dialog[open]")) return;
+    const active = document.activeElement;
+    const tag = active?.tagName;
+    const editable = ["INPUT", "SELECT", "TEXTAREA"].includes(tag) || active?.isContentEditable;
+    const dialogOpen = $("dialog[open]");
+    // Escape leaves an editing field first. A second Escape in Normal
+    // mode moves focus to the sidebar, where global navigation lives.
+    if (shortcutPreset() === "vim" && e.key === "Escape" && !dialogOpen) {
+      if (editable) {
+        e.preventDefault();
+        active.blur();
+        setVimPaneFocus(state.settings.vimPane || "list");
+        return;
+      }
+      $("#sidebar").classList.remove("open");
+      $("#scrim").classList.remove("show");
+      setVimPaneFocus("sidebar");
+      e.preventDefault();
+      return;
+    }
+    if (editable || dialogOpen) return;
     if (handleVimNavigation(e)) return;
     if (e.key === "Escape") {
       $("#sidebar").classList.remove("open");
