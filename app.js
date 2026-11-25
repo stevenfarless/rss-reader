@@ -3835,7 +3835,7 @@ function coachShortcut(e) {
   if (!shortcutKey) return;
 
   const now = Date.now();
-  if (now - (coachLastShown.get(action) || 0) < 60000 || now - coachLastAnyShown < 2500) return;
+  if (!canShowShortcutCoach(action, coachLastShown, coachLastAnyShown, now)) return;
 
   coachLastShown.set(action, now);
   coachLastAnyShown = now;
