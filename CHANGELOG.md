@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.12] - 2026-11-25
+
+### Added
+- Add Vim-style Escape handling: leave an editing field first, then use Escape in Normal mode to focus the sidebar.
+- Add uppercase D to collapse or expand the sidebar while the sidebar pane is focused.
+- Add a persistent, preset-aware keyboard shortcut strip with a Settings toggle.
+- Add browser and unit regression coverage for Vim sidebar controls and shortcut-strip preferences.
+
+
 ## [1.9.11] - 2026-11-25
 
 ### Fixed
