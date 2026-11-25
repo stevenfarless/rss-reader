@@ -323,13 +323,6 @@ function isShortcutCoachPointerEvent(event, activation, now = Date.now(), maxAge
   );
 }
 
-function canShowShortcutCoach(action, lastShown, lastAnyShown, now = Date.now(), actionCooldown = 60000, globalCooldown = 2500) {
-  if (typeof action !== "string" || !action) return false;
-  const previous = lastShown instanceof Map && lastShown.has(action) ? lastShown.get(action) : null;
-  const actionIsDue = previous === null || now - previous >= actionCooldown;
-  return actionIsDue && now - (Number(lastAnyShown) || 0) >= globalCooldown;
-}
-
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder, nextFeedSort, keyDesc, PRESETS, ACTION_LABELS, findShortcutForAction, isShortcutCoachPointerEvent, canShowShortcutCoach };
+  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder, nextFeedSort, keyDesc, PRESETS, ACTION_LABELS, findShortcutForAction, isShortcutCoachPointerEvent };
 }
