@@ -4986,8 +4986,8 @@ async function init() {
     toast("Could not open browser storage. Your articles are unavailable.", { label: "Retry", fn: () => location.reload() });
   } else {
     if (state.feedsRestored) toast("Your subscriptions were restored from a backup copy.");
-    // Refresh on launch when the newest cached article is stale, so
-    // the list is never silently days old.
+    // Evaluate each feed against its own interval and retry backoff on
+    // launch; a minute-level scheduler handles due feeds while the app is visible.
     if (state.feeds.length) {
       refresh(true);
       if (!automaticRefreshTimer) automaticRefreshTimer = setInterval(() => {
