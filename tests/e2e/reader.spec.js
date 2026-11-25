@@ -15,28 +15,25 @@ test("reader loads, changes appearance, and collapses its sidebar", async ({ pag
   await expect(page.locator("[data-rail-search]")).toBeVisible();
 });
 
-test("collapsing the sidebar expands the article list into the freed space", async ({ page }) => {
+test("collapsing the sidebar shifts the article list and reader left without widening the list", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.addInitScript(() => {
-    localStorage.setItem("rss-reader.settings.v1", JSON.stringify({
-      sidebarWidth: 250,
-      listWidth: 640
-    }));
+    localStorage.setItem("rss-reader.settings.v1", JSON.stringify({ sidebarWidth: 250, listWidth: 400 }));
   });
   await page.goto("/");
-
   const list = page.locator(".list-pane");
-  const before = await list.evaluate(el => el.getBoundingClientRect().width);
+  const reader = page.locator("#reader");
+  const beforeList = await list.boundingBox();
+  const beforeReader = await reader.boundingBox();
   await page.locator("#sideToggle").click();
   await expect(page.locator("body")).toHaveClass(/sidebar-collapsed/);
-
-  const after = await list.evaluate(el => el.getBoundingClientRect().width);
-  expect(after).toBeGreaterThan(before + 100);
-
-  const reader = await page.locator("#reader").evaluate(el => el.getBoundingClientRect());
-  expect(reader.width).toBeGreaterThanOrEqual(320);
-  expect(await page.locator(".layout").evaluate(el => el.scrollWidth))
-    .toBeLessThanOrEqual(await page.locator(".layout").evaluate(el => el.clientWidth));
+  const afterList = await list.boundingBox();
+  const afterReader = await reader.boundingBox();
+  expect(afterList.x).toBeLessThan(beforeList.x - 150);
+  expect(afterList.width).toBeCloseTo(beforeList.width, 0);
+  expect(afterReader.x).toBeLessThan(beforeReader.x - 150);
+  expect(afterReader.width).toBeGreaterThan(beforeReader.width + 100);
+  expect(await page.locator(".layout").evaluate(el => el.scrollWidth)).toBeLessThanOrEqual(await page.locator(".layout").evaluate(el => el.clientWidth));
 });
 
 test("the article list can be resized narrower after the sidebar collapses", async ({ page }) => {
@@ -158,6 +155,27 @@ test("reading queue persists article ordering in the local library", async ({ pa
   await expect(page.locator("#articleList")).toContainText("Fixture Article");
   await page.locator("#removeQueue").click();
   await expect(page.locator("#queueCount")).toHaveText("0");
+});
+
+test("OPML preview selects every new feed by default and supports individual selection", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#settings").click();
+  await page.locator("#opmlFile").setInputFiles({
+    name: "selection.opml",
+    mimeType: "text/xml",
+    buffer: Buffer.from('<?xml version="1.0"?><opml version="2.0"><body><outline text="Tech"><outline text="One" type="rss" xmlUrl="https://one.example/feed.xml"/><outline text="Two" type="rss" xmlUrl="https://two.example/feed.xml"/></outline></body></opml>')
+  });
+  await expect(page.locator("#opmlPreviewDialog")).toBeVisible();
+  const feeds = page.locator("#opmlFeedSelection input[data-opml-feed]");
+  await expect(feeds).toHaveCount(2);
+  await expect(feeds.nth(0)).toBeChecked();
+  await expect(feeds.nth(1)).toBeChecked();
+  await page.locator("#opmlSelectNone").click();
+  await expect(page.locator("#opmlPreviewConfirm")).toBeDisabled();
+  await feeds.nth(1).check();
+  await expect(page.locator("#opmlPreviewConfirm")).toBeEnabled();
+  await expect(page.locator("#opmlPreviewConfirm")).toHaveText("Import 1 feed");
+  await page.locator("#opmlPreviewCancel").click();
 });
 
 test("OPML import displays a preview before changing subscriptions", async ({ page }) => {
