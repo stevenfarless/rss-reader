@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.15] - 2026-11-25
+
+### Fixed
+- Fall back to a non-modal OPML preview if the browser rejects modal promotion after closing other dialogs.
+- Focus the article list explicitly in the Vim browser test before checking pane navigation.
+
+
 ## [1.9.14] - 2026-11-25
 
 ### Fixed
