@@ -67,9 +67,14 @@ test("reading queue persists article ordering in the local library", async ({ pa
   await page.reload();
   await expect(page.locator("#articleList")).toContainText("Fixture Article");
   await page.locator('[data-action="queue"]').click();
+  await expect(page.locator("#queueCount")).toHaveText("1");
+  await page.locator('[data-item="fixture-article"]').click();
+  await page.locator('#reader [data-reader="queue"]').click();
+  await expect(page.locator("#queueCount")).toHaveText("0");
+  await page.locator('#reader [data-reader="queue"]').click();
+  await expect(page.locator("#queueCount")).toHaveText("1");
   await page.locator('#sidebar > .nav[data-view="queue"]').click();
   await expect(page.locator("#articleList")).toContainText("Fixture Article");
-  await expect(page.locator("#queueCount")).toHaveText("1");
 });
 
 test("OPML import displays a preview before changing subscriptions", async ({ page }) => {
@@ -132,4 +137,30 @@ test("adding a feed through the address form creates a subscription", async ({ p
   await page.locator("#saveFeed").click();
   await expect(page.locator("#feeds")).toContainText("Address Fixture", { timeout: 15000 });
   await expect(page.locator("#feedDialog")).not.toBeVisible();
+});
+
+test("feed health report identifies stale subscriptions", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(() => {
+    localStorage.setItem("rss-reader.feeds.v1", JSON.stringify([{
+      id: "stale-feed",
+      url: "https://example.test/stale.xml",
+      title: "Stale Fixture",
+      site: "https://example.test/",
+      added: new Date().toISOString(),
+      lastAttempt: Date.now(),
+      lastSuccess: Date.now() - 3 * 60 * 60 * 1000,
+      refreshMinutes: 15,
+      error: "",
+      via: "direct",
+      wpRoot: "",
+      group: ""
+    }]));
+  });
+  await page.reload();
+  await page.locator("#settings").click();
+  await page.locator("#openFeedHealth").click();
+  await expect(page.locator("#feedHealthDialog")).toContainText("Stale Fixture");
+  await expect(page.locator("#feedHealthDialog")).toContainText("Stale");
+  await page.locator("#feedHealthDone").click();
 });
