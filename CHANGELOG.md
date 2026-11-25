@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.9.17] - 2026-11-25
+
+### Fixed
+- Correctly enumerate all open dialogs before opening the OPML preview, avoiding a single-element iteration error.
+
+
 ## [1.9.16] - 2026-11-25
 
 ### Fixed
