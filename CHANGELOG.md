@@ -9,8 +9,6 @@
 
 ## [1.9.0] - 2026-11-24
 
-## [1.9.0] - 2026-11-24
-
 ### Added
 - Full local profile backup and restore with validation, merge, replacement, and rollback.
 - Automated Playwright end-to-end browser coverage in GitHub Actions.
