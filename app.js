@@ -3455,8 +3455,44 @@ function showReadingStats(days=30){
   $("#statsBody").innerHTML="<p>"+state.items.length+" cached articles</p><p>"+read.length+" currently marked read</p><p>"+recent.length+" articles marked read during "+period+"</p><p>"+state.items.filter(x=>x.saved).length+" saved · "+state.items.filter(x=>x.queued).length+" queued · "+state.highlights.length+" highlights</p><p class=\"muted\">Historical activity is available only for items with a recorded read timestamp.</p>"+(rows.length?rows.map(x=>"<p>"+esc(x[0])+": "+x[1]+"</p>").join(""):"<p>No timestamped reading activity for this period.</p>");
   $("#statsDialog").showModal();
 }
-function previewOPML(file){file.text().then(text=>{const d=new DOMParser().parseFromString(text,"text/xml");if(d.querySelector("parsererror")||d.documentElement.localName!=="opml"){toast("Invalid OPML file.");return;}const feeds=[...d.querySelectorAll("outline[xmlUrl]")],seen=new Set();let duplicates=0,invalid=0;for(const o of feeds){try{const u=normalizeFeedUrl(o.getAttribute("xmlUrl"));if(seen.has(u)||state.feeds.some(f=>sameFeedUrl(f.url,u)))duplicates++;seen.add(u);}catch{invalid++;}}const folders=new Set([...d.querySelectorAll("outline:not([xmlUrl])")].map(o=>o.getAttribute("text")||o.getAttribute("title")||"").filter(Boolean));$("#opmlPreviewSummary").textContent=feeds.length+" feeds and "+folders.size+" folders found. "+duplicates+" duplicates and "+invalid+" invalid URLs will be skipped.";$("#opmlPreviewDetails").textContent=feeds.slice(0,10).map(o=>o.getAttribute("title")||o.getAttribute("text")||o.getAttribute("xmlUrl")).join("\n")+(feeds.length>10?"\n…":"");pendingOPMLFile=file;$("#opmlPreviewDialog").showModal();}).catch(e=>toast("Could not read OPML file: "+e.message));}
-let coachLastShown = new Map(), pointerActivation = null;
+function previewOPML(file) {
+  file.text().then(text => {
+    const doc = new DOMParser().parseFromString(text, "text/xml");
+    if (doc.querySelector("parsererror") || doc.documentElement.localName !== "opml") {
+      toast("Invalid OPML file.");
+      return;
+    }
+    const feeds = [...doc.querySelectorAll("outline[xmlUrl]")];
+    const seen = new Set();
+    const duplicates = [];
+    const invalid = [];
+    for (const outline of feeds) {
+      const label = outline.getAttribute("title") || outline.getAttribute("text") || outline.getAttribute("xmlUrl");
+      try {
+        const url = normalizeFeedUrl(outline.getAttribute("xmlUrl"));
+        if (seen.has(url) || state.feeds.some(feed => sameFeedUrl(feed.url, url))) duplicates.push(label + " — " + url);
+        seen.add(url);
+      } catch {
+        invalid.push(label + " — " + (outline.getAttribute("xmlUrl") || "missing URL"));
+      }
+    }
+    const folders = [...new Set([...doc.querySelectorAll("outline:not([xmlUrl])")]
+      .map(outline => outline.getAttribute("text") || outline.getAttribute("title") || "")
+      .filter(Boolean))];
+    const folderText = folders.length ? "Folders:\n" + folders.join("\n") : "No named folders.";
+    const duplicateText = duplicates.length ? "Duplicates to skip:\n" + duplicates.slice(0, 12).join("\n") : "No duplicate feeds.";
+    const invalidText = invalid.length ? "Invalid URLs to skip:\n" + invalid.slice(0, 12).join("\n") : "No invalid feed URLs.";
+    const feedText = "Feed entries:\n" + feeds.slice(0, 12).map(outline =>
+      outline.getAttribute("title") || outline.getAttribute("text") || outline.getAttribute("xmlUrl")
+    ).join("\n");
+    $("#opmlPreviewSummary").textContent =
+      feeds.length + " feed entries and " + folders.length + " folders found. " +
+      duplicates.length + " duplicates and " + invalid.length + " invalid URLs will be skipped.";
+    $("#opmlPreviewDetails").textContent = [folderText, duplicateText, invalidText, feedText].join("\n\n");
+    pendingOPMLFile = file;
+    $("#opmlPreviewDialog").showModal();
+  }).catch(error => toast("Could not read OPML file: " + error.message));
+}
 function coachShortcut(e){
   if(!state.settings.shortcutCoaching||e.detail===0||!pointerActivation||Date.now()-pointerActivation.at>1200||!["mouse","pen"].includes(pointerActivation.type))return;
   const t=e.target.closest?.("[data-action],[data-reader],[data-view],#refresh,#settings,#add");if(!t)return;let action=null,label="";
