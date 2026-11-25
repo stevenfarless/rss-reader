@@ -3758,7 +3758,7 @@ function coachShortcut(e) {
   if (!state.settings.shortcutCoaching ||
       !isShortcutCoachPointerEvent(e, pointerActivation)) return;
 
-  const target = e.target?.closest?.("button,a,[role='button'],summary,input[type='search'],input[type='button'],input[type='submit'],input[type='reset'],[data-action],[data-reader],[data-view],[data-rail-next-unread],[data-rail-search],[data-rail-refresh]");
+  const target = e.target?.closest?.("button,a,[role='button'],summary,input[type='search'],input[type='button'],input[type='submit'],input[type='reset'],[data-action],[data-reader],[data-view],[data-rail-next-unread],[data-rail-search],[data-rail-refresh],[data-folder-toggle]");
   if (!target || target.closest("#shortcutCoach")) return;
 
   const readerAction = target.dataset.reader;
@@ -3767,7 +3767,8 @@ function coachShortcut(e) {
   let action = target.dataset.shortcutAction || readerAction || appAction || view ||
     (target.hasAttribute("data-rail-next-unread") ? "nextUnread" :
       target.hasAttribute("data-rail-search") ? "search" :
-        target.hasAttribute("data-rail-refresh") ? "refresh" : target.id) || "";
+        target.hasAttribute("data-rail-refresh") ? "refresh" :
+          target.hasAttribute("data-folder-toggle") ? "folderToggle" : target.id) || "";
   let label = target.getAttribute("aria-label") ||
     target.getAttribute("title") ||
     target.textContent?.replace(/\s+/g, " ").trim() ||
