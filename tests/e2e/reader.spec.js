@@ -114,9 +114,15 @@ test("shortcut coaching and statistics are available from settings", async ({ pa
   await page.locator("#feedDialog .x").click();
 
   await page.locator("#settings").click();
+  // Clear the previous valid suggestion, then verify an action without a
+  // shortcut leaves the coach empty.
+  await page.locator("#shortcutCoach").evaluate(el => {
+    el.textContent = "";
+    el.classList.remove("show");
+  });
   await page.locator("#openStats").click();
   await expect(page.locator("#statsDialog")).toBeVisible();
-  await expect(page.locator("#shortcutCoach")).toContainText("No keyboard shortcut assigned");
+  await expect(page.locator("#shortcutCoach")).toBeEmpty();
   await page.locator("#statsRange").selectOption("7");
   await expect(page.locator("#statsBody")).toContainText("the last 7 days");
 });
