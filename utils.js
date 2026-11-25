@@ -325,8 +325,9 @@ function isShortcutCoachPointerEvent(event, activation, now = Date.now(), maxAge
 
 function canShowShortcutCoach(action, lastShown, lastAnyShown, now = Date.now(), actionCooldown = 60000, globalCooldown = 2500) {
   if (typeof action !== "string" || !action) return false;
-  const previous = lastShown instanceof Map ? lastShown.get(action) || 0 : 0;
-  return now - previous >= actionCooldown && now - (Number(lastAnyShown) || 0) >= globalCooldown;
+  const previous = lastShown instanceof Map && lastShown.has(action) ? lastShown.get(action) : null;
+  const actionIsDue = previous === null || now - previous >= actionCooldown;
+  return actionIsDue && now - (Number(lastAnyShown) || 0) >= globalCooldown;
 }
 
 if (typeof module !== "undefined" && module.exports) {
