@@ -37,7 +37,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.9.15";
+const APP_VERSION = "1.9.16";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -3488,7 +3488,7 @@ async function importSettings(file) {
     toast("Settings imported.");
   } catch (e) { toast(e.message); }
 }
-let pendingOPMLFile = null;
+let pendingOPMLFile = null, pendingOPMLFeedUrls = [];
 let pointerActivation = null, coachTimer = null;
 async function exportCompleteBackup(){try{const d={format:"rss-reader-backup",version:1,exportedAt:new Date().toISOString(),profile:{feeds:state.feeds,folders:state.folders,tags:state.tags,savedSearches:state.savedSearches,rules:state.rules,settings:state.settings,notes:articleNotes,collapsedFolders:[...collapsedFolders],lastRefresh:state.lastRefresh||0},items:await dbAll(),highlights:await hlAll()};download(JSON.stringify(d,null,2),"rss-reader-backup.json","application/json");toast("Complete profile backup exported.");}catch(e){toast("Backup export failed: "+e.message);}}
 function validateCompleteBackup(d){if(!d||d.format!=="rss-reader-backup"||d.version!==1||!d.profile||!Array.isArray(d.profile.feeds)||!Array.isArray(d.items)||!Array.isArray(d.highlights)||!d.profile.settings||typeof d.profile.settings!=="object")throw Error("Unsupported or incomplete backup file.");if(!d.profile.feeds.every(x=>x&&typeof x.id==="string"&&typeof x.url==="string")||!d.items.every(x=>x&&typeof x.id==="string"&&typeof x.feedId==="string")||!d.highlights.every(x=>x&&typeof x.id==="string"&&typeof x.itemId==="string"))throw Error("Backup contains invalid records.");return d;}
