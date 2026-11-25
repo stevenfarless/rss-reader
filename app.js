@@ -37,7 +37,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.9.9";
+const APP_VERSION = "1.9.10";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -498,6 +498,7 @@ function validateSettings(d) {
   if (typeof d.sidebarCollapsed === "boolean") next.sidebarCollapsed = d.sidebarCollapsed;
   if (typeof d.sidebarWidth === "number" && d.sidebarWidth >= 180 && d.sidebarWidth <= 420) next.sidebarWidth = d.sidebarWidth;
   if (typeof d.listWidth === "number" && d.listWidth >= 280 && d.listWidth <= 640) next.listWidth = d.listWidth;
+  if (["sidebar", "list", "article"].includes(d.vimPane)) next.vimPane = d.vimPane;
   if (typeof d.shortcutCoaching === "boolean") next.shortcutCoaching = d.shortcutCoaching;
   if ([0,30,90,180,365].includes(Number(d.retentionDays))) next.retentionDays = Number(d.retentionDays);
   if ([0,250,500,1000,2500,5000].includes(Number(d.retentionCount))) next.retentionCount = Number(d.retentionCount);
