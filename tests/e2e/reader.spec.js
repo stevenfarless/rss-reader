@@ -279,3 +279,89 @@ test("service worker installs and serves the shell after network loss", async ({
   await context.setOffline(false);
   await context.close();
 });
+
+test("backup restore can replace the existing profile", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(() => localStorage.setItem("rss-reader.feeds.v1", JSON.stringify([{
+    id: "existing-feed",
+    url: "https://existing.test/feed.xml",
+    title: "Existing Feed",
+    site: "https://existing.test/",
+    added: new Date().toISOString(),
+    lastAttempt: Date.now(),
+    lastSuccess: Date.now(),
+    error: "",
+    via: "direct",
+    wpRoot: "",
+    group: ""
+  }])));
+  await page.reload();
+  await page.locator("#settings").click();
+  await page.locator("#backupFile").setInputFiles({
+    name: "replace-backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({
+      format: "rss-reader-backup",
+      version: 1,
+      profile: { feeds: [], settings: {} },
+      items: [],
+      highlights: []
+    }))
+  });
+  page.once("dialog", dialog => dialog.accept());
+  await expect(page.locator("#toast")).toContainText("Backup restored");
+  await expect(page.locator("#feeds")).not.toContainText("Existing Feed");
+});
+
+test("backup restore can merge subscriptions without replacing the current profile", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(() => localStorage.setItem("rss-reader.feeds.v1", JSON.stringify([{
+    id: "existing-feed",
+    url: "https://existing.test/feed.xml",
+    title: "Existing Feed",
+    site: "https://existing.test/",
+    added: new Date().toISOString(),
+    lastAttempt: Date.now(),
+    lastSuccess: Date.now(),
+    error: "",
+    via: "direct",
+    wpRoot: "",
+    group: ""
+  }])));
+  await page.reload();
+  await page.locator("#settings").click();
+  await page.locator("#backupFile").setInputFiles({
+    name: "merge-backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({
+      format: "rss-reader-backup",
+      version: 1,
+      profile: {
+        feeds: [{
+          id: "backup-feed",
+          url: "https://backup.test/feed.xml",
+          title: "Backup Feed",
+          site: "https://backup.test/",
+          added: new Date().toISOString(),
+          lastAttempt: Date.now(),
+          lastSuccess: Date.now(),
+          error: "",
+          via: "direct",
+          wpRoot: "",
+          group: ""
+        }],
+        settings: {}
+      },
+      items: [],
+      highlights: []
+    }))
+  });
+  let prompt = 0;
+  page.on("dialog", dialog => {
+    if (prompt++ === 0) dialog.dismiss();
+    else dialog.accept();
+  });
+  await expect(page.locator("#toast")).toContainText("Backup restored");
+  await expect(page.locator("#feeds")).toContainText("Existing Feed");
+  await expect(page.locator("#feeds")).toContainText("Backup Feed");
+});
