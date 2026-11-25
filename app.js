@@ -3889,11 +3889,11 @@ async function markAboveBelow(which) {
   if (i === -1) { toast("Select an article first."); return; }
   const targets = (which === "above" ? a.slice(0, i) : a.slice(i + 1)).filter(x => !x.read);
   if (!targets.length) { toast(which === "above" ? "Nothing above this article is unread." : "Nothing below this article is unread."); return; }
-  for (const x of targets) x.read = true;
+  for (const x of targets) { x.read = true; x.readAt = Date.now(); }
   await putMany(targets);
   render();
   toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} ${which} read.`, { label: "Undo", fn: async () => {
-    for (const x of targets) x.read = false;
+    for (const x of targets) { x.read = false; x.readAt = null; }
     await putMany(targets);
     render();
   } });
