@@ -3466,7 +3466,7 @@ async function importSettings(file) {
   } catch (e) { toast(e.message); }
 }
 let pendingOPMLFile = null;
-let coachLastShown = new Map(), pointerActivation = null;
+let coachLastShown = new Map(), pointerActivation = null, coachLastAnyShown = 0, coachTimer = null;
 async function exportCompleteBackup(){try{const d={format:"rss-reader-backup",version:1,exportedAt:new Date().toISOString(),profile:{feeds:state.feeds,folders:state.folders,tags:state.tags,savedSearches:state.savedSearches,rules:state.rules,settings:state.settings,notes:articleNotes,collapsedFolders:[...collapsedFolders],lastRefresh:state.lastRefresh||0},items:await dbAll(),highlights:await hlAll()};download(JSON.stringify(d,null,2),"rss-reader-backup.json","application/json");toast("Complete profile backup exported.");}catch(e){toast("Backup export failed: "+e.message);}}
 function validateCompleteBackup(d){if(!d||d.format!=="rss-reader-backup"||d.version!==1||!d.profile||!Array.isArray(d.profile.feeds)||!Array.isArray(d.items)||!Array.isArray(d.highlights)||!d.profile.settings||typeof d.profile.settings!=="object")throw Error("Unsupported or incomplete backup file.");if(!d.profile.feeds.every(x=>x&&typeof x.id==="string"&&typeof x.url==="string")||!d.items.every(x=>x&&typeof x.id==="string"&&typeof x.feedId==="string")||!d.highlights.every(x=>x&&typeof x.id==="string"&&typeof x.itemId==="string"))throw Error("Backup contains invalid records.");return d;}
 async function importCompleteBackup(file) {
@@ -3744,33 +3744,102 @@ function previewOPML(file) {
 }
 function showShortcutCoach(action, label, shortcut) {
   let suppressed = [];
-  try { suppressed = JSON.parse(localStorage.getItem("rss-reader.shortcut-coach-suppressed.v1") || "[]"); } catch {}
+  try {
+    const stored = JSON.parse(localStorage.getItem("rss-reader.shortcut-coach-suppressed.v1") || "[]");
+    if (Array.isArray(stored)) suppressed = stored.filter(value => typeof value === "string");
+  } catch {}
   if (suppressed.includes(action)) return;
+
   const el = $("#toast");
+  if (!el) return;
   el.replaceChildren(document.createTextNode(label + " · Shortcut: " + shortcut));
+
   const dismiss = document.createElement("button");
-  dismiss.type = "button"; dismiss.textContent = "Dismiss";
-  dismiss.onclick = () => el.classList.remove("show");
+  dismiss.type = "button";
+  dismiss.textContent = "Dismiss";
+  dismiss.onclick = () => {
+    clearTimeout(coachTimer);
+    el.classList.remove("show");
+  };
+
   const suppress = document.createElement("button");
-  suppress.type = "button"; suppress.textContent = "Don’t show again";
+  suppress.type = "button";
+  suppress.textContent = "Don’t show again";
   suppress.onclick = () => {
     const next = [...new Set([...suppressed, action])];
     try { localStorage.setItem("rss-reader.shortcut-coach-suppressed.v1", JSON.stringify(next)); } catch {}
+    clearTimeout(coachTimer);
     el.classList.remove("show");
   };
+
   el.append(dismiss, suppress);
   el.classList.add("show");
-  clearTimeout(timer);
-  timer = setTimeout(() => el.classList.remove("show"), 7000);
+  clearTimeout(coachTimer);
+  coachTimer = setTimeout(() => el.classList.remove("show"), 7000);
 }
-function coachShortcut(e){
-  if(!state.settings.shortcutCoaching||e.detail===0||!pointerActivation||Date.now()-pointerActivation.at>1200||!["mouse","pen"].includes(pointerActivation.type))return;
-  const t=e.target.closest?.("[data-action],[data-reader],[data-view],#refresh,#settings,#add,#search");if(!t)return;let action=null,label="";
-  if(t.dataset.action==="save"||t.dataset.reader==="save"){action="save";label="Save article";}else if(t.dataset.action==="read"||t.dataset.reader==="read"){action="toggleRead";label="Toggle read state";}else if(t.dataset.view==="all"){action="allView";label="All articles";}else if(t.dataset.view==="unread"){action="unreadView";label="Unread";}else if(t.id==="refresh"||t.hasAttribute("data-rail-refresh")){action="refresh";label="Refresh feeds";}else if(t.id==="add"){action="addFeed";label="Add feed";}else if(t.id==="settings"||t.id==="railSettings"){action="goPrefs";label="Settings";}else if(t.id==="search"){action="search";label="Search";}if(!action)return;
-  if(t.dataset.id && state.selected !== t.dataset.id)return;
-  const p=PRESETS[shortcutPreset()]||PRESETS.inoreader,entry=Object.entries(p.keys).find(x=>x[1]===action);if(!entry)return;
-  const now=Date.now();if(now-(coachLastShown.get(action)||0)<60000)return;coachLastShown.set(action,now);
-  showShortcutCoach(action,label,entry[0].split(" ").map(displayDesc).join(" then "));
+
+function coachShortcut(e) {
+  if (!state.settings.shortcutCoaching ||
+      !isShortcutCoachPointerEvent(e, pointerActivation)) return;
+
+  const target = e.target?.closest?.("[data-action],[data-reader],[data-view],#refresh,#settings,#railSettings,#add,#search,[data-rail-refresh]");
+  if (!target) return;
+
+  let action = null;
+  let label = "";
+  const readerAction = target.dataset.reader;
+  const appAction = target.dataset.action;
+  const view = target.dataset.view;
+
+  if (appAction === "save" || readerAction === "save") {
+    action = "save"; label = "Save article";
+  } else if (appAction === "read" || readerAction === "read") {
+    action = "toggleRead"; label = "Toggle read state";
+  } else if (readerAction === "tags") {
+    action = "tag"; label = "Add article tag";
+  } else if (readerAction === "fulltext") {
+    action = "fullArticle"; label = "Toggle full article";
+  } else if (readerAction === "open") {
+    action = "openOriginal"; label = "Open original article";
+  } else if (readerAction === "close") {
+    action = "closeReader"; label = "Close article";
+  } else if (readerAction === "share" || appAction === "share") {
+    action = "share"; label = "Share article";
+  } else if (view === "all") {
+    action = "allView"; label = "All articles";
+  } else if (view === "unread") {
+    action = "unreadView"; label = "Unread";
+  } else if (view === "saved") {
+    action = "goSaved"; label = "Saved articles";
+  } else if (view === "snoozed") {
+    action = "goSnoozed"; label = "Snoozed articles";
+  } else if (view === "highlights") {
+    action = "goHighlights"; label = "Highlights";
+  } else if (target.id === "refresh" || target.hasAttribute("data-rail-refresh")) {
+    action = "refresh"; label = "Refresh feeds";
+  } else if (target.id === "add") {
+    action = "addFeed"; label = "Add feed";
+  } else if (target.id === "settings" || target.id === "railSettings") {
+    action = "goPrefs"; label = "Settings";
+  } else if (target.id === "search") {
+    action = "search"; label = "Search";
+  }
+
+  if (!action) return;
+
+  // A card action is only coachable when it refers to a current article.
+  if (target.dataset.id && !state.items.some(item => item.id === target.dataset.id)) return;
+
+  const presetName = shortcutPreset();
+  const shortcutKey = findShortcutForAction(presetName, action);
+  if (!shortcutKey) return;
+
+  const now = Date.now();
+  if (now - (coachLastShown.get(action) || 0) < 60000 || now - coachLastAnyShown < 2500) return;
+
+  coachLastShown.set(action, now);
+  coachLastAnyShown = now;
+  showShortcutCoach(action, label, shortcutKey.split(" ").map(displayDesc).join(" then "));
 }
 function toolbarOrderFromDialog() {
   const items = [...document.querySelectorAll("#toolbarOrderList [data-tb-key]")];
@@ -4206,7 +4275,7 @@ async function markAboveBelow(which) {
 }
 
 function bind() {
-  document.addEventListener("pointerdown", e => { pointerActivation = { type:e.pointerType, at:Date.now() }; }, true);
+  document.addEventListener("pointerdown", e => { pointerActivation = { type:e.pointerType, at:Date.now(), isTrusted:e.isTrusted }; }, true);
   document.addEventListener("click", e => coachShortcut(e), true);
   document.addEventListener("click", async e => { const retry = e.target.closest("[data-health-retry]"); if (!retry) return; const feed = state.feeds.find(x => x.id === retry.dataset.healthRetry); if (!feed) return; retry.disabled = true; await refreshFeed(feed); saveFeeds(); render(); $("#feedHealthDialog").close(); showFeedHealth(); });
   document.addEventListener("click", async e => {
