@@ -187,7 +187,7 @@ test("OPML import displays a preview before changing subscriptions", async ({ pa
     buffer: Buffer.from('<?xml version="1.0"?><opml version="2.0"><body><outline text="Example" title="Example"><outline text="Fixture" title="Fixture" type="rss" xmlUrl="https://example.test/feed.xml"/></outline></body></opml>')
   });
   await expect(page.locator("#opmlPreviewDialog")).toBeVisible();
-  await expect(page.locator("#opmlPreviewSummary")).toContainText("1 feed entry");
+  await expect(page.locator("#opmlPreviewSummary")).toContainText("1 available feed");
   await page.locator("#opmlPreviewCancel").click();
   await expect(page.locator("#opmlPreviewDialog")).not.toBeVisible();
 });
