@@ -1644,15 +1644,18 @@ async function refreshFeed(f) {
     }
     f.title = loaded.parsed.title || f.title;
     f.error = "";
-    f.lastSuccess = Date.now(); f.consecutiveFailures = 0; f.lastError = ""; f.retrievalPath = loaded.via;
+    f.consecutiveFailures = 0; f.lastError = ""; f.nextRetryAt = 0; f.retrievalPath = loaded.via;
     f.via = loaded.via;
     f.wpRoot = loaded.wpRoot || f.wpRoot || "";
     if (loaded.url) f.url = loaded.url;
     await saveItems(f, loaded.parsed.items);
+    f.lastSuccess = Date.now();
     return true;
   } catch (e) {
     f.error = classifyError(e); f.lastError = f.error;
     f.consecutiveFailures = (Number(f.consecutiveFailures) || 0) + 1;
+    const backoff = Math.min(24 * 60 * 60 * 1000, 5 * 60 * 1000 * (2 ** Math.min(8, f.consecutiveFailures - 1)));
+    f.nextRetryAt = Date.now() + backoff;
     return false;
   }
 }
@@ -1678,7 +1681,7 @@ async function refresh(automatic = false) {
     // concurrent requests, and the burst is what gets the shared
     // helper (rss2json) rate-limited by publishers. Five at a time
     // is far gentler and still fast enough.
-    const eligibleFeeds = state.feeds.filter(f => !automatic || Date.now() - (f.lastAttempt || 0) >= (Number(f.refreshMinutes) || Number(state.settings.globalRefreshMinutes) || 30) * 60000);
+    const eligibleFeeds = state.feeds.filter(f => !automatic || ((!f.nextRetryAt || Date.now() >= f.nextRetryAt) && Date.now() - (f.lastAttempt || 0) >= (Number(f.refreshMinutes) || Number(state.settings.globalRefreshMinutes) || 30) * 60000));
     if (!eligibleFeeds.length) { toast("All feeds are within their refresh interval."); return; }
     const results = new Array(eligibleFeeds.length);
     let next = 0;
@@ -3437,10 +3440,19 @@ let pendingOPMLFile = null;
 async function exportCompleteBackup(){try{const d={format:"rss-reader-backup",version:1,exportedAt:new Date().toISOString(),profile:{feeds:state.feeds,folders:state.folders,tags:state.tags,savedSearches:state.savedSearches,rules:state.rules,settings:state.settings,notes:articleNotes},items:await dbAll(),highlights:await hlAll()};download(JSON.stringify(d,null,2),"rss-reader-backup.json","application/json");toast("Complete profile backup exported.");}catch(e){toast("Backup export failed: "+e.message);}}
 function validateCompleteBackup(d){if(!d||d.format!=="rss-reader-backup"||d.version!==1||!d.profile||!Array.isArray(d.profile.feeds)||!Array.isArray(d.items)||!Array.isArray(d.highlights)||!d.profile.settings||typeof d.profile.settings!=="object")throw Error("Unsupported or incomplete backup file.");if(!d.profile.feeds.every(x=>x&&typeof x.id==="string"&&typeof x.url==="string")||!d.items.every(x=>x&&typeof x.id==="string"&&typeof x.feedId==="string")||!d.highlights.every(x=>x&&typeof x.id==="string"&&typeof x.itemId==="string"))throw Error("Backup contains invalid records.");return d;}
 async function importCompleteBackup(file){let d;try{d=validateCompleteBackup(JSON.parse(await file.text()));}catch(e){toast(e.message);return;}const replace=confirm("Choose OK to replace this profile. Choose Cancel to merge backup records into this profile.");if(!replace&&!confirm("Merge backup records? Existing records with matching IDs will be kept."))return;try{const oi=replace?[]:await dbAll(),oh=replace?[]:await hlAll();const merge=(old,add)=>{const m=new Map(old.map(x=>[x.id,x]));for(const x of add)if(!m.has(x.id))m.set(x.id,x);return [...m.values()];};const items=replace?d.items:merge(oi,d.items),highlights=replace?d.highlights:merge(oh,d.highlights);const tx=db.transaction(["items","highlights"],"readwrite"),is=tx.objectStore("items"),hs=tx.objectStore("highlights");if(replace){is.clear();hs.clear();}for(const x of items)is.put(x);for(const x of highlights)hs.put(x);await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error||Error("Restore aborted."));});const p=d.profile;if(replace){state.feeds=p.feeds;state.folders=Array.isArray(p.folders)?p.folders:[];state.tags=Array.isArray(p.tags)?p.tags:[];state.savedSearches=Array.isArray(p.savedSearches)?p.savedSearches:[];state.rules=Array.isArray(p.rules)?p.rules:[];state.settings={...state.settings,...validateSettings(p.settings)};articleNotes=p.notes&&typeof p.notes==="object"?p.notes:{};}else{const mb=(x,y)=>[...x,...y.filter(v=>!x.some(w=>w.id===v.id))];state.feeds=mb(state.feeds,p.feeds);state.folders=[...new Set([...state.folders,...(p.folders||[])])];state.tags=[...new Set([...state.tags,...(p.tags||[])])];state.savedSearches=mb(state.savedSearches,p.savedSearches||[]);state.rules=mb(state.rules,p.rules||[]);articleNotes={...articleNotes,...(p.notes||{})};}localStorage.setItem(K,JSON.stringify(state.feeds));localStorage.setItem(KF,JSON.stringify(state.folders));localStorage.setItem(KT,JSON.stringify(state.tags));localStorage.setItem(KS,JSON.stringify(state.savedSearches));localStorage.setItem(KR,JSON.stringify(state.rules));localStorage.setItem(S,JSON.stringify(state.settings));localStorage.setItem(NK,JSON.stringify(articleNotes));state.items=items;state.highlights=highlights;syncFolders();applySettings();mirrorSync();render();toast("Backup restored: "+state.feeds.length+" feeds, "+items.length+" articles, "+highlights.length+" highlights.");}catch(e){console.error(e);toast("Restore failed: "+e.message);}}
-function exportAnnotations(format){const byId=new Map(state.items.map(x=>[x.id,x]));const rows=[...state.highlights.map(h=>{const x=byId.get(h.itemId)||{};return {type:"highlight",title:x.title||"",url:x.url||"",feed:x.feedTitle||"",text:h.text||h.quote||"",note:h.note||""};}),...Object.entries(articleNotes).map(([id,note])=>{const x=byId.get(id)||{};return {type:"note",title:x.title||"",url:x.url||"",feed:x.feedTitle||"",note};})];if(format==="json"){download(JSON.stringify({format:"rss-reader-annotations",version:1,annotations:rows},null,2),"rss-reader-annotations.json","application/json");return;}const md=rows.map(x=>"## "+(x.title||"Untitled article")+"\n\nSource: "+(x.url||"Unavailable")+"\n\nFeed: "+(x.feed||"Unknown")+"\n\n"+(x.text?"> "+x.text+"\n\n":"")+(x.note||"")).join("\n---\n\n");download(md,"rss-reader-annotations.md","text/markdown");}
+function exportAnnotations(format){const byId=new Map(state.items.map(x=>[x.id,x]));const rows=[...state.highlights.map(h=>{const x=byId.get(h.itemId)||{};return {type:"highlight",title:x.title||"",url:x.url||"",feed:x.feedTitle||"",text:h.text||h.quote||"",note:h.note||"",createdAt:h.created||null,updatedAt:h.updated||null};}),...Object.entries(articleNotes).map(([id,note])=>{const x=byId.get(id)||{};return {type:"note",title:x.title||"",url:x.url||"",feed:x.feedTitle||"",note,createdAt:null,updatedAt:null};})];if(format==="json"){download(JSON.stringify({format:"rss-reader-annotations",version:1,annotations:rows},null,2),"rss-reader-annotations.json","application/json");return;}const md=rows.map(x=>"## "+(x.title||"Untitled article")+"\n\nSource: "+(x.url||"Unavailable")+"\n\nFeed: "+(x.feed||"Unknown")+"\n\n"+(x.text?"> "+x.text+"\n\n":"")+(x.note||"")).join("\n---\n\n");download(md,"rss-reader-annotations.md","text/markdown");}
 async function updateStorageUsage(){const el=$("#storageUsage");if(!el)return;if(!navigator.storage?.estimate){el.textContent="Storage usage estimates are unavailable.";return;}try{const d=await navigator.storage.estimate(),fmt=n=>n<1048576?Math.round(n/1024)+" KB":(n/1048576).toFixed(1)+" MB";el.textContent="Approximate browser storage: "+fmt(d.usage||0)+" used of "+(d.quota?fmt(d.quota):"unknown quota")+". ";}catch{el.textContent="Storage usage could not be read.";}}
 async function previewRetentionCleanup(){const days=Number(state.settings.retentionDays)||0;if(!days){toast("Choose an article retention period in Settings first.");return;}const protectedIds=new Set([...state.highlights.map(x=>x.itemId),...Object.keys(articleNotes)]),cutoff=Date.now()-days*86400000;const old=state.items.filter(x=>{const t=dateSortKey(x);return t&&t<cutoff&&!x.saved&&!x.queued&&!protectedIds.has(x.id);});if(!old.length){toast("No unprotected articles are older than the selected period.");return;}if(!confirm("Remove "+old.length+" old articles? Saved, queued, highlighted, and noted articles are protected."))return;const ids=old.map(x=>x.id),set=new Set(ids);await deleteMany(ids);state.items=state.items.filter(x=>!set.has(x.id));render();updateStorageUsage();toast("Removed "+ids.length+" old articles.");}
-function showReadingStats(){const read=state.items.filter(x=>x.read),recent=read.filter(x=>x.readAt&&Date.now()-x.readAt<=30*86400000),days=new Map();for(const x of recent){const k=new Date(x.readAt).toLocaleDateString();days.set(k,(days.get(k)||0)+1);}const rows=[...days.entries()].sort((a,b)=>new Date(a[0])-new Date(b[0])).slice(-14);$("#statsBody").innerHTML="<p>"+state.items.length+" cached articles</p><p>"+read.length+" currently marked read</p><p>"+recent.length+" marked read in the last 30 days with recorded timestamps</p><p>"+state.items.filter(x=>x.saved).length+" saved · "+state.items.filter(x=>x.queued).length+" queued · "+state.highlights.length+" highlights</p><p class=\"muted\">Older read states have no reliable historical timestamp. Activity tracking begins as read timestamps are recorded.</p>"+(rows.length?rows.map(x=>"<p>"+esc(x[0])+": "+x[1]+"</p>").join(""):"<p>No timestamped reading activity yet.</p>");$("#statsDialog").showModal();}
+function showReadingStats(days=30){
+  const read=state.items.filter(x=>x.read);
+  const recent=read.filter(x=>x.readAt&&(days===0||Date.now()-x.readAt<=days*86400000));
+  const daily=new Map();
+  for(const x of recent){const key=new Date(x.readAt).toLocaleDateString();daily.set(key,(daily.get(key)||0)+1);}
+  const rows=[...daily.entries()].sort((a,b)=>new Date(a[0])-new Date(b[0])).slice(-30);
+  const period=days===0?"all recorded history":"the last "+days+" days";
+  $("#statsBody").innerHTML="<p>"+state.items.length+" cached articles</p><p>"+read.length+" currently marked read</p><p>"+recent.length+" articles marked read during "+period+"</p><p>"+state.items.filter(x=>x.saved).length+" saved · "+state.items.filter(x=>x.queued).length+" queued · "+state.highlights.length+" highlights</p><p class=\"muted\">Historical activity is available only for items with a recorded read timestamp.</p>"+(rows.length?rows.map(x=>"<p>"+esc(x[0])+": "+x[1]+"</p>").join(""):"<p>No timestamped reading activity for this period.</p>");
+  $("#statsDialog").showModal();
+}
 function previewOPML(file){file.text().then(text=>{const d=new DOMParser().parseFromString(text,"text/xml");if(d.querySelector("parsererror")||d.documentElement.localName!=="opml"){toast("Invalid OPML file.");return;}const feeds=[...d.querySelectorAll("outline[xmlUrl]")],seen=new Set();let duplicates=0,invalid=0;for(const o of feeds){try{const u=normalizeFeedUrl(o.getAttribute("xmlUrl"));if(seen.has(u)||state.feeds.some(f=>sameFeedUrl(f.url,u)))duplicates++;seen.add(u);}catch{invalid++;}}const folders=new Set([...d.querySelectorAll("outline:not([xmlUrl])")].map(o=>o.getAttribute("text")||o.getAttribute("title")||"").filter(Boolean));$("#opmlPreviewSummary").textContent=feeds.length+" feeds and "+folders.size+" folders found. "+duplicates+" duplicates and "+invalid+" invalid URLs will be skipped.";$("#opmlPreviewDetails").textContent=feeds.slice(0,10).map(o=>o.getAttribute("title")||o.getAttribute("text")||o.getAttribute("xmlUrl")).join("\n")+(feeds.length>10?"\n…":"");pendingOPMLFile=file;$("#opmlPreviewDialog").showModal();}).catch(e=>toast("Could not read OPML file: "+e.message));}
 let coachLastShown = new Map(), pointerActivation = null;
 function coachShortcut(e){
@@ -3719,7 +3731,7 @@ function runShortcutAction(name, e) {
     case "openCurrentTab": openInCurrentTab(); return true;
     case "toggleRead":
       if (!sel) return false;
-      sel.read = !sel.read; put(sel); render(); renderReader(sel); return true;
+      sel.read = !sel.read; sel.readAt = sel.read ? Date.now() : null; put(sel); render(); renderReader(sel); return true;
     case "toggleReadNext": toggleReadNext(); return true;
     case "toggleReadPrev": toggleReadPrev(); return true;
     case "markVisibleRead": markVisibleRead(); return true;
@@ -4355,9 +4367,10 @@ function bind() {
   $("#exportAnnotationsJSON").onclick = () => exportAnnotations("json"); $("#exportAnnotationsMarkdown").onclick = () => exportAnnotations("markdown");
   $("#previewCleanup").onclick = previewRetentionCleanup; $("#openStats").onclick = showReadingStats;
   $("#statsClose").onclick = $("#statsDone").onclick = () => $("#statsDialog").close();
+  $("#statsRange").onchange = e => { $("#statsDialog").close(); showReadingStats(Number(e.target.value)); };
   $("#libraryMore").addEventListener("toggle", () => { try { localStorage.setItem("rss-reader.library-more-open", $("#libraryMore").open ? "1" : "0"); } catch {} });
   try { $("#libraryMore").open = localStorage.getItem("rss-reader.library-more-open") === "1"; } catch {}
-  document.addEventListener("click", e => { if (e.target.closest("[data-rail-search]")) $("#search").focus(); if (e.target.closest("[data-rail-refresh]")) refresh(); });
+  document.addEventListener("click", e => { if (e.target.closest("[data-rail-search]")) $("#search").focus(); if (e.target.closest("[data-rail-refresh]")) refresh(); if (e.target.closest("[data-rail-next-unread]")) moveUnread(1); });
   $("#menu").onclick = () => {
     const open = $("#sidebar").classList.toggle("open");
     $("#scrim").classList.toggle("show", open);
