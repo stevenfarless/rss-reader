@@ -165,11 +165,13 @@ let feedMenuFeedId = null;
 function feedMenuHTML(f) {
   const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id;
   const orderLabel = !f.sort || f.sort === "global" ? "Use global" : f.sort === "newest" ? "Newest" : "Oldest";
+  const refreshInterval = Number(f.refreshMinutes) || 0;
   return `<button type="button" data-feed-opt="rename">Rename</button>` +
     `<button type="button" data-feed-opt="open">Open site</button>` +
     `<button type="button" data-feed-opt="autofull" aria-pressed="${!!f.autoFull}">${f.autoFull ? "✓ " : ""}Full article: ${f.autoFull ? "Always fetch" : "Use RSS text"}</button>` +
     `<button type="button" data-feed-opt="layout">Layout for this feed</button>` +
     `<button type="button" data-feed-opt="order">Order for this feed: ${orderLabel}</button>` +
+    `<button type="button" data-feed-opt="interval">Refresh interval: ${refreshInterval ? refreshInterval + " min" : "Global"}</button>` +
     `<button type="button" data-feed-opt="unsub">${armed ? "Click again to unsubscribe" : "Unsubscribe"}</button>`;
 }
 function renderFeedMenu() {
@@ -708,6 +710,8 @@ function readSettingsFromDialog() {
     vimPane: state.settings.vimPane || "list",
     cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
+    shortcutCoaching: $("#shortcutCoachingToggle").checked,
+    retentionDays: Number($("#retentionDaysSelect").value),
     shortcutCoaching: $("#shortcutCoachingToggle").checked,
     retentionDays: Number($("#retentionDaysSelect").value),
     sidebarCollapsed: state.settings.sidebarCollapsed || false,
@@ -1790,6 +1794,7 @@ function visible() {
   const newest = effectiveSort() === "newest";
   // Precompute the date keys once: the old comparator re-parsed each
   // article's date O(log N) times during the sort.
+  if (state.view === "queue") return a.sort((x,y)=>(x.queueOrder||0)-(y.queueOrder||0));
   const keyed = a.map(x => [dateSortKey(x), x]);
   keyed.sort((p, q) => {
     const dx = p[0], dy = q[0];
@@ -2081,7 +2086,7 @@ function renderList() {
     const thumb = feedCardImage(srcFeed) && x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : "";
     const rt = readingTimeText(x);
     const snoozeNote = state.view === "snoozed" && x.snoozedUntil ? ` · <span>Snoozed until ${esc(fmtDateTime(new Date(x.snoozedUntil)))}</span>` : "";
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}">${thumb}<div class="article-main"><h2>${esc(x.title)}</h2><div class="article-source">${fav ? `<img class="card-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span>${esc(feedTitle)}</span></div>${excerpt}<div class="article-bottom"><span>${showAuthor ? `${esc(x.author)} · ` : ""}<time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? ` · <span>${rt}</span>` : ""}${snoozeNote}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button>${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div></article>`;
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}">${thumb}<div class="article-main"><h2>${esc(x.title)}</h2><div class="article-source">${fav ? `<img class="card-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span>${esc(feedTitle)}</span></div>${excerpt}<div class="article-bottom"><span>${showAuthor ? `${esc(x.author)} · ` : ""}<time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? ` · <span>${rt}</span>` : ""}${snoozeNote}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button><button data-action="queue" data-id="${esc(x.id)}" title="${x.queued ? "Remove from queue" : "Add to queue"}" aria-label="${x.queued ? "Remove from queue" : "Add to queue"}: ${esc(x.title)}" aria-pressed="${!!x.queued}">${x.queued ? "☷" : "＋"}</button>${state.view === "queue" ? `<button class="text-btn" data-action="queue-up" data-id="${esc(x.id)}" title="Move earlier">↑</button><button class="text-btn" data-action="queue-down" data-id="${esc(x.id)}" title="Move later">↓</button>` : ""}${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div></article>`;
   }).join("") : (state.query || state.filter !== "all" ? `<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>No articles match${state.query ? " &quot;" + esc(state.query) + "&quot;" : ""}.</p><button class="primary" id="emptyClear">Clear search</button></div>` : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>');
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
@@ -3435,6 +3440,14 @@ async function updateStorageUsage(){const el=$("#storageUsage");if(!el)return;if
 async function previewRetentionCleanup(){const days=Number(state.settings.retentionDays)||0;if(!days){toast("Choose an article retention period in Settings first.");return;}const protectedIds=new Set([...state.highlights.map(x=>x.itemId),...Object.keys(articleNotes)]),cutoff=Date.now()-days*86400000;const old=state.items.filter(x=>{const t=dateSortKey(x);return t&&t<cutoff&&!x.saved&&!x.queued&&!protectedIds.has(x.id);});if(!old.length){toast("No unprotected articles are older than the selected period.");return;}if(!confirm("Remove "+old.length+" old articles? Saved, queued, highlighted, and noted articles are protected."))return;const ids=old.map(x=>x.id),set=new Set(ids);await deleteMany(ids);state.items=state.items.filter(x=>!set.has(x.id));render();updateStorageUsage();toast("Removed "+ids.length+" old articles.");}
 function showReadingStats(){const read=state.items.filter(x=>x.read),recent=read.filter(x=>x.readAt&&Date.now()-x.readAt<=30*86400000),days=new Map();for(const x of recent){const k=new Date(x.readAt).toLocaleDateString();days.set(k,(days.get(k)||0)+1);}const rows=[...days.entries()].sort((a,b)=>new Date(a[0])-new Date(b[0])).slice(-14);$("#statsBody").innerHTML="<p>"+state.items.length+" cached articles</p><p>"+read.length+" currently marked read</p><p>"+recent.length+" marked read in the last 30 days with recorded timestamps</p><p>"+state.items.filter(x=>x.saved).length+" saved · "+state.items.filter(x=>x.queued).length+" queued · "+state.highlights.length+" highlights</p><p class=\"muted\">Older read states have no reliable historical timestamp. Activity tracking begins as read timestamps are recorded.</p>"+(rows.length?rows.map(x=>"<p>"+esc(x[0])+": "+x[1]+"</p>").join(""):"<p>No timestamped reading activity yet.</p>");$("#statsDialog").showModal();}
 function previewOPML(file){file.text().then(text=>{const d=new DOMParser().parseFromString(text,"text/xml");if(d.querySelector("parsererror")||d.documentElement.localName!=="opml"){toast("Invalid OPML file.");return;}const feeds=[...d.querySelectorAll("outline[xmlUrl]")],seen=new Set();let duplicates=0,invalid=0;for(const o of feeds){try{const u=normalizeFeedUrl(o.getAttribute("xmlUrl"));if(seen.has(u)||state.feeds.some(f=>sameFeedUrl(f.url,u)))duplicates++;seen.add(u);}catch{invalid++;}}const folders=new Set([...d.querySelectorAll("outline:not([xmlUrl])")].map(o=>o.getAttribute("text")||o.getAttribute("title")||"").filter(Boolean));$("#opmlPreviewSummary").textContent=feeds.length+" feeds and "+folders.size+" folders found. "+duplicates+" duplicates and "+invalid+" invalid URLs will be skipped.";$("#opmlPreviewDetails").textContent=feeds.slice(0,10).map(o=>o.getAttribute("title")||o.getAttribute("text")||o.getAttribute("xmlUrl")).join("\n")+(feeds.length>10?"\n…":"");pendingOPMLFile=file;$("#opmlPreviewDialog").showModal();}).catch(e=>toast("Could not read OPML file: "+e.message));}
+let coachLastShown = new Map(), pointerActivation = null;
+function coachShortcut(e){
+  if(!state.settings.shortcutCoaching||e.detail===0||!pointerActivation||Date.now()-pointerActivation.at>1200||!["mouse","pen"].includes(pointerActivation.type))return;
+  const t=e.target.closest?.("[data-action],[data-reader],[data-view],#refresh,#settings,#add");if(!t)return;let action=null,label="";
+  if(t.dataset.action==="save"||t.dataset.reader==="save"){action="save";label="Save article";}else if(t.dataset.action==="read"||t.dataset.reader==="read"){action="toggleRead";label="Toggle read state";}else if(t.dataset.view==="all"){action="allView";label="All articles";}else if(t.dataset.view==="unread"){action="unreadView";label="Unread";}else if(t.id==="refresh"||t.hasAttribute("data-rail-refresh")){action="refresh";label="Refresh feeds";}else if(t.id==="add"){action="addFeed";label="Add feed";}else if(t.id==="settings"){action="goPrefs";label="Settings";}if(!action)return;
+  const p=PRESETS[shortcutPreset()]||PRESETS.inoreader,entry=Object.entries(p.keys).find(x=>x[1]===action);if(!entry)return;
+  const now=Date.now();if(now-(coachLastShown.get(action)||0)<60000)return;coachLastShown.set(action,now);toast(label+" · Shortcut: "+entry[0].split(" ").map(displayDesc).join(" then "));
+}
 function toolbarOrderFromDialog() {
   const items = [...document.querySelectorAll("#toolbarOrderList [data-tb-key]")];
   if (!items.length) return null;
@@ -3867,6 +3880,8 @@ async function markAboveBelow(which) {
 }
 
 function bind() {
+  document.addEventListener("pointerdown", e => { pointerActivation = { type:e.pointerType, at:Date.now() }; }, true);
+  document.addEventListener("click", e => coachShortcut(e), true);
   document.addEventListener("click", async e => {
     // The snooze menu closes on any click outside it or its button.
     // Remember whether it was open first: the snooze button toggles
@@ -3943,8 +3958,11 @@ function bind() {
       if (x) {
         if (act.dataset.action === "share") { shareArticle(x); return; }
         if (act.dataset.action === "unsnooze") { await unsnoozeItem(x); return; }
+        if (act.dataset.action === "queue") { x.queued = !x.queued; x.queueOrder = x.queued ? Date.now() : 0; await put(x); render(); toast(x.queued ? "Added to reading queue." : "Removed from reading queue."); return; }
+        if (act.dataset.action === "queue-up" || act.dataset.action === "queue-down") { const q=state.items.filter(v=>v.queued).sort((u,v)=>(u.queueOrder||0)-(v.queueOrder||0)); const i=q.findIndex(v=>v.id===x.id),j=i+(act.dataset.action==="queue-up"?-1:1); if(i>=0&&j>=0&&j<q.length){const old=q[i].queueOrder;q[i].queueOrder=q[j].queueOrder;q[j].queueOrder=old;await putMany([q[i],q[j]]);render();} return; }
         const key = act.dataset.action === "save" ? "saved" : "read";
         x[key] = !x[key];
+        if (key === "read") x.readAt = x.read ? Date.now() : null;
         await put(x);
         render();
         // renderReader, not openItem: opening would mark an item read
@@ -4004,7 +4022,7 @@ function bind() {
       const x = selectedItem();
       if (!x) return;
       if (ra.dataset.reader === "save") { x.saved = !x.saved; await put(x); openItem(x.id); return; }
-      if (ra.dataset.reader === "read") { x.read = !x.read; await put(x); renderNav(); renderList(); renderReader(x); toast(x.read ? "Article marked read." : "Article marked unread."); return; }
+      if (ra.dataset.reader === "read") { x.read = !x.read; x.readAt = x.read ? Date.now() : null; await put(x); renderNav(); renderList(); renderReader(x); toast(x.read ? "Article marked read." : "Article marked unread."); return; }
       if (ra.dataset.reader === "listen") { if (tts?.itemId === x.id) stopTTS(); else startTTS(x); return; }
       if (ra.dataset.reader === "share") { shareArticle(x); return; }
       if (ra.dataset.reader === "snooze") { const m = $("#snoozeMenu"); if (m) { m.hidden = snoozeMenuWasOpen; ra.setAttribute("aria-expanded", String(!m.hidden)); if (!m.hidden) m.scrollIntoView({ block: "nearest" }); } return; }
@@ -4157,6 +4175,11 @@ function bind() {
     if (opt === "open") { closeFeedMenu(); window.open(f.site || f.url, "_blank", "noopener"); return; }
     if (opt === "autofull") { f.autoFull = !f.autoFull; saveFeeds(); renderFeedMenu(); toast(`Auto full article ${f.autoFull ? "on" : "off"} for ${feedDisplayTitle(f)}.`); return; }
     if (opt === "layout") { closeFeedMenu(); showFeedLayoutDialog(f); return; }
+    if (opt === "interval") {
+      const choices = [0,15,30,60,180,360,720,1440], current = Number(f.refreshMinutes) || 0;
+      f.refreshMinutes = choices[(choices.indexOf(current) + 1) % choices.length];
+      saveFeeds(); renderFeedMenu(); toast(f.refreshMinutes ? `Refresh interval set to ${f.refreshMinutes} minutes.` : "Feed uses the global interval."); return;
+    }
     if (opt === "order") {
       f.sort = nextFeedSort(f.sort);
       saveFeeds(); renderFeedMenu(); renderSortBtn(); renderList();
