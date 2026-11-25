@@ -3480,6 +3480,9 @@ function showSettings() {
   $("#shortcutCoachingToggle").checked = !!state.settings.shortcutCoaching;
   $("#retentionDaysSelect").value = String(state.settings.retentionDays || 0);
   $("#globalRefreshMinutesSelect").value = String(state.settings.globalRefreshMinutes || 30);
+  $("#shortcutCoachingToggle").checked = !!state.settings.shortcutCoaching;
+  $("#retentionDaysSelect").value = String(state.settings.retentionDays || 0);
+  $("#globalRefreshMinutesSelect").value = String(state.settings.globalRefreshMinutes || 30);
   updateStorageUsage();
   // App updates (#144): the running version, and the last check result
   // (an update waiting shows here as well as in the banner).
