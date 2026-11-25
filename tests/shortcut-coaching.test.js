@@ -27,7 +27,7 @@ test("coaching accepts trusted mouse and pen activations", () => {
   assert.equal(isShortcutCoachPointerEvent({ isTrusted: true, detail: 1 }, { ...activation, type: "pen" }, 1100), true);
 });
 
-test("coaching excludes touch, keyboard, synthetic, stale, and invalid activations", () => {
+test("coaching accepts touch and excludes keyboard, synthetic, stale, and invalid activations", () => {
   const event = { isTrusted: true, detail: 1 };
   const base = { type: "mouse", at: 1000, isTrusted: true };
   assert.equal(isShortcutCoachPointerEvent(event, { ...base, type: "touch" }, 1100), true);
@@ -55,7 +55,7 @@ test("app wires coaching to pointer-originated clicks and the persisted setting"
   assert.match(app, /pointerdown[\s\S]*pointerActivation/);
   assert.match(app, /click", e => coachShortcut\(e\)/);
   assert.match(app, /isShortcutCoachPointerEvent\(e, pointerActivation\)/);
-  assert.match(app, /findShortcutForAction\(presetName, action\)/);
+  assert.match(app, /findShortcutForAction\(shortcutPreset\(\), action\)/);
   assert.match(app, /No keyboard shortcut assigned/);
   assert.match(app, /button,a,/);
   assert.doesNotMatch(app, /shortcut-coach-suppressed/);
