@@ -110,3 +110,26 @@ test("shortcut coaching and statistics are available from settings", async ({ pa
   await page.locator("#statsRange").selectOption("7");
   await expect(page.locator("#statsBody")).toContainText("the last 7 days");
 });
+
+test("adding a feed through the address form creates a subscription", async ({ page }) => {
+  await page.route("**/*", async route => {
+    const url = new URL(route.request().url());
+    if (url.hostname === "example.test" && url.pathname === "/feed.xml") {
+      await route.fulfill({
+        status: 200,
+        headers: { "access-control-allow-origin": "*" },
+        contentType: "application/rss+xml",
+        body: "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>Address Fixture</title><link>https://example.test/</link><description>Fixture feed</description></channel></rss>"
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto("/");
+  await page.locator("#add").click();
+  await page.locator("#feedSearchInput").fill("https://example.test/feed.xml");
+  await page.locator("#saveFeed").click();
+  await expect(page.locator("#feeds")).toContainText("Address Fixture", { timeout: 15000 });
+  await expect(page.locator("#feedDialog")).not.toBeVisible();
+});
