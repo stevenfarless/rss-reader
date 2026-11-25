@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.13] - 2026-11-25
+
+### Fixed
+- Wait for the Settings dialog close event before opening the OPML preview, avoiding modal-stack timing failures.
+- Preserve the Vim pane preference during browser reload tests instead of resetting it from the test setup script.
+
+
 ## [1.9.12] - 2026-11-25
 
 ### Added
