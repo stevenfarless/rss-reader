@@ -220,3 +220,27 @@ test("retention cleanup preserves saved and queued articles", async ({ page }) =
   await expect(page.locator("#articleList")).toContainText("Old saved article");
   await expect(page.locator("#articleList")).toContainText("Old queued article");
 });
+
+test("invalid profile backups are rejected before changing local data", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#settings").click();
+  await page.locator("#backupFile").setInputFiles({
+    name: "broken-backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from('{"format":"rss-reader-backup","version":999}')
+  });
+  await expect(page.locator("#toast")).toContainText("Backup validation failed");
+  await expect(page.locator("#settingsDialog")).toBeVisible();
+});
+
+test("narrow mobile viewport keeps the reader within the screen", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  const dimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth
+  }));
+  expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
+  await page.locator("#settings").click();
+  await expect(page.locator("#settingsDialog")).toBeVisible();
+});
