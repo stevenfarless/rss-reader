@@ -5,6 +5,7 @@ test("reader loads, changes appearance, and collapses its sidebar", async ({ pag
   await expect(page.locator("#heading")).toHaveText("All articles");
   await page.locator("#settings").click();
   await expect(page.locator("#settingsDialog")).toBeVisible();
+  await expect(page.locator("#settingsDialog")).toBeFocused();
   await page.locator("#themeSelect").selectOption("oled");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "oled");
   await page.locator("#saveSettings").click();
