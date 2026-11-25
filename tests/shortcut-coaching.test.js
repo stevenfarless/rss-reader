@@ -47,6 +47,8 @@ test("app wires coaching to pointer-originated clicks and the persisted setting"
   assert.match(app, /isShortcutCoachPointerEvent\(e, pointerActivation\)/);
   assert.match(app, /findShortcutForAction\(shortcutPreset\(\), action\)/);
   assert.match(app, /if \(!shortcutKey\) return;/);
+  assert.match(app, /function isShortcutCoachingAvailable\(\)[\s\S]*?matchMedia\("\(min-width:821px\)"\)\.matches/);
+  assert.match(app, /!isShortcutCoachingAvailable\(\) \|\| !state\.settings\.shortcutCoaching/);
   assert.ok(!app.includes("No keyboard shortcut assigned"));
   assert.match(app, /sideToggle: \["sidebarToggle", "Toggle sidebar"\]/);
   assert.match(app, /data-rail-next-unread/);
