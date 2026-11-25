@@ -15,6 +15,30 @@ test("reader loads, changes appearance, and collapses its sidebar", async ({ pag
   await expect(page.locator("[data-rail-search]")).toBeVisible();
 });
 
+test("collapsing the sidebar expands the article list into the freed space", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.addInitScript(() => {
+    localStorage.setItem("rss-reader.settings.v1", JSON.stringify({
+      sidebarWidth: 250,
+      listWidth: 640
+    }));
+  });
+  await page.goto("/");
+
+  const list = page.locator(".list-pane");
+  const before = await list.evaluate(el => el.getBoundingClientRect().width);
+  await page.locator("#sideToggle").click();
+  await expect(page.locator("body")).toHaveClass(/sidebar-collapsed/);
+
+  const after = await list.evaluate(el => el.getBoundingClientRect().width);
+  expect(after).toBeGreaterThan(before + 100);
+
+  const reader = await page.locator("#reader").evaluate(el => el.getBoundingClientRect());
+  expect(reader.width).toBeGreaterThanOrEqual(320);
+  expect(await page.locator(".layout").evaluate(el => el.scrollWidth))
+    .toBeLessThanOrEqual(await page.locator(".layout").evaluate(el => el.clientWidth));
+});
+
 test("secondary navigation can be expanded and queue view is reachable", async ({ page }) => {
   await page.goto("/");
   await page.locator("#libraryMore summary").click();
