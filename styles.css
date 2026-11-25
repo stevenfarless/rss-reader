@@ -360,6 +360,7 @@ body.vim-navigation-enabled #reader.vim-focused{outline:2px solid var(--accent);
 .feed-row-wrap .feed-unsub{right:52px}
 .feed-row-wrap .feed-row{padding-right:0}
 @media(hover:hover){.feed-row-wrap .feed-mute,.feed-row-wrap .feed-unsub,.feed-row-wrap .feed-opts{opacity:0;pointer-events:none}.feed-row-wrap:hover .feed-mute,.feed-row-wrap:hover .feed-unsub,.feed-row-wrap:hover .feed-opts,.feed-row-wrap:focus-within .feed-mute,.feed-row-wrap:focus-within .feed-unsub,.feed-row-wrap:focus-within .feed-opts,.feed-row-wrap .feed-mute.on,.feed-row-wrap .feed-unsub.armed{opacity:1;pointer-events:auto}}
+@media(hover:hover){.feed-row-wrap:hover .feed-row,.feed-row-wrap:focus-within .feed-row{padding-right:82px}}
 dialog:focus:not(:focus-visible),dialog :focus:not(:focus-visible){outline:none;box-shadow:none}
 dialog .x:focus:not(:focus-visible){background:transparent}
 .stats-days{display:grid;gap:5px;margin-top:12px}
