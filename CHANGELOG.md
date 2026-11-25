@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.2] - 2026-11-25
+
+### Fixed
+- Give contextual shortcut suggestions a dedicated notification surface so action toasts cannot overwrite them.
+- Keep shortcut suggestion dismissal and per-action suppression independent of ordinary notifications.
+
+
 ## [1.9.1] - 2026-11-24
 
 ### Fixed
