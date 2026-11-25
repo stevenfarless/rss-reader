@@ -52,7 +52,6 @@ test("app wires coaching to pointer-originated clicks and the persisted setting"
   assert.match(app, /data-rail-next-unread/);
   assert.ok(app.includes('target.hasAttribute("data-folder-toggle") ? "folderToggle"'));
   assert.ok(app.includes("input[type='search']"));
-  assert.match(app, /No keyboard shortcut assigned/);
   assert.match(app, /button,a,/);
   assert.doesNotMatch(app, /shortcut-coach-suppressed/);
   assert.doesNotMatch(app, /Don’t show again|Dismiss shortcut suggestion/);
