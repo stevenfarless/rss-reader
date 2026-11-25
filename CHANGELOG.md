@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.16] - 2026-11-25
+
+### Fixed
+- Initialize the OPML import selection state used while building the preview, fixing the runtime error that prevented OPML previews from opening.
+- Remove temporary browser-test diagnostics after identifying the regression.
+
+
 ## [1.9.15] - 2026-11-25
 
 ### Fixed
