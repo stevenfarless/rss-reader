@@ -2045,10 +2045,27 @@ function renderHighlightsList() {
   if (ma) ma.disabled = true;
   if (mb) mb.disabled = true;
 }
+async function removeVisibleFromQueue() {
+  const targets = visible().filter(item => item.queued);
+  if (!targets.length) { toast("There are no queued articles in this view."); return; }
+  const previousOrder = new Map(targets.map(item => [item.id, item.queueOrder || 0]));
+  for (const item of targets) { item.queued = false; item.queueOrder = 0; }
+  await putMany(targets);
+  render();
+  toast("Removed " + targets.length + " article" + (targets.length === 1 ? "" : "s") + " from the queue.", {
+    label: "Undo",
+    fn: async () => {
+      for (const item of targets) { item.queued = true; item.queueOrder = previousOrder.get(item.id); }
+      await putMany(targets);
+      render();
+    }
+  });
+}
 function renderList() {
   const a = visible();
   const titles = { all: "All articles", unread: "Unread", queue: "Reading queue", saved: "Saved", snoozed: "Snoozed", highlights: "Highlights", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", folder: state.folder || "Folder", savedSearch: state.savedSearches.find(s => s.id === state.savedSearch)?.name || "Saved search", tag: state.tag ? "Tag: " + state.tag : "Tag" };
   $("#heading").textContent = titles[state.view];
+  $("#removeQueue").hidden = state.view !== "queue";
   $("#mobileTitle").textContent = titles[state.view];
   // The Highlights view (#116) lists the highlights themselves, newest
   // first, with the article each came from; clicking one opens it.
@@ -4250,6 +4267,7 @@ function bind() {
     else if (e.target.id === "orgEditInput") { e.preventDefault(); doRename(e.target.value); }
   });
   $("#refresh").onclick = refresh;
+  $("#removeQueue").onclick = removeVisibleFromQueue;
   bindSplitters();
   $("#reader").addEventListener("scroll", updateReadProgress, { passive: true });
   // Highlights (#116): the button follows the selection in the article
