@@ -160,11 +160,14 @@ test("reading queue persists article ordering in the local library", async ({ pa
 test("OPML preview selects every new feed by default and supports individual selection", async ({ page }) => {
   await page.goto("/");
   await page.locator("#settings").click();
+  page.on("pageerror", error => console.log("OPML page error:", error.message));
   await page.locator("#opmlFile").setInputFiles({
     name: "selection.opml",
     mimeType: "text/xml",
     buffer: Buffer.from('<?xml version="1.0"?><opml version="2.0"><body><outline text="Tech"><outline text="One" type="rss" xmlUrl="https://one.example/feed.xml"/><outline text="Two" type="rss" xmlUrl="https://two.example/feed.xml"/></outline></body></opml>')
   });
+  await page.waitForTimeout(250);
+  console.log("OPML preview state:", JSON.stringify(await page.evaluate(() => ({ settingsOpen: document.querySelector("#settingsDialog").open, previewOpen: document.querySelector("#opmlPreviewDialog").open, toast: document.querySelector("#toast")?.textContent }))));
   await expect(page.locator("#opmlPreviewDialog")).toBeVisible();
   const feeds = page.locator("#opmlFeedSelection input[data-opml-feed]");
   await expect(feeds).toHaveCount(2);
@@ -503,6 +506,8 @@ test("Vim preset navigates panes and preserves the focused pane after reload", a
   await page.reload();
   await expect(page.locator("body")).toHaveClass(/vim-navigation-enabled/);
   await expect(page.locator("body")).toHaveAttribute("data-vim-pane", "sidebar");
+  // Give keyboard navigation a predictable document focus after reload.
+  await page.locator(".list-pane").click({ position: { x: 20, y: 20 } });
 
   const handledKeys = await page.evaluate(() => {
     window.__vimHandledKeys = [];
