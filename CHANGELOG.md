@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.9.7] - 2026-11-25
+
+### Fixed
+- Disable keyboard shortcut coaching on mobile-sized layouts and clear any visible suggestion when switching to mobile; the desktop preference remains intact.
+- Added unit and browser regression coverage for mobile and desktop behavior.
+
 ## [1.9.6] - 2026-11-25
 
 ### Fixed
