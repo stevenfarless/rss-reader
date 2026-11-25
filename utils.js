@@ -316,7 +316,7 @@ function isShortcutCoachPointerEvent(event, activation, now = Date.now(), maxAge
     event?.isTrusted === true &&
     Number(event.detail) > 0 &&
     activation?.isTrusted === true &&
-    (activation.type === "mouse" || activation.type === "pen") &&
+    (activation.type === "mouse" || activation.type === "pen" || activation.type === "touch") &&
     Number.isFinite(activation.at) &&
     now >= activation.at &&
     now - activation.at <= maxAge
