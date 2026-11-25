@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.19] - 2026-11-25
+
+### Fixed
+- Use multi-element selectors for OPML feed checkbox counting, bulk selection, and selected-feed collection.
+- Align the OPML preview browser assertion with the current summary text.
+- Add unit coverage for OPML multi-selection behavior.
+
+
 ## [1.9.18] - 2026-11-25
 
 ### Fixed
