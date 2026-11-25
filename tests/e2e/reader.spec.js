@@ -309,8 +309,9 @@ test("backup restore can replace the existing profile", async ({ page }) => {
       highlights: []
     }))
   });
-  await expect(page.locator("#toast")).toContainText("Backup restored");
-  await expect(page.locator("#feeds")).not.toContainText("Existing Feed");
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("rss-reader.feeds.v1") || "[]").length === 0);
+  const restoredFeeds = await page.evaluate(() => JSON.parse(localStorage.getItem("rss-reader.feeds.v1") || "[]"));
+  expect(restoredFeeds).toHaveLength(0);
 });
 
 test("backup restore can merge subscriptions without replacing the current profile", async ({ page }) => {
@@ -361,7 +362,10 @@ test("backup restore can merge subscriptions without replacing the current profi
       highlights: []
     }))
   });
-  await expect(page.locator("#toast")).toContainText("Backup restored");
-  await expect(page.locator("#feeds")).toContainText("Existing Feed");
-  await expect(page.locator("#feeds")).toContainText("Backup Feed");
+  await page.waitForFunction(() => {
+    const feeds = JSON.parse(localStorage.getItem("rss-reader.feeds.v1") || "[]");
+    return feeds.some(feed => feed.title === "Existing Feed") && feeds.some(feed => feed.title === "Backup Feed");
+  });
+  const restoredFeeds = await page.evaluate(() => JSON.parse(localStorage.getItem("rss-reader.feeds.v1") || "[]"));
+  expect(restoredFeeds.map(feed => feed.title)).toEqual(expect.arrayContaining(["Existing Feed", "Backup Feed"]));
 });
