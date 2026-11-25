@@ -109,7 +109,7 @@ test("shortcut coaching and statistics are available from settings", async ({ pa
   await page.locator("#shortcutCoachingToggle").check();
   await page.locator("#saveSettings").click();
   await page.locator("#add").click();
-  await expect(page.locator("#toast")).toContainText("Shortcut:");
+  await expect(page.locator("#shortcutCoach")).toContainText("Shortcut:");
   await page.locator("#feedDialog .x").click();
 
   await page.locator("#settings").click();

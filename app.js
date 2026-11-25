@@ -37,7 +37,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.9.1";
+const APP_VERSION = "1.9.2";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -3750,13 +3750,14 @@ function showShortcutCoach(action, label, shortcut) {
   } catch {}
   if (suppressed.includes(action)) return;
 
-  const el = $("#toast");
+  const el = $("#shortcutCoach");
   if (!el) return;
   el.replaceChildren(document.createTextNode(label + " · Shortcut: " + shortcut));
 
   const dismiss = document.createElement("button");
   dismiss.type = "button";
   dismiss.textContent = "Dismiss";
+  dismiss.setAttribute("aria-label", "Dismiss shortcut suggestion");
   dismiss.onclick = () => {
     clearTimeout(coachTimer);
     el.classList.remove("show");
@@ -3765,6 +3766,7 @@ function showShortcutCoach(action, label, shortcut) {
   const suppress = document.createElement("button");
   suppress.type = "button";
   suppress.textContent = "Don’t show again";
+  suppress.setAttribute("aria-label", "Do not show this shortcut suggestion again");
   suppress.onclick = () => {
     const next = [...new Set([...suppressed, action])];
     try { localStorage.setItem("rss-reader.shortcut-coach-suppressed.v1", JSON.stringify(next)); } catch {}

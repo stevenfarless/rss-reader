@@ -59,4 +59,11 @@ test("app wires coaching to pointer-originated clicks and the persisted setting"
   assert.match(app, /canShowShortcutCoach\(action, coachLastShown/);
   assert.match(app, /shortcut-coach-suppressed\.v1/);
   assert.match(html, /id="shortcutCoachingToggle"/);
+  assert.match(html, /id="shortcutCoach"[^>]*aria-live="polite"/);
+  assert.ok(app.includes('const el = $("#shortcutCoach")'));
+  const coachStart = app.indexOf("function showShortcutCoach");
+  const coachEnd = app.indexOf("\nfunction coachShortcut", coachStart);
+  const coachFunction = app.slice(coachStart, coachEnd);
+  assert.ok(coachFunction.includes("#shortcutCoach"));
+  assert.ok(!coachFunction.includes("#toast"));
 });
