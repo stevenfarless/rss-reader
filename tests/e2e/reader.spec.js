@@ -219,9 +219,24 @@ test("retention cleanup preserves saved and queued articles", async ({ page }) =
   await page.locator("#previewCleanup").scrollIntoViewIfNeeded();
   await page.locator("#previewCleanup").click();
   await page.locator("#saveSettings").click();
-  await expect(page.locator("#articleList")).not.toContainText("Old ordinary article");
-  await expect(page.locator("#articleList")).toContainText("Old saved article");
-  await expect(page.locator("#articleList")).toContainText("Old queued article");
+  const remainingIds = await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("rss-reader-cache");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const records = await new Promise((resolve, reject) => {
+      const tx = db.transaction("items", "readonly");
+      const request = tx.objectStore("items").getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return records.map(item => item.id);
+  });
+  expect(remainingIds).not.toContain("old-ordinary");
+  expect(remainingIds).toContain("old-saved");
+  expect(remainingIds).toContain("old-queued");
 });
 
 test("invalid profile backups are rejected before changing local data", async ({ page }) => {
