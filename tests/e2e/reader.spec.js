@@ -497,6 +497,7 @@ test("Vim preset navigates panes and preserves the focused pane after reload", a
   await page.keyboard.press("h");
   await expect(page.locator("body")).toHaveAttribute("data-vim-pane", "sidebar");
 
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("rss-reader.settings.v1") || "{}").vimPane)).toBe("sidebar");
   await page.reload();
   await expect(page.locator("body")).toHaveClass(/vim-navigation-enabled/);
   await expect(page.locator("body")).toHaveAttribute("data-vim-pane", "sidebar");
