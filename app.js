@@ -3746,9 +3746,8 @@ function showShortcutCoach(label, shortcut) {
   const el = $("#shortcutCoach");
   if (!el) return;
 
-  el.textContent = shortcut
-    ? label + " · Shortcut: " + shortcut
-    : label + " · No keyboard shortcut assigned";
+  if (!shortcut) return;
+  el.textContent = label + " · Shortcut: " + shortcut;
   el.classList.add("show");
   clearTimeout(coachTimer);
   coachTimer = setTimeout(() => el.classList.remove("show"), 7000);
@@ -3806,9 +3805,8 @@ function coachShortcut(e) {
   if (target.dataset.id && !state.items.some(item => item.id === target.dataset.id)) return;
 
   const shortcutKey = findShortcutForAction(shortcutPreset(), action);
-  const shortcut = shortcutKey
-    ? shortcutKey.split(" ").map(displayDesc).join(" then ")
-    : "";
+  if (!shortcutKey) return;
+  const shortcut = shortcutKey.split(" ").map(displayDesc).join(" then ");
   showShortcutCoach(label, shortcut);
 }
 function toolbarOrderFromDialog() {
