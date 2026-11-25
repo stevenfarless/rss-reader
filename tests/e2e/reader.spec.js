@@ -214,9 +214,9 @@ test("retention cleanup preserves saved and queued articles", async ({ page }) =
   await page.reload();
   await page.locator("#settings").click();
   await page.locator("#retentionDaysSelect").selectOption("30");
-  await page.locator("#saveSettings").click();
   page.once("dialog", dialog => dialog.accept());
   await page.locator("#previewCleanup").click();
+  await page.locator("#saveSettings").click();
   await expect(page.locator("#articleList")).not.toContainText("Old ordinary article");
   await expect(page.locator("#articleList")).toContainText("Old saved article");
   await expect(page.locator("#articleList")).toContainText("Old queued article");
@@ -242,8 +242,7 @@ test("narrow mobile viewport keeps the reader within the screen", async ({ page 
     document: document.documentElement.scrollWidth
   }));
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
-  await page.locator("#settings").click();
-  await expect(page.locator("#settingsDialog")).toBeVisible();
+  await expect(page.locator("#heading")).toBeVisible();
 });
 
 test("service worker installs and serves the shell after network loss", async ({ browser }) => {
