@@ -164,3 +164,57 @@ test("feed health report identifies stale subscriptions", async ({ page }) => {
   await expect(page.locator("#feedHealthDialog")).toContainText("Stale");
   await page.locator("#feedHealthDone").click();
 });
+
+test("retention cleanup preserves saved and queued articles", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("rss-reader-cache");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("items", "readwrite");
+      const store = tx.objectStore("items");
+      const base = {
+        feedId: "retention-feed",
+        url: "https://example.test/article",
+        published: "2020-01-01T00:00:00.000Z",
+        content: "Old content",
+        summary: "Old content",
+        read: false,
+        queued: false,
+        saved: false,
+        tags: []
+      };
+      store.put({ ...base, id: "old-ordinary", title: "Old ordinary article" });
+      store.put({ ...base, id: "old-saved", title: "Old saved article", saved: true });
+      store.put({ ...base, id: "old-queued", title: "Old queued article", queued: true, queueOrder: 1 });
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    localStorage.setItem("rss-reader.feeds.v1", JSON.stringify([{
+      id: "retention-feed",
+      url: "https://example.test/feed.xml",
+      title: "Retention Fixture",
+      site: "https://example.test/",
+      added: new Date().toISOString(),
+      lastAttempt: Date.now(),
+      lastSuccess: Date.now(),
+      error: "",
+      via: "direct",
+      wpRoot: "",
+      group: ""
+    }]));
+    db.close();
+  });
+  await page.reload();
+  await page.locator("#settings").click();
+  await page.locator("#retentionDaysSelect").selectOption("30");
+  await page.locator("#saveSettings").click();
+  page.once("dialog", dialog => dialog.accept());
+  await page.locator("#previewCleanup").click();
+  await expect(page.locator("#articleList")).not.toContainText("Old ordinary article");
+  await expect(page.locator("#articleList")).toContainText("Old saved article");
+  await expect(page.locator("#articleList")).toContainText("Old queued article");
+});
