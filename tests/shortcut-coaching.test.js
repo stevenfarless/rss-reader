@@ -46,6 +46,8 @@ test("app wires coaching to pointer-originated clicks and the persisted setting"
   assert.match(app, /click", e => coachShortcut\(e\)/);
   assert.match(app, /isShortcutCoachPointerEvent\(e, pointerActivation\)/);
   assert.match(app, /findShortcutForAction\(shortcutPreset\(\), action\)/);
+  assert.match(app, /if \(!shortcutKey\) return;/);
+  assert.ok(!app.includes("No keyboard shortcut assigned"));
   assert.match(app, /sideToggle: \["sidebarToggle", "Toggle sidebar"\]/);
   assert.match(app, /data-rail-next-unread/);
   assert.ok(app.includes('target.hasAttribute("data-folder-toggle") ? "folderToggle"'));
