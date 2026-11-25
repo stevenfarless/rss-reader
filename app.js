@@ -37,7 +37,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.9.8";
+const APP_VERSION = "1.9.9";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -3418,7 +3418,7 @@ function exportOPML() {
   ).join("");
   download(`<?xml version="1.0"?><opml version="2.0"><head><title>RSS Reader subscriptions</title></head><body>${body}</body></opml>`, "rss-reader-subscriptions.opml", "text/xml");
 }
-async function importOPML(file) {
+async function importOPML(file, selectedUrls = null) {
   const d = new DOMParser().parseFromString(await file.text(), "text/xml");
   if (d.querySelector("parsererror") || d.documentElement.localName !== "opml") return toast("Invalid OPML file.");
   let added = 0, skipped = 0, failed = 0, done = 0;
@@ -3428,6 +3428,7 @@ async function importOPML(file) {
     const rawUrl = o.getAttribute("xmlUrl");
     let url;
     try { url = normalizeFeedUrl(rawUrl); } catch { skipped++; continue; }
+    if (selectedUrls && !selectedUrls.has(url)) continue;
     if (state.feeds.some(f => sameFeedUrl(f.url, url)) || seenBatch.has(url)) { skipped++; continue; }
     seenBatch.add(url);
     const parent = o.parentElement;
@@ -3744,17 +3745,34 @@ function previewOPML(file) {
       }
     }
     const folders = [...folderPaths];
-    const folderText = folders.length ? "Folder hierarchy:\n" + folders.join("\n") : "No named folders.";
-    const duplicateText = duplicates.length ? "Duplicates to skip:\n" + duplicates.slice(0, 12).join("\n") : "No duplicate feeds.";
-    const invalidText = invalid.length ? "Invalid URLs to skip:\n" + invalid.slice(0, 12).join("\n") : "No invalid feed URLs.";
-    const feedText = "Feed entries:\n" + entries.slice(0, 12).map(entry =>
-      (entry.path.length ? entry.path.join(" / ") + " / " : "") + entry.title
-    ).join("\n");
-    $("#opmlPreviewSummary").textContent =
-      entries.length + (entries.length === 1 ? " feed entry" : " feed entries") + " and " +
-      folders.length + (folders.length === 1 ? " folder" : " folders") + " found. " +
-      duplicates.length + " duplicates and " + invalid.length + " invalid URLs will be skipped.";
-    $("#opmlPreviewDetails").textContent = [folderText, duplicateText, invalidText, feedText].join("\n\n");
+    const normalizedByEntry = new Map();
+    const invalidEntries = new Set();
+    const seenUrls = new Set();
+    const duplicateEntries = new Set();
+    for (const entry of entries) {
+      try {
+        const url = normalizeFeedUrl(entry.url);
+        normalizedByEntry.set(entry, url);
+        if (seenUrls.has(url) || state.feeds.some(feed => sameFeedUrl(feed.url, url))) duplicateEntries.add(entry);
+        seenUrls.add(url);
+      } catch { invalidEntries.add(entry); }
+    }
+    const eligible = entries.filter(entry => normalizedByEntry.has(entry) && !duplicateEntries.has(entry) && !state.feeds.some(feed => sameFeedUrl(feed.url, normalizedByEntry.get(entry))));
+    pendingOPMLFeedUrls = eligible.map(entry => normalizedByEntry.get(entry));
+    $("#opmlPreviewSummary").textContent = eligible.length + " available feed" + (eligible.length === 1 ? "" : "s") + " selected by default. " + duplicateEntries.size + " duplicates and " + invalidEntries.size + " invalid URLs will be skipped."; 
+    $("#opmlPreviewDetails").textContent = folders.length ? "Folders found: " + folders.join(" · ") : "No named folders."; 
+    const eligibleUrls = new Set(pendingOPMLFeedUrls);
+    $("#opmlFeedSelection").innerHTML = entries.map(entry => {
+      const url = normalizedByEntry.get(entry) || "";
+      const selectable = !!url && eligibleUrls.has(url);
+      const status = invalidEntries.has(entry) ? "Invalid URL" : !selectable ? "Duplicate or already subscribed" : "";
+      const label = [...entry.path, entry.title].filter(Boolean).join(" / ");
+      return '<label class="opml-feed-option' + (selectable ? "" : " unavailable") + '"><input type="checkbox" data-opml-feed="' + esc(url) + '"' + (selectable ? " checked" : " disabled") + '><span class="opml-feed-title">' + esc(label) + '</span>' + (status ? '<span class="opml-feed-status">' + esc(status) + '</span>' : "") + '</label>';
+    }).join("");
+    $("#opmlSelectAll").disabled = eligible.length === 0;
+    $("#opmlSelectNone").disabled = eligible.length === 0;
+    $("#opmlPreviewConfirm").disabled = eligible.length === 0;
+    $("#opmlPreviewConfirm").textContent = eligible.length ? "Import " + eligible.length + " feeds" : "No new feeds to import";
     pendingOPMLFile = file;
     $("#opmlPreviewDialog").showModal();
   }).catch(error => toast("Could not read OPML file: " + error.message));
@@ -4687,8 +4705,25 @@ function bind() {
   $("#importOpml").onclick = () => $("#opmlFile").click();
   $("#exportOpml").onclick = exportOPML;
   $("#opmlFile").onchange = e => { if (e.target.files[0]) previewOPML(e.target.files[0]); e.target.value = ""; };
-  $("#opmlPreviewClose").onclick = $("#opmlPreviewCancel").onclick = () => $("#opmlPreviewDialog").close();
-  $("#opmlPreviewConfirm").onclick = async () => { if (!pendingOPMLFile) return; const file=pendingOPMLFile; pendingOPMLFile=null; $("#opmlPreviewDialog").close(); await importOPML(file); };
+  const closeOPMLPreview = () => { pendingOPMLFile = null; pendingOPMLFeedUrls = []; $("#opmlPreviewDialog").close(); };
+  $("#opmlPreviewClose").onclick = $("#opmlPreviewCancel").onclick = closeOPMLPreview;
+  const updateOPMLSelection = () => {
+    const selected = $("#opmlFeedSelection input[data-opml-feed]:checked").length;
+    $("#opmlPreviewConfirm").disabled = selected === 0;
+    $("#opmlPreviewConfirm").textContent = selected ? "Import " + selected + " feed" + (selected === 1 ? "" : "s") : "Select feeds to import";
+  };
+  $("#opmlFeedSelection").addEventListener("change", updateOPMLSelection);
+  $("#opmlSelectAll").onclick = () => { $("#opmlFeedSelection input[data-opml-feed]:not(:disabled)").forEach(input => { input.checked = true; }); updateOPMLSelection(); };
+  $("#opmlSelectNone").onclick = () => { $("#opmlFeedSelection input[data-opml-feed]:not(:disabled)").forEach(input => { input.checked = false; }); updateOPMLSelection(); };
+  $("#opmlPreviewConfirm").onclick = async () => {
+    if (!pendingOPMLFile) return;
+    const file = pendingOPMLFile;
+    const selected = new Set($("#opmlFeedSelection input[data-opml-feed]:checked").map(input => input.dataset.opmlFeed));
+    pendingOPMLFile = null;
+    pendingOPMLFeedUrls = [];
+    $("#opmlPreviewDialog").close();
+    await importOPML(file, selected);
+  };
   // The X and Cancel buttons are type="button" (not submit), so the
   // Add feed button is the form's only submit button and therefore
   // the one Enter submits with. They close the dialog explicitly
