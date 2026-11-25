@@ -245,3 +245,16 @@ test("narrow mobile viewport keeps the reader within the screen", async ({ page 
   await page.locator("#settings").click();
   await expect(page.locator("#settingsDialog")).toBeVisible();
 });
+
+test("service worker installs and serves the shell after network loss", async ({ browser }) => {
+  const context = await browser.newContext({ serviceWorkers: "allow" });
+  const page = await context.newPage();
+  await page.goto("/");
+  await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
+  await expect(page.locator("#heading")).toHaveText("All articles");
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.locator("#heading")).toHaveText("All articles");
+  await context.setOffline(false);
+  await context.close();
+});
