@@ -61,3 +61,10 @@ test("mobile bottom reading progress stays on the viewport edge", () => {
   assert.ok(!css.includes("#readProgress.bottom{bottom:calc(56px + env(safe-area-inset-bottom))}"));
   assert.ok(css.includes("body:not(.mobile-bar-top) .reader-actions{position:fixed;left:0;right:0;bottom:0;z-index:30"));
 });
+
+
+test("Vim pane focus survives settings validation", () => {
+  assert.match(app, /if \(\["sidebar", "list", "article"\]\.includes\(d\.vimPane\)\) next\.vimPane = d\.vimPane/);
+  assert.match(app, /function setVimPaneFocus\(pane\)[^]*local\(S, state\.settings\)/);
+  assert.match(app, /function handleVimNavigation\(e\)[^]*if \(key === "j" \|\| key === "k"\)/);
+});
