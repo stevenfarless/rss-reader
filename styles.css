@@ -366,3 +366,5 @@ dialog .x:focus:not(:focus-visible){background:transparent}
 .stats-days>div{display:flex;justify-content:space-between;padding:5px 8px;background:var(--panel2);border-radius:4px}
 
 .feed-row.feed-stale .feed-dot{background:#b78b43}
+
+.list-heading p:empty{display:none}
