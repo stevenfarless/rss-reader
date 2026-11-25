@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.14] - 2026-11-25
+
+### Fixed
+- Defer the OPML preview modal until the browser has completed closing Settings.
+- Include the individual Vim key-handling results in browser test output when a regression occurs.
+
+
 ## [1.9.13] - 2026-11-25
 
 ### Fixed
