@@ -13,6 +13,12 @@
    content), or via the reader/proxy services. */
 
 const $ = s => document.querySelector(s);
+const nativeShowModal = HTMLDialogElement.prototype.showModal;
+HTMLDialogElement.prototype.showModal = function (...args) {
+  if (!this.hasAttribute("tabindex")) this.setAttribute("tabindex", "-1");
+  nativeShowModal.apply(this, args);
+  this.focus({ preventScroll: true });
+};
 const $$ = s => [...document.querySelectorAll(s)];
 const K = "rss-reader.feeds.v1", S = "rss-reader.settings.v1", DB = "rss-reader-cache";
 const KF = "rss-reader.folders.v1", KT = "rss-reader.tags.v1", LR = "rss-reader.lastRefresh.v1";
