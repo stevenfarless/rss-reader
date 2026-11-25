@@ -13,6 +13,12 @@
    content), or via the reader/proxy services. */
 
 const $ = s => document.querySelector(s);
+const nativeShowModal = HTMLDialogElement.prototype.showModal;
+HTMLDialogElement.prototype.showModal = function (...args) {
+  if (!this.hasAttribute("tabindex")) this.setAttribute("tabindex", "-1");
+  nativeShowModal.apply(this, args);
+  this.focus({ preventScroll: true });
+};
 const $$ = s => [...document.querySelectorAll(s)];
 const K = "rss-reader.feeds.v1", S = "rss-reader.settings.v1", DB = "rss-reader-cache";
 const KF = "rss-reader.folders.v1", KT = "rss-reader.tags.v1", LR = "rss-reader.lastRefresh.v1";
@@ -31,15 +37,15 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.8.24";
+const APP_VERSION = "1.9.0";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null, savedSearch: null,
   folders: [], tags: [], savedSearches: [], rules: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 230, listWidth: 430, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader" }
+  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 250, listWidth: 400, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader", shortcutCoaching: false, retentionDays: 0, retentionCount: 0, globalRefreshMinutes: 30 }
 };
-let db, timer, pendingSeq = null, pendingSeqTimer = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null;
+let db, timer, pendingSeq = null, pendingSeqTimer = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null, automaticRefreshTimer = null;
 /* Text-to-speech state (#105): the article being read, its sentence
    chunks, and where playback has reached. Null when nothing is playing. */
 let tts = null;
@@ -165,11 +171,13 @@ let feedMenuFeedId = null;
 function feedMenuHTML(f) {
   const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id;
   const orderLabel = !f.sort || f.sort === "global" ? "Use global" : f.sort === "newest" ? "Newest" : "Oldest";
+  const refreshInterval = Number(f.refreshMinutes) || 0;
   return `<button type="button" data-feed-opt="rename">Rename</button>` +
     `<button type="button" data-feed-opt="open">Open site</button>` +
     `<button type="button" data-feed-opt="autofull" aria-pressed="${!!f.autoFull}">${f.autoFull ? "✓ " : ""}Full article: ${f.autoFull ? "Always fetch" : "Use RSS text"}</button>` +
     `<button type="button" data-feed-opt="layout">Layout for this feed</button>` +
     `<button type="button" data-feed-opt="order">Order for this feed: ${orderLabel}</button>` +
+    `<button type="button" data-feed-opt="interval">Refresh interval: ${refreshInterval ? refreshInterval + " min" : "Global"}</button>` +
     `<button type="button" data-feed-opt="unsub">${armed ? "Click again to unsubscribe" : "Unsubscribe"}</button>`;
 }
 function renderFeedMenu() {
@@ -489,7 +497,11 @@ function validateSettings(d) {
   if (typeof d.notifyNew === "boolean") next.notifyNew = d.notifyNew;
   if (typeof d.sidebarCollapsed === "boolean") next.sidebarCollapsed = d.sidebarCollapsed;
   if (typeof d.sidebarWidth === "number" && d.sidebarWidth >= 180 && d.sidebarWidth <= 420) next.sidebarWidth = d.sidebarWidth;
-  if (typeof d.listWidth === "number" && d.listWidth >= 320 && d.listWidth <= 640) next.listWidth = d.listWidth;
+  if (typeof d.listWidth === "number" && d.listWidth >= 280 && d.listWidth <= 640) next.listWidth = d.listWidth;
+  if (typeof d.shortcutCoaching === "boolean") next.shortcutCoaching = d.shortcutCoaching;
+  if ([0,30,90,180,365].includes(Number(d.retentionDays))) next.retentionDays = Number(d.retentionDays);
+  if ([0,250,500,1000,2500,5000].includes(Number(d.retentionCount))) next.retentionCount = Number(d.retentionCount);
+  if ([15,30,60,180,360,720,1440].includes(Number(d.globalRefreshMinutes))) next.globalRefreshMinutes = Number(d.globalRefreshMinutes);
   if (d.sort === "newest" || d.sort === "oldest") next.sort = d.sort;
   if (["all", "today", "week"].includes(d.filter)) next.filter = d.filter;
   if (Array.isArray(d.toolbarOrder)) {
@@ -706,6 +718,10 @@ function readSettingsFromDialog() {
     vimPane: state.settings.vimPane || "list",
     cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
+    shortcutCoaching: $("#shortcutCoachingToggle").checked,
+    retentionDays: Number($("#retentionDaysSelect").value),
+    retentionCount: Number($("#retentionCountSelect").value),
+    globalRefreshMinutes: Number($("#globalRefreshMinutesSelect").value),
     sidebarCollapsed: state.settings.sidebarCollapsed || false,
     sidebarWidth: state.settings.sidebarWidth, listWidth: state.settings.listWidth,
     // Sort and filter are set elsewhere (the sort button, the filter
@@ -783,7 +799,7 @@ function applySettings() {
   // Keep the browser chrome (status bar, task switcher) on the same
   // color as the theme, so the theme never flashes the wrong color.
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = t === "light" ? "#f4f2ec" : "#171916";
+  if (meta) meta.content = t === "light" ? "#f4f2ec" : t === "white" ? "#ffffff" : "#000000";
   document.documentElement.dataset.width = state.settings.width;
   document.documentElement.dataset.size = state.settings.size;
   // Reader typography (#111): serif/comfortable are the defaults, so
@@ -818,8 +834,8 @@ function applySidebarCollapsed() {
    The splitter handles are absolutely positioned in .layout and placed
    from the panes' actual rects, so they stay on the boundary even when
    the grid clamps a column on a narrow viewport. */
-const SIDE_W = { min: 180, max: 420, def: 230 };
-const LIST_W = { min: 320, max: 640, def: 430 };
+const SIDE_W = { min: 180, max: 420, def: 250 };
+const LIST_W = { min: 280, max: 640, def: 400 };
 function clampW(v, r) { return Math.min(r.max, Math.max(r.min, Math.round(v) || r.def)); }
 function applyPaneWidths() {
   const side = clampW(state.settings.sidebarWidth, SIDE_W);
@@ -1493,7 +1509,7 @@ async function addFeed(raw) {
   if (dup) throw Error(`You already subscribe to this feed (“${dup.title}”).`);
   const feed = {
     id: id(), url: loaded.url, title: loaded.parsed.title, site: loaded.parsed.site,
-    added: new Date().toISOString(), error: "", via: loaded.via, wpRoot: loaded.wpRoot || "", group: ""
+    added: new Date().toISOString(), error: "", via: loaded.via, wpRoot: loaded.wpRoot || "", group: "", lastAttempt: Date.now(), lastSuccess: Date.now(), retrievalPath: loaded.via, consecutiveFailures: 0
   };
   state.feeds.push(feed);
   saveFeeds();
@@ -1581,7 +1597,7 @@ async function saveItems(feed, items) {
       published: d ? d.toISOString() : null,
       image: x.image || old?.image || "",
       enclosure: x.enclosure || old?.enclosure || null,
-      read: old?.read || false, saved: old?.saved || false,
+      read: old?.read || false, readAt: old?.readAt || null, saved: old?.saved || false, queued: old?.queued || false, queueOrder: old?.queueOrder || 0,
       snoozedUntil: old?.snoozedUntil || null,
       tags: old?.tags || []
     };
@@ -1618,6 +1634,9 @@ async function saveItems(feed, items) {
 }
 
 async function refreshFeed(f) {
+  if (f.refreshing) return false;
+  f.refreshing = true;
+  f.lastAttempt = Date.now();
   try {
     let loaded;
     if (f.via === "wp" && f.wpRoot) {
@@ -1633,25 +1652,32 @@ async function refreshFeed(f) {
     }
     f.title = loaded.parsed.title || f.title;
     f.error = "";
+    f.consecutiveFailures = 0; f.nextRetryAt = 0; f.retrievalPath = loaded.via;
     f.via = loaded.via;
     f.wpRoot = loaded.wpRoot || f.wpRoot || "";
     if (loaded.url) f.url = loaded.url;
     await saveItems(f, loaded.parsed.items);
+    f.lastSuccess = Date.now();
     return true;
   } catch (e) {
-    f.error = classifyError(e);
+    f.error = e?.name === "QuotaExceededError" ? "Browser storage is full. Use Settings > Storage management to remove older articles, then retry." : classifyError(e); f.lastError = f.error; f.lastErrorAt = Date.now();
+    f.consecutiveFailures = (Number(f.consecutiveFailures) || 0) + 1;
+    const backoff = Math.min(24 * 60 * 60 * 1000, 5 * 60 * 1000 * (2 ** Math.min(8, f.consecutiveFailures - 1)));
+    f.nextRetryAt = Date.now() + backoff;
     return false;
+  } finally {
+    f.refreshing = false;
   }
 }
 /* A failed feed shows its full error with Retry and Unsubscribe (#162). */
 function showFeedError(id) {
   const f = state.feeds.find(v => v.id === id);
   if (!f) return;
-  $("#feedErrorText").textContent = f.error || "This feed failed to load.";
+  $("#feedErrorText").textContent = [f.error || "This feed failed to load.", f.lastAttempt ? "Last attempt: " + new Date(f.lastAttempt).toLocaleString() : "", f.lastSuccess ? "Last success: " + new Date(f.lastSuccess).toLocaleString() : "No successful refresh recorded", "Consecutive failures: " + (Number(f.consecutiveFailures) || 0), f.retrievalPath ? "Retrieval path: " + f.retrievalPath : "", f.lastError ? "Most recent error: " + f.lastError + (f.lastErrorAt ? " (" + new Date(f.lastErrorAt).toLocaleString() + ")" : "") : ""].filter(Boolean).join("\n");
   $("#feedErrorDialog").dataset.feed = id;
   $("#feedErrorDialog").showModal();
 }
-async function refresh() {
+async function refresh(automatic = false) {
   if (!state.feeds.length) { toast("Add a feed first."); return; }
   const now = Date.now();
   if (now - refreshAt < 2000) return; // debounce repeated refreshes (incl. holding "r")
@@ -1665,17 +1691,19 @@ async function refresh() {
     // concurrent requests, and the burst is what gets the shared
     // helper (rss2json) rate-limited by publishers. Five at a time
     // is far gentler and still fast enough.
-    const results = new Array(state.feeds.length);
+    const eligibleFeeds = state.feeds.filter(f => !automatic || ((!f.nextRetryAt || Date.now() >= f.nextRetryAt) && Date.now() - (f.lastAttempt || 0) >= (Number(f.refreshMinutes) || Number(state.settings.globalRefreshMinutes) || 30) * 60000));
+    if (!eligibleFeeds.length) { if (!automatic) toast("All feeds are within their refresh interval."); return; }
+    const results = new Array(eligibleFeeds.length);
     let next = 0;
     const REFRESH_CONCURRENCY = 5;
-    await Promise.all(Array.from({ length: Math.min(REFRESH_CONCURRENCY, state.feeds.length) }, async () => {
-      while (next < state.feeds.length) {
+    await Promise.all(Array.from({ length: Math.min(REFRESH_CONCURRENCY, eligibleFeeds.length) }, async () => {
+      while (next < eligibleFeeds.length) {
         const i = next++;
-        results[i] = await refreshFeed(state.feeds[i]);
+        results[i] = await refreshFeed(eligibleFeeds[i]);
       }
     }));
     const ok = results.filter(Boolean).length;
-    const failed = state.feeds.filter((f, i) => !results[i]).map(f => f.title);
+    const failed = eligibleFeeds.filter((f, i) => !results[i]).map(f => f.title);
     saveFeeds();
     // Rules (#109) can add tags to new articles; keep the tag list
     // current after a refresh.
@@ -1684,9 +1712,9 @@ async function refresh() {
     state.lastRefresh = Date.now();
     try { localStorage.setItem(LR, String(state.lastRefresh)); } catch {}
     render();
-    toast(ok === state.feeds.length
-      ? `Refreshed ${ok} of ${state.feeds.length} feeds.`
-      : `Refreshed ${ok} of ${state.feeds.length} feeds. Failed: ${failed.join(", ")}.`);
+    toast(ok === eligibleFeeds.length
+      ? `Refreshed ${ok} of ${eligibleFeeds.length} feeds.`
+      : `Refreshed ${ok} of ${eligibleFeeds.length} feeds. Failed: ${failed.join(", ")}.`);
   } finally {
     btn.disabled = false;
     btn.removeAttribute("aria-busy");
@@ -1747,6 +1775,7 @@ function visible() {
   const savedSearch = state.view === "savedSearch" ? state.savedSearches.find(v => v.id === state.savedSearch) : null;
   let a = state.items.filter(x => {
     if (state.view === "snoozed") return isSnoozed(x);
+    if (state.view === "queue") return !!x.queued;
     if (isSnoozed(x)) return false;
     if (state.view === "unread") return !x.read && !mutedIds.has(x.feedId);
     if (state.view === "saved") return x.saved;
@@ -1780,6 +1809,7 @@ function visible() {
   const newest = effectiveSort() === "newest";
   // Precompute the date keys once: the old comparator re-parsed each
   // article's date O(log N) times during the sort.
+  if (state.view === "queue") return a.sort((x,y)=>(x.queueOrder||0)-(y.queueOrder||0));
   const keyed = a.map(x => [dateSortKey(x), x]);
   keyed.sort((p, q) => {
     const dx = p[0], dy = q[0];
@@ -1820,6 +1850,9 @@ function renderNav() {
   $("#savedCount").textContent = fmtCount(state.items.filter(x => x.saved && !isSnoozed(x)).length);
   $("#snoozedCount").textContent = fmtCount(state.items.filter(isSnoozed).length);
   $("#highlightsCount").textContent = fmtCount(state.highlights.length);
+  const queueCount = $("#queueCount"); if (queueCount) queueCount.textContent = fmtCount(state.items.filter(x => x.queued).length);
+  const moreCount = $("#libraryMoreCount"); if (moreCount) moreCount.textContent = fmtCount(state.items.filter(x => x.saved || isSnoozed(x)).length + state.highlights.length);
+  $("#libraryMore")?.querySelector("summary")?.classList.toggle("active", ["saved","snoozed","highlights"].includes(state.view));
   $$(".nav").forEach(b => {
     b.classList.toggle("active", b.dataset.view === state.view && state.view !== "feed");
     if (b.dataset.view === state.view && state.view !== "feed") b.setAttribute("aria-current", "true");
@@ -1859,6 +1892,8 @@ function renderNav() {
     const label = g ? `<div class="folder-head" data-drop-folder="${esc(g)}"><button type="button" class="folder-toggle" data-folder-toggle="${esc(g)}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Collapse"} folder ${esc(g)}"><span class="folder-chevron" aria-hidden="true">▾</span></button><button type="button" class="feed-group folder-open${state.view === "folder" && state.folder === g ? " active" : ""}" data-folder="${esc(g)}" ${state.view === "folder" && state.folder === g ? 'aria-current="true"' : ""}>${esc(g)}${folderUnread ? `<span>${fmtCount(folderUnread)}</span>` : ""}</button></div>` : (groupNames.length > 1 ? `<div class="feed-group" data-drop-folder="">Ungrouped</div>` : "");
     const rows = groups[g].map(f => {
       const unreadCount = unreadByFeed.get(f.id) || 0;
+      const staleAfter = (Number(f.refreshMinutes) || Number(state.settings.globalRefreshMinutes) || 30) * 3 * 60000;
+      const health = f.error ? " feed-error" : f.lastSuccess && Date.now() - f.lastSuccess > staleAfter ? " feed-stale" : "";
       const err = f.error ? " feed-error" : "";
       const armed = pendingDelete?.kind === "feed" && pendingDelete.id === f.id;
       // The site's own favicon marks the row; if it fails to load the
@@ -1872,7 +1907,7 @@ function renderNav() {
       const countBtn = unreadCount ? `<button type="button" class="feed-count" data-mark-read="${esc(f.id)}" title="Mark ${esc(displayTitle)} read" aria-label="Mark ${esc(displayTitle)} read">${fmtCount(unreadCount)}</button>` : "";
       const muteBtn = `<button type="button" class="feed-mute${f.muted ? " on" : ""}" data-mute="${esc(f.id)}" title="${f.muted ? "Unmute" : "Mute"} ${esc(displayTitle)}" aria-label="${f.muted ? "Unmute" : "Mute"} ${esc(displayTitle)}" aria-pressed="${!!f.muted}">${f.muted ? "Muted" : "Mute"}</button>`;
       const optsBtn = `<button type="button" class="feed-opts" data-feed-opts="${esc(f.id)}" title="Options for ${esc(displayTitle)}" aria-label="Options for ${esc(displayTitle)}" aria-haspopup="true" aria-expanded="false">···</button>`;
-      return `<div class="feed-row-wrap${g ? " nested-feed" : ""}"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${err}" draggable="true" title="${esc(displayTitle)}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(displayTitle)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(displayTitle)}">!</button>` : ""}${countBtn}${muteBtn}${optsBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(displayTitle)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(displayTitle)}` : `Unsubscribe from ${esc(displayTitle)}`}">${armed ? "Sure?" : "×"}</button></div>`;
+      return `<div class="feed-row-wrap${g ? " nested-feed" : ""}"><button class="feed-row${state.feed === f.id ? " active" : ""}${f.muted ? " muted" : ""}${health}" draggable="true" title="${esc(displayTitle + (f.lastSuccess ? " · Last successful refresh: " + new Date(f.lastSuccess).toLocaleString() : ""))}" data-feed="${esc(f.id)}" ${state.feed === f.id ? 'aria-current="true"' : ""}>${mark}<span class="feed-name">${esc(displayTitle)}</span></button>${f.error ? `<button type="button" class="feed-err" data-feed-err="${esc(f.id)}" title="This feed failed to load — click for details" aria-label="Feed error: ${esc(displayTitle)}">!</button>` : ""}${countBtn}${muteBtn}${optsBtn}<button type="button" class="feed-unsub${armed ? " armed" : ""}" data-unsub="${esc(f.id)}" title="${armed ? "Click again to unsubscribe" : `Unsubscribe from ${esc(displayTitle)}`}" aria-label="${armed ? `Click again to unsubscribe from ${esc(displayTitle)}` : `Unsubscribe from ${esc(displayTitle)}`}">${armed ? "Sure?" : "×"}</button></div>`;
     }).join("");
     return label + (g ? `<div class="folder-feeds" data-drop-folder="${esc(g)}"${collapsed ? " hidden" : ""}>${rows}</div>` : rows);
   }).join("") : '<p class="muted">Your feeds will appear here.</p>';
@@ -2020,10 +2055,27 @@ function renderHighlightsList() {
   if (ma) ma.disabled = true;
   if (mb) mb.disabled = true;
 }
+async function removeVisibleFromQueue() {
+  const targets = visible().filter(item => item.queued);
+  if (!targets.length) { toast("There are no queued articles in this view."); return; }
+  const previousOrder = new Map(targets.map(item => [item.id, item.queueOrder || 0]));
+  for (const item of targets) { item.queued = false; item.queueOrder = 0; }
+  await putMany(targets);
+  render();
+  toast("Removed " + targets.length + " article" + (targets.length === 1 ? "" : "s") + " from the queue.", {
+    label: "Undo",
+    fn: async () => {
+      for (const item of targets) { item.queued = true; item.queueOrder = previousOrder.get(item.id); }
+      await putMany(targets);
+      render();
+    }
+  });
+}
 function renderList() {
   const a = visible();
-  const titles = { all: "All articles", unread: "Unread", saved: "Saved", snoozed: "Snoozed", highlights: "Highlights", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", folder: state.folder || "Folder", savedSearch: state.savedSearches.find(s => s.id === state.savedSearch)?.name || "Saved search", tag: state.tag ? "Tag: " + state.tag : "Tag" };
+  const titles = { all: "All articles", unread: "Unread", queue: "Reading queue", saved: "Saved", snoozed: "Snoozed", highlights: "Highlights", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", folder: state.folder || "Folder", savedSearch: state.savedSearches.find(s => s.id === state.savedSearch)?.name || "Saved search", tag: state.tag ? "Tag: " + state.tag : "Tag" };
   $("#heading").textContent = titles[state.view];
+  $("#removeQueue").hidden = state.view !== "queue";
   $("#mobileTitle").textContent = titles[state.view];
   // The Highlights view (#116) lists the highlights themselves, newest
   // first, with the article each came from; clicking one opens it.
@@ -2036,11 +2088,12 @@ function renderList() {
   // The filter menu button shows the active filter (#175).
   const fb = $("#filterMenuBtn");
   if (fb) fb.querySelector(".disclosure-label").textContent = ({ all: "All", today: "Today", week: "This week" }[state.filter] || "All");
-  const base = state.view === "saved" ? "Articles you have kept for later."
+  const base = state.view === "queue" ? "Articles arranged for your next reading session."
+    : state.view === "saved" ? "Articles you have kept for later."
     : state.view === "snoozed" ? "Articles waiting to come back."
     : state.view === "unread" ? "Stories you have not read yet."
     : state.view === "highlights" ? "Passages you highlighted, with your notes."
-    : state.view === "folder" ? `Every feed in “${state.folder}”, newest first.`
+    : state.view === "folder" ? ""
     : state.view === "savedSearch" ? "A saved filter, run over your library."
     : state.view === "tag" ? `Articles tagged “${state.tag}”.`
     : "";
@@ -2067,7 +2120,7 @@ function renderList() {
     const thumb = feedCardImage(srcFeed) && x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : "";
     const rt = readingTimeText(x);
     const snoozeNote = state.view === "snoozed" && x.snoozedUntil ? ` · <span>Snoozed until ${esc(fmtDateTime(new Date(x.snoozedUntil)))}</span>` : "";
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}">${thumb}<div class="article-main"><h2>${esc(x.title)}</h2><div class="article-source">${fav ? `<img class="card-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span>${esc(feedTitle)}</span></div>${excerpt}<div class="article-bottom"><span>${showAuthor ? `${esc(x.author)} · ` : ""}<time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? ` · <span>${rt}</span>` : ""}${snoozeNote}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button>${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div></article>`;
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}">${thumb}<div class="article-main"><h2>${esc(x.title)}</h2><div class="article-source">${fav ? `<img class="card-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span>${esc(feedTitle)}</span></div>${excerpt}<div class="article-bottom"><span>${showAuthor ? `${esc(x.author)} · ` : ""}<time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? ` · <span>${rt}</span>` : ""}${snoozeNote}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button><button data-action="queue" data-id="${esc(x.id)}" title="${x.queued ? "Remove from queue" : "Add to queue"}" aria-label="${x.queued ? "Remove from queue" : "Add to queue"}: ${esc(x.title)}" aria-pressed="${!!x.queued}">${x.queued ? "☷" : "＋"}</button>${state.view === "queue" ? `<button class="text-btn" data-action="queue-up" data-id="${esc(x.id)}" title="Move earlier">↑</button><button class="text-btn" data-action="queue-down" data-id="${esc(x.id)}" title="Move later">↓</button>` : ""}${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div></article>`;
   }).join("") : (state.query || state.filter !== "all" ? `<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>No articles match${state.query ? " &quot;" + esc(state.query) + "&quot;" : ""}.</p><button class="primary" id="emptyClear">Clear search</button></div>` : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>');
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
@@ -2473,7 +2526,7 @@ function renderReader(x) {
   const tagsRowHTML = ((x.tags || []).length || tagsOpen) ? `<div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<span id="tagInputWrap" ${tagsOpen ? "" : "hidden"}><input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></span></div>` : "";
   const hasNote = !!getArticleNote(x.id);
   const readerFeedTitle = f ? feedDisplayTitle(f) : x.feedTitle;
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span title="${esc(readerFeedTitle)}" aria-label="${esc(readerFeedTitle)}">${esc(readerFeedTitle)}</span><div class="reader-actions">${toolbarOrder().map(k => toolbarButtonHTML(k, x, {fullLabel, canListen, canFull, hasNote})).join("")}</div></div>${tagsRowHTML}${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${articleNoteHTML(x)}${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span title="${esc(readerFeedTitle)}" aria-label="${esc(readerFeedTitle)}">${esc(readerFeedTitle)}</span><div class="reader-actions">${toolbarOrder().map(k => toolbarButtonHTML(k, x, {fullLabel, canListen, canFull, hasNote})).join("")}<button type="button" class="reader-btn" data-reader="queue" title="${x.queued ? "Remove from queue" : "Add to reading queue"}" aria-label="${x.queued ? "Remove from reading queue" : "Add to reading queue"}" aria-pressed="${!!x.queued}">${x.queued ? "☷" : "＋"}</button></div></div>${tagsRowHTML}${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${articleNoteHTML(x)}${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
   setupReaderToolbarOverflow();
   const tagAdd = $("#tagAddBtn");
   if (tagAdd) tagAdd.onclick = () => { const x = selectedItem(); const inp = $("#tagInput"); if (x && inp) addTagToItem(x, inp.value); };
@@ -3367,7 +3420,7 @@ async function importOPML(file) {
         const loaded = await loadFeedFromUrl(url);
         const feed = {
           id: id(), url: loaded.url, title: loaded.parsed.title, site: loaded.parsed.site,
-          added: new Date().toISOString(), error: "", via: loaded.via, wpRoot: loaded.wpRoot || "", group
+          added: new Date().toISOString(), error: "", via: loaded.via, wpRoot: loaded.wpRoot || "", group, lastAttempt: Date.now(), lastSuccess: Date.now(), retrievalPath: loaded.via, consecutiveFailures: 0
         };
         state.feeds.push(feed);
         await saveItems(feed, loaded.parsed.items);
@@ -3412,6 +3465,313 @@ async function importSettings(file) {
     toast("Settings imported.");
   } catch (e) { toast(e.message); }
 }
+let pendingOPMLFile = null;
+let coachLastShown = new Map(), pointerActivation = null;
+async function exportCompleteBackup(){try{const d={format:"rss-reader-backup",version:1,exportedAt:new Date().toISOString(),profile:{feeds:state.feeds,folders:state.folders,tags:state.tags,savedSearches:state.savedSearches,rules:state.rules,settings:state.settings,notes:articleNotes,collapsedFolders:[...collapsedFolders],lastRefresh:state.lastRefresh||0},items:await dbAll(),highlights:await hlAll()};download(JSON.stringify(d,null,2),"rss-reader-backup.json","application/json");toast("Complete profile backup exported.");}catch(e){toast("Backup export failed: "+e.message);}}
+function validateCompleteBackup(d){if(!d||d.format!=="rss-reader-backup"||d.version!==1||!d.profile||!Array.isArray(d.profile.feeds)||!Array.isArray(d.items)||!Array.isArray(d.highlights)||!d.profile.settings||typeof d.profile.settings!=="object")throw Error("Unsupported or incomplete backup file.");if(!d.profile.feeds.every(x=>x&&typeof x.id==="string"&&typeof x.url==="string")||!d.items.every(x=>x&&typeof x.id==="string"&&typeof x.feedId==="string")||!d.highlights.every(x=>x&&typeof x.id==="string"&&typeof x.itemId==="string"))throw Error("Backup contains invalid records.");return d;}
+async function importCompleteBackup(file) {
+  let backup;
+  let settings;
+  try {
+    backup = validateCompleteBackup(JSON.parse(await file.text()));
+    settings = validateSettings(backup.profile.settings);
+    for (const key of ["folders", "tags", "savedSearches", "rules"]) {
+      if (backup.profile[key] !== undefined && !Array.isArray(backup.profile[key])) {
+        throw new Error("Backup contains an invalid " + key + " collection.");
+      }
+    }
+    if (backup.profile.notes !== undefined &&
+        (!backup.profile.notes || typeof backup.profile.notes !== "object" || Array.isArray(backup.profile.notes))) {
+      throw new Error("Backup contains invalid article notes.");
+    }
+  } catch (error) {
+    toast("Backup validation failed: " + error.message);
+    return;
+  }
+
+  const summary = "Backup contains " + backup.profile.feeds.length + " feeds, " +
+    backup.items.length + " articles, and " + backup.highlights.length +
+    " highlights. Choose OK to replace this profile. Choose Cancel to merge it into the current profile.";
+  const replace = confirm(summary);
+  if (!replace && !confirm("Merge backup records? Existing records with matching IDs or feed URLs will be kept.")) return;
+
+  const storageKeys = [K, KF, KT, KS, KR, S, NK, COLLAPSED_FOLDERS_KEY];
+  const previousStorage = new Map(storageKeys.map(key => [key, localStorage.getItem(key)]));
+  const previousState = {
+    feeds: state.feeds, folders: state.folders, tags: state.tags,
+    savedSearches: state.savedSearches, rules: state.rules, settings: state.settings,
+    notes: articleNotes, collapsedFolders, lastRefresh: state.lastRefresh,
+    items: state.items, highlights: state.highlights
+  };
+
+  let previousItems;
+  let previousHighlights;
+  let transactionCommitted = false;
+  try {
+    previousItems = await dbAll();
+    previousHighlights = await hlAll();
+    const mergeById = (current, incoming) => {
+      const map = new Map(current.map(item => [item.id, item]));
+      for (const item of incoming) if (!map.has(item.id)) map.set(item.id, item);
+      return [...map.values()];
+    };
+    const items = replace ? backup.items : mergeById(previousItems, backup.items);
+    const highlights = replace ? backup.highlights : mergeById(previousHighlights, backup.highlights);
+    const profile = backup.profile;
+
+    const tx = db.transaction(["items", "highlights"], "readwrite");
+    const itemStore = tx.objectStore("items");
+    const highlightStore = tx.objectStore("highlights");
+    if (replace) { itemStore.clear(); highlightStore.clear(); }
+    for (const item of items) itemStore.put(item);
+    for (const highlight of highlights) highlightStore.put(highlight);
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("Restore transaction aborted."));
+    });
+    transactionCommitted = true;
+
+    if (replace) {
+      state.feeds = [...profile.feeds];
+      state.folders = Array.isArray(profile.folders) ? [...profile.folders] : [];
+      state.tags = Array.isArray(profile.tags) ? [...profile.tags] : [];
+      state.savedSearches = Array.isArray(profile.savedSearches) ? [...profile.savedSearches] : [];
+      state.rules = Array.isArray(profile.rules) ? [...profile.rules] : [];
+      state.settings = { ...state.settings, ...settings };
+      articleNotes = profile.notes || {};
+      collapsedFolders = new Set(Array.isArray(profile.collapsedFolders) ? profile.collapsedFolders : []);
+      state.lastRefresh = Number(profile.lastRefresh) || 0;
+    } else {
+      state.feeds = [...state.feeds, ...profile.feeds.filter(incoming =>
+        !state.feeds.some(existing => existing.id === incoming.id || sameFeedUrl(existing.url, incoming.url))
+      )];
+      state.folders = [...new Set([...state.folders, ...(profile.folders || [])])];
+      state.tags = [...new Set([...state.tags, ...(profile.tags || [])])];
+      state.savedSearches = mergeById(state.savedSearches, profile.savedSearches || []);
+      state.rules = mergeById(state.rules, profile.rules || []);
+      articleNotes = { ...articleNotes, ...(profile.notes || {}) };
+      collapsedFolders = new Set([...collapsedFolders, ...(profile.collapsedFolders || [])]);
+    }
+
+    localStorage.setItem(K, JSON.stringify(state.feeds));
+    localStorage.setItem(KF, JSON.stringify(state.folders));
+    localStorage.setItem(KT, JSON.stringify(state.tags));
+    localStorage.setItem(KS, JSON.stringify(state.savedSearches));
+    localStorage.setItem(KR, JSON.stringify(state.rules));
+    localStorage.setItem(S, JSON.stringify(state.settings));
+    localStorage.setItem(NK, JSON.stringify(articleNotes));
+    localStorage.setItem(COLLAPSED_FOLDERS_KEY, JSON.stringify([...collapsedFolders]));
+
+    state.items = items;
+    state.highlights = highlights;
+    syncFolders();
+    applySettings();
+    mirrorSync();
+    render();
+    toast("Backup restored: " + state.feeds.length + " feeds, " + items.length +
+      " articles, and " + highlights.length + " highlights.");
+  } catch (error) {
+    console.error(error);
+    try {
+      if (transactionCommitted) {
+        const rollback = db.transaction(["items", "highlights"], "readwrite");
+        const itemStore = rollback.objectStore("items");
+        const highlightStore = rollback.objectStore("highlights");
+        itemStore.clear();
+        highlightStore.clear();
+        for (const item of previousItems || []) itemStore.put(item);
+        for (const highlight of previousHighlights || []) highlightStore.put(highlight);
+        await new Promise((resolve, reject) => {
+          rollback.oncomplete = resolve;
+          rollback.onerror = () => reject(rollback.error);
+          rollback.onabort = () => reject(rollback.error || new Error("Rollback aborted."));
+        });
+      }
+      for (const [key, value] of previousStorage) {
+        if (value === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, value);
+      }
+      state.feeds = previousState.feeds;
+      state.folders = previousState.folders;
+      state.tags = previousState.tags;
+      state.savedSearches = previousState.savedSearches;
+      state.rules = previousState.rules;
+      state.settings = previousState.settings;
+      articleNotes = previousState.notes;
+      collapsedFolders = previousState.collapsedFolders;
+      state.lastRefresh = previousState.lastRefresh;
+      state.items = previousState.items;
+      state.highlights = previousState.highlights;
+      render();
+    } catch (rollbackError) {
+      console.error("Backup rollback failed", rollbackError);
+      toast("Restore failed and rollback was incomplete. Close other tabs and check available browser storage.");
+      return;
+    }
+    toast("Restore failed. Your previous profile was restored: " + error.message);
+  }
+}
+function exportAnnotations(format){const byId=new Map(state.items.map(x=>[x.id,x]));const rows=[...state.highlights.map(h=>{const x=byId.get(h.itemId)||{};return {type:"highlight",title:x.title||"",url:x.url||"",feed:x.feedTitle||"",text:h.text||h.quote||"",note:h.note||"",createdAt:h.created||null,updatedAt:h.updated||null};}),...Object.entries(articleNotes).map(([id,note])=>{const x=byId.get(id)||{};return {type:"note",title:x.title||"",url:x.url||"",feed:x.feedTitle||"",note,createdAt:null,updatedAt:null};})];if(format==="json"){download(JSON.stringify({format:"rss-reader-annotations",version:1,annotations:rows},null,2),"rss-reader-annotations.json","application/json");return;}const md=rows.map(x=>"## "+(x.title||"Untitled article")+"\n\nSource: "+(x.url||"Unavailable")+"\n\nFeed: "+(x.feed||"Unknown")+"\n\n"+(x.createdAt?"Created: "+new Date(x.createdAt).toISOString()+"\n\n":"")+(x.updatedAt?"Updated: "+new Date(x.updatedAt).toISOString()+"\n\n":"")+(x.text?"> "+x.text+"\n\n":"")+(x.note||"")).join("\n---\n\n");download(md,"rss-reader-annotations.md","text/markdown");}
+async function updateStorageUsage(){const el=$("#storageUsage");if(!el)return;if(!navigator.storage?.estimate){el.textContent="Storage usage estimates are unavailable.";return;}try{const d=await navigator.storage.estimate(),fmt=n=>n<1048576?Math.round(n/1024)+" KB":(n/1048576).toFixed(1)+" MB";el.textContent="Approximate browser storage: "+fmt(d.usage||0)+" used of "+(d.quota?fmt(d.quota):"unknown quota")+". ";}catch{el.textContent="Storage usage could not be read.";}}
+async function previewRetentionCleanup() {
+  const days = Number(state.settings.retentionDays) || 0;
+  const limit = Number(state.settings.retentionCount) || 0;
+  if (!days && !limit) { toast("Choose an article age limit or maximum count in Settings first."); return; }
+  const protectedIds = new Set([...state.highlights.map(x => x.itemId), ...Object.keys(articleNotes)]);
+  const sorted = [...state.items].sort((a,b) => (dateSortKey(b) || 0) - (dateSortKey(a) || 0));
+  const beyondLimit = limit ? new Set(sorted.slice(limit).map(x => x.id)) : new Set();
+  const cutoff = days ? Date.now() - days * 86400000 : 0;
+  const removable = sorted.filter(item => {
+    const timestamp = dateSortKey(item);
+    const tooOld = days && timestamp && timestamp < cutoff;
+    const beyondCount = limit && beyondLimit.has(item.id);
+    return (tooOld || beyondCount) && !item.saved && !item.queued && !protectedIds.has(item.id);
+  });
+  if (!removable.length) { toast("No unprotected articles exceed the selected retention limits."); return; }
+  if (!confirm("Remove " + removable.length + " articles outside the selected retention limits? Saved, queued, highlighted, and noted articles are protected.")) return;
+  const ids = removable.map(x => x.id);
+  for (let i = 0; i < ids.length; i += 250) await deleteMany(ids.slice(i, i + 250));
+  const removed = new Set(ids);
+  state.items = state.items.filter(x => !removed.has(x.id));
+  render();
+  updateStorageUsage();
+  toast("Removed " + ids.length + " old or excess articles.");
+}
+function showFeedHealth() {
+  const now = Date.now();
+  const unhealthy = state.feeds.map(feed => {
+    const interval = (Number(feed.refreshMinutes) || Number(state.settings.globalRefreshMinutes) || 30) * 60000;
+    const stale = !!feed.lastSuccess && now - feed.lastSuccess > interval * 3;
+    const failed = !!feed.error;
+    const status = failed ? "Failing" : stale ? "Stale" : feed.lastSuccess ? "Healthy" : "No refresh history";
+    return { feed, stale, failed, status };
+  }).filter(x => x.failed || x.stale || !x.feed.lastSuccess);
+  if (!unhealthy.length) {
+    $("#feedHealthList").innerHTML = "<p>All subscriptions have a recent successful refresh.</p>";
+  } else {
+    $("#feedHealthList").innerHTML = unhealthy.map(({feed,stale,failed,status}) =>
+      '<section class="health-row"><strong>' + esc(feed.title || feed.url) + '</strong><p>' + status +
+      (feed.lastSuccess ? ' · Last success: ' + esc(new Date(feed.lastSuccess).toLocaleString()) : ' · No successful refresh recorded') +
+      (feed.lastAttempt ? ' · Last attempt: ' + esc(new Date(feed.lastAttempt).toLocaleString()) : '') +
+      (feed.consecutiveFailures ? ' · Failures: ' + Number(feed.consecutiveFailures) : '') +
+      '</p>' + (feed.error ? '<p class="muted">Current error: ' + esc(feed.error) + '</p>' : feed.lastError ? '<p class="muted">Most recent error: ' + esc(feed.lastError) + (feed.lastErrorAt ? " · " + esc(new Date(feed.lastErrorAt).toLocaleString()) : "") + '</p>' : '') +
+      '<button type="button" class="quiet" data-health-retry="' + esc(feed.id) + '">Retry feed</button></section>'
+    ).join("");
+  }
+  $("#feedHealthDialog").showModal();
+}
+function showReadingStats(days = 30) {
+  const read = state.items.filter(item => item.read);
+  const recent = read.filter(item => item.readAt && (days === 0 || Date.now() - item.readAt <= days * 86400000));
+  const daily = new Map();
+  const byFeed = new Map();
+  for (const item of recent) {
+    const day = new Date(item.readAt).toLocaleDateString();
+    daily.set(day, (daily.get(day) || 0) + 1);
+    const feed = state.feeds.find(entry => entry.id === item.feedId);
+    const name = feed?.title || item.feedTitle || "Unknown feed";
+    byFeed.set(name, (byFeed.get(name) || 0) + 1);
+  }
+  const rows = [...daily.entries()].sort((a,b) => new Date(a[0]) - new Date(b[0])).slice(-30);
+  const topFeeds = [...byFeed.entries()].sort((a,b) => b[1] - a[1]).slice(0,5);
+  const period = days === 0 ? "all recorded history" : "the last " + days + " days";
+  const queued = state.items.filter(item => item.queued);
+  const completedQueue = queued.filter(item => item.read).length;
+  $("#statsBody").innerHTML =
+    "<p>" + state.items.length + " cached articles</p>" +
+    "<p>" + read.length + " currently marked read</p>" +
+    "<p>" + recent.length + " articles marked read during " + period + "</p>" +
+    "<p>" + state.items.filter(item => item.saved).length + " saved · " + queued.length + " queued · " + completedQueue + " queued and read · " + state.highlights.length + " highlights</p>" +
+    "<p class=\"muted\">Period totals use local read timestamps. Older read states without timestamps are excluded.</p>" +
+    "<h3>Reading activity by day</h3>" +
+    (rows.length ? rows.map(row => "<p>" + esc(row[0]) + ": " + row[1] + "</p>").join("") : "<p>No timestamped reading activity for this period.</p>") +
+    "<h3>Most-read feeds</h3>" +
+    (topFeeds.length ? topFeeds.map(row => "<p>" + esc(row[0]) + ": " + row[1] + "</p>").join("") : "<p>No feed-level reading history for this period.</p>");
+  $("#statsDialog").showModal();
+}
+function previewOPML(file) {
+  file.text().then(text => {
+    const doc = new DOMParser().parseFromString(text, "text/xml");
+    if (doc.querySelector("parsererror") || doc.documentElement.localName !== "opml") {
+      toast("Invalid OPML file.");
+      return;
+    }
+    const entries = [];
+    const folderPaths = new Set();
+    const walk = (parent, path = []) => {
+      for (const outline of [...parent.children].filter(node => node.localName === "outline")) {
+        const title = outline.getAttribute("title") || outline.getAttribute("text") || outline.getAttribute("xmlUrl") || "Untitled";
+        const url = outline.getAttribute("xmlUrl");
+        if (url) entries.push({ outline, path, title, url });
+        else {
+          const nextPath = [...path, title];
+          folderPaths.add(nextPath.join(" / "));
+          walk(outline, nextPath);
+        }
+      }
+    };
+    walk(doc.querySelector("body") || doc.documentElement);
+    const seen = new Set();
+    const duplicates = [];
+    const invalid = [];
+    for (const entry of entries) {
+      try {
+        const url = normalizeFeedUrl(entry.url);
+        if (seen.has(url) || state.feeds.some(feed => sameFeedUrl(feed.url, url))) {
+          duplicates.push((entry.path.length ? entry.path.join(" / ") + " / " : "") + entry.title + " — " + url);
+        }
+        seen.add(url);
+      } catch (error) {
+        invalid.push(entry.title + " — " + entry.url + " (" + (error.message || "invalid URL") + ")");
+      }
+    }
+    const folders = [...folderPaths];
+    const folderText = folders.length ? "Folder hierarchy:\n" + folders.join("\n") : "No named folders.";
+    const duplicateText = duplicates.length ? "Duplicates to skip:\n" + duplicates.slice(0, 12).join("\n") : "No duplicate feeds.";
+    const invalidText = invalid.length ? "Invalid URLs to skip:\n" + invalid.slice(0, 12).join("\n") : "No invalid feed URLs.";
+    const feedText = "Feed entries:\n" + entries.slice(0, 12).map(entry =>
+      (entry.path.length ? entry.path.join(" / ") + " / " : "") + entry.title
+    ).join("\n");
+    $("#opmlPreviewSummary").textContent =
+      entries.length + (entries.length === 1 ? " feed entry" : " feed entries") + " and " +
+      folders.length + (folders.length === 1 ? " folder" : " folders") + " found. " +
+      duplicates.length + " duplicates and " + invalid.length + " invalid URLs will be skipped.";
+    $("#opmlPreviewDetails").textContent = [folderText, duplicateText, invalidText, feedText].join("\n\n");
+    pendingOPMLFile = file;
+    $("#opmlPreviewDialog").showModal();
+  }).catch(error => toast("Could not read OPML file: " + error.message));
+}
+function showShortcutCoach(action, label, shortcut) {
+  let suppressed = [];
+  try { suppressed = JSON.parse(localStorage.getItem("rss-reader.shortcut-coach-suppressed.v1") || "[]"); } catch {}
+  if (suppressed.includes(action)) return;
+  const el = $("#toast");
+  el.replaceChildren(document.createTextNode(label + " · Shortcut: " + shortcut));
+  const dismiss = document.createElement("button");
+  dismiss.type = "button"; dismiss.textContent = "Dismiss";
+  dismiss.onclick = () => el.classList.remove("show");
+  const suppress = document.createElement("button");
+  suppress.type = "button"; suppress.textContent = "Don’t show again";
+  suppress.onclick = () => {
+    const next = [...new Set([...suppressed, action])];
+    try { localStorage.setItem("rss-reader.shortcut-coach-suppressed.v1", JSON.stringify(next)); } catch {}
+    el.classList.remove("show");
+  };
+  el.append(dismiss, suppress);
+  el.classList.add("show");
+  clearTimeout(timer);
+  timer = setTimeout(() => el.classList.remove("show"), 7000);
+}
+function coachShortcut(e){
+  if(!state.settings.shortcutCoaching||e.detail===0||!pointerActivation||Date.now()-pointerActivation.at>1200||!["mouse","pen"].includes(pointerActivation.type))return;
+  const t=e.target.closest?.("[data-action],[data-reader],[data-view],#refresh,#settings,#add,#search");if(!t)return;let action=null,label="";
+  if(t.dataset.action==="save"||t.dataset.reader==="save"){action="save";label="Save article";}else if(t.dataset.action==="read"||t.dataset.reader==="read"){action="toggleRead";label="Toggle read state";}else if(t.dataset.view==="all"){action="allView";label="All articles";}else if(t.dataset.view==="unread"){action="unreadView";label="Unread";}else if(t.id==="refresh"||t.hasAttribute("data-rail-refresh")){action="refresh";label="Refresh feeds";}else if(t.id==="add"){action="addFeed";label="Add feed";}else if(t.id==="settings"||t.id==="railSettings"){action="goPrefs";label="Settings";}else if(t.id==="search"){action="search";label="Search";}if(!action)return;
+  if(t.dataset.id && state.selected !== t.dataset.id)return;
+  const p=PRESETS[shortcutPreset()]||PRESETS.inoreader,entry=Object.entries(p.keys).find(x=>x[1]===action);if(!entry)return;
+  const now=Date.now();if(now-(coachLastShown.get(action)||0)<60000)return;coachLastShown.set(action,now);
+  showShortcutCoach(action,label,entry[0].split(" ").map(displayDesc).join(" then "));
+}
 function toolbarOrderFromDialog() {
   const items = [...document.querySelectorAll("#toolbarOrderList [data-tb-key]")];
   if (!items.length) return null;
@@ -3439,6 +3799,11 @@ function showSettings() {
   $("#hideDuplicatesToggle").checked = state.settings.hideDuplicates !== false;
   $("#backgroundSyncToggle").checked = !!state.settings.backgroundSync;
   $("#notifyNewToggle").checked = !!state.settings.notifyNew;
+  $("#shortcutCoachingToggle").checked = !!state.settings.shortcutCoaching;
+  $("#retentionDaysSelect").value = String(state.settings.retentionDays || 0);
+  $("#retentionCountSelect").value = String(state.settings.retentionCount || 0);
+  $("#globalRefreshMinutesSelect").value = String(state.settings.globalRefreshMinutes || 30);
+  updateStorageUsage();
   // App updates (#144): the running version, and the last check result
   // (an update waiting shows here as well as in the banner).
   const av = $("#appVersion");
@@ -3674,7 +4039,7 @@ function runShortcutAction(name, e) {
     case "openCurrentTab": openInCurrentTab(); return true;
     case "toggleRead":
       if (!sel) return false;
-      sel.read = !sel.read; put(sel); render(); renderReader(sel); return true;
+      sel.read = !sel.read; sel.readAt = sel.read ? Date.now() : null; put(sel); render(); renderReader(sel); return true;
     case "toggleReadNext": toggleReadNext(); return true;
     case "toggleReadPrev": toggleReadPrev(); return true;
     case "markVisibleRead": markVisibleRead(); return true;
@@ -3780,11 +4145,11 @@ function goSavedSearch(id) {
 async function markVisibleRead() {
   const targets = visible().filter(x => !x.read);
   if (!targets.length) { toast("Visible articles are already read."); return; }
-  for (const x of targets) x.read = true;
+  for (const x of targets) { x.read = true; x.readAt = Date.now(); }
   await putMany(targets);
   render();
   toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} read.`, { label: "Undo", fn: async () => {
-    for (const x of targets) x.read = false;
+    for (const x of targets) { x.read = false; x.readAt = null; }
     await putMany(targets);
     render();
   } });
@@ -3796,11 +4161,11 @@ async function markFeedRead(feedId) {
   const feed = state.feeds.find(f => f.id === feedId);
   const targets = state.items.filter(x => x.feedId === feedId && !x.read);
   if (!targets.length) { toast("That feed is already read."); return; }
-  for (const x of targets) x.read = true;
+  for (const x of targets) { x.read = true; x.readAt = Date.now(); }
   await putMany(targets);
   render();
   toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} in “${feed?.title || "feed"}” read.`, { label: "Undo", fn: async () => {
-    for (const x of targets) x.read = false;
+    for (const x of targets) { x.read = false; x.readAt = null; }
     await putMany(targets);
     render();
   } });
@@ -3830,17 +4195,20 @@ async function markAboveBelow(which) {
   if (i === -1) { toast("Select an article first."); return; }
   const targets = (which === "above" ? a.slice(0, i) : a.slice(i + 1)).filter(x => !x.read);
   if (!targets.length) { toast(which === "above" ? "Nothing above this article is unread." : "Nothing below this article is unread."); return; }
-  for (const x of targets) x.read = true;
+  for (const x of targets) { x.read = true; x.readAt = Date.now(); }
   await putMany(targets);
   render();
   toast(`Marked ${targets.length} article${targets.length === 1 ? "" : "s"} ${which} read.`, { label: "Undo", fn: async () => {
-    for (const x of targets) x.read = false;
+    for (const x of targets) { x.read = false; x.readAt = null; }
     await putMany(targets);
     render();
   } });
 }
 
 function bind() {
+  document.addEventListener("pointerdown", e => { pointerActivation = { type:e.pointerType, at:Date.now() }; }, true);
+  document.addEventListener("click", e => coachShortcut(e), true);
+  document.addEventListener("click", async e => { const retry = e.target.closest("[data-health-retry]"); if (!retry) return; const feed = state.feeds.find(x => x.id === retry.dataset.healthRetry); if (!feed) return; retry.disabled = true; await refreshFeed(feed); saveFeeds(); render(); $("#feedHealthDialog").close(); showFeedHealth(); });
   document.addEventListener("click", async e => {
     // The snooze menu closes on any click outside it or its button.
     // Remember whether it was open first: the snooze button toggles
@@ -3917,8 +4285,11 @@ function bind() {
       if (x) {
         if (act.dataset.action === "share") { shareArticle(x); return; }
         if (act.dataset.action === "unsnooze") { await unsnoozeItem(x); return; }
+        if (act.dataset.action === "queue") { x.queued = !x.queued; x.queueOrder = x.queued ? Date.now() : 0; await put(x); render(); toast(x.queued ? "Added to reading queue." : "Removed from reading queue."); return; }
+        if (act.dataset.action === "queue-up" || act.dataset.action === "queue-down") { const q=state.items.filter(v=>v.queued).sort((u,v)=>(u.queueOrder||0)-(v.queueOrder||0)); const i=q.findIndex(v=>v.id===x.id),j=i+(act.dataset.action==="queue-up"?-1:1); if(i>=0&&j>=0&&j<q.length){const old=q[i].queueOrder;q[i].queueOrder=q[j].queueOrder;q[j].queueOrder=old;await putMany([q[i],q[j]]);render();} return; }
         const key = act.dataset.action === "save" ? "saved" : "read";
         x[key] = !x[key];
+        if (key === "read") x.readAt = x.read ? Date.now() : null;
         await put(x);
         render();
         // renderReader, not openItem: opening would mark an item read
@@ -3978,7 +4349,8 @@ function bind() {
       const x = selectedItem();
       if (!x) return;
       if (ra.dataset.reader === "save") { x.saved = !x.saved; await put(x); openItem(x.id); return; }
-      if (ra.dataset.reader === "read") { x.read = !x.read; await put(x); renderNav(); renderList(); renderReader(x); toast(x.read ? "Article marked read." : "Article marked unread."); return; }
+      if (ra.dataset.reader === "queue") { x.queued = !x.queued; x.queueOrder = x.queued ? Date.now() : 0; await put(x); renderNav(); renderList(); renderReader(x); toast(x.queued ? "Added to reading queue." : "Removed from reading queue."); return; }
+      if (ra.dataset.reader === "read") { x.read = !x.read; x.readAt = x.read ? Date.now() : null; await put(x); renderNav(); renderList(); renderReader(x); toast(x.read ? "Article marked read." : "Article marked unread."); return; }
       if (ra.dataset.reader === "listen") { if (tts?.itemId === x.id) stopTTS(); else startTTS(x); return; }
       if (ra.dataset.reader === "share") { shareArticle(x); return; }
       if (ra.dataset.reader === "snooze") { const m = $("#snoozeMenu"); if (m) { m.hidden = snoozeMenuWasOpen; ra.setAttribute("aria-expanded", String(!m.hidden)); if (!m.hidden) m.scrollIntoView({ block: "nearest" }); } return; }
@@ -4103,6 +4475,7 @@ function bind() {
     else if (e.target.id === "orgEditInput") { e.preventDefault(); doRename(e.target.value); }
   });
   $("#refresh").onclick = refresh;
+  $("#removeQueue").onclick = removeVisibleFromQueue;
   bindSplitters();
   $("#reader").addEventListener("scroll", updateReadProgress, { passive: true });
   // Highlights (#116): the button follows the selection in the article
@@ -4131,6 +4504,11 @@ function bind() {
     if (opt === "open") { closeFeedMenu(); window.open(f.site || f.url, "_blank", "noopener"); return; }
     if (opt === "autofull") { f.autoFull = !f.autoFull; saveFeeds(); renderFeedMenu(); toast(`Auto full article ${f.autoFull ? "on" : "off"} for ${feedDisplayTitle(f)}.`); return; }
     if (opt === "layout") { closeFeedMenu(); showFeedLayoutDialog(f); return; }
+    if (opt === "interval") {
+      const choices = [0,15,30,60,180,360,720,1440], current = Number(f.refreshMinutes) || 0;
+      f.refreshMinutes = choices[(choices.indexOf(current) + 1) % choices.length];
+      saveFeeds(); renderFeedMenu(); toast(f.refreshMinutes ? `Refresh interval set to ${f.refreshMinutes} minutes.` : "Feed uses the global interval."); return;
+    }
     if (opt === "order") {
       f.sort = nextFeedSort(f.sort);
       saveFeeds(); renderFeedMenu(); renderSortBtn(); renderList();
@@ -4248,7 +4626,9 @@ function bind() {
   };
   $("#importOpml").onclick = () => $("#opmlFile").click();
   $("#exportOpml").onclick = exportOPML;
-  $("#opmlFile").onchange = e => { if (e.target.files[0]) importOPML(e.target.files[0]); e.target.value = ""; };
+  $("#opmlFile").onchange = e => { if (e.target.files[0]) previewOPML(e.target.files[0]); e.target.value = ""; };
+  $("#opmlPreviewClose").onclick = $("#opmlPreviewCancel").onclick = () => $("#opmlPreviewDialog").close();
+  $("#opmlPreviewConfirm").onclick = async () => { if (!pendingOPMLFile) return; const file=pendingOPMLFile; pendingOPMLFile=null; $("#opmlPreviewDialog").close(); await importOPML(file); };
   // The X and Cancel buttons are type="button" (not submit), so the
   // Add feed button is the form's only submit button and therefore
   // the one Enter submits with. They close the dialog explicitly
@@ -4293,6 +4673,17 @@ function bind() {
   $("#importSettings").onclick = () => $("#settingsFile").click();
   $("#checkUpdates").onclick = checkForUpdates;
   $("#settingsFile").onchange = e => { if (e.target.files[0]) importSettings(e.target.files[0]); e.target.value = ""; };
+  $("#exportBackup").onclick = exportCompleteBackup; $("#importBackup").onclick = () => $("#backupFile").click();
+  $("#backupFile").onchange = e => { if (e.target.files[0]) importCompleteBackup(e.target.files[0]); e.target.value = ""; };
+  $("#exportAnnotationsJSON").onclick = () => exportAnnotations("json"); $("#exportAnnotationsMarkdown").onclick = () => exportAnnotations("markdown");
+  $("#previewCleanup").onclick = previewRetentionCleanup; $("#openStats").onclick = showReadingStats;
+  $("#openFeedHealth").onclick = showFeedHealth;
+  $("#feedHealthClose").onclick = $("#feedHealthDone").onclick = () => $("#feedHealthDialog").close();
+  $("#statsClose").onclick = $("#statsDone").onclick = () => $("#statsDialog").close();
+  $("#statsRange").onchange = e => { $("#statsDialog").close(); showReadingStats(Number(e.target.value)); };
+  $("#libraryMore").addEventListener("toggle", () => { try { localStorage.setItem("rss-reader.library-more-open", $("#libraryMore").open ? "1" : "0"); } catch {} });
+  try { $("#libraryMore").open = localStorage.getItem("rss-reader.library-more-open") === "1"; } catch {}
+  document.addEventListener("click", e => { if (e.target.closest("[data-rail-search]")) { state.settings.sidebarCollapsed = false; local(S, state.settings); applySidebarCollapsed(); $("#search").focus(); } if (e.target.closest("[data-rail-refresh]")) refresh(); if (e.target.closest("[data-rail-next-unread]")) moveUnread(1); if (e.target.closest("#railTheme")) $("#theme").click(); if (e.target.closest("#railSettings")) showSettings(); });
   $("#menu").onclick = () => {
     const open = $("#sidebar").classList.toggle("open");
     $("#scrim").classList.toggle("show", open);
@@ -4595,11 +4986,13 @@ async function init() {
     toast("Could not open browser storage. Your articles are unavailable.", { label: "Retry", fn: () => location.reload() });
   } else {
     if (state.feedsRestored) toast("Your subscriptions were restored from a backup copy.");
-    // Refresh on launch when the newest cached article is stale, so
-    // the list is never silently days old.
+    // Evaluate each feed against its own interval and retry backoff on
+    // launch; a minute-level scheduler handles due feeds while the app is visible.
     if (state.feeds.length) {
-      const newest = state.items.reduce((m, x) => Math.max(m, dateSortKey(x) ?? 0), 0);
-      if (!state.items.length || Date.now() - newest > 30 * 60 * 1000) refresh();
+      refresh(true);
+      if (!automaticRefreshTimer) automaticRefreshTimer = setInterval(() => {
+        if (document.visibilityState === "visible" && !$("#refresh")?.disabled) refresh(true);
+      }, 60000);
     }
   }
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {

@@ -32,10 +32,21 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - Article cache and read/saved state stored in IndexedDB
 - Responsive desktop and mobile layout
 - Collapsible sidebar: the ‹/› toggle in the top left folds the sidebar to a narrow rail, remembered across visits
-- Refresh on launch when the newest article is stale, with a last-updated time under the heading
+- Per-feed automatic refresh scheduling on launch and while the reader is open, with a last-updated time under the heading
 - Undo for bulk actions (mark all in this list read, unsubscribe)
 - Article thumbnails, per-feed favicons, and relative dates ("5m ago")
-- Dark mode by default, with light and system options
+- Dark mode by default, with light, system, OLED Black, and Pure White options
+- Complete profile backup and restore: subscriptions, articles, read/saved/queued state, highlights, notes, folders, rules, searches, and preferences; restore can replace or merge
+- Reading queue with persistent manual ordering
+- Feed health indicators, last refresh details, retrieval-path diagnostics, and exponential retry backoff
+- Global and per-feed refresh intervals while the reader is open
+- Configurable article retention with protected saved, queued, highlighted, and noted items; browser storage estimates in Settings
+- OPML import preview with folder, duplicate, and invalid-URL reporting before import
+- Export highlights and article notes as JSON or Markdown, including available timestamps
+- Local reading activity statistics with selectable time ranges
+- Optional keyboard shortcut coaching after mouse or stylus actions
+- Collapsed sidebar navigation rail with library views, next-unread, search, refresh, theme, and settings actions
+- Browser end-to-end tests with Playwright, run alongside the Node test suite in GitHub Actions
 - Adjustable reading width and text size
 - Keyboard shortcuts: / search, j/k navigate, n/p next/previous unread, o or Enter open, v open original, m toggle read, s save, t add a tag, a mark all in this list read, Ctrl+M / Shift+M mark everything above/below read, u back to list, g then a/u/s go to All/Unread/Saved, r refresh, Space scroll, ? help, Esc close
 - Gentium Book Plus typography
