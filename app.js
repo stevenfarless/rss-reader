@@ -37,7 +37,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.9.18";
+const APP_VERSION = "1.9.19";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -4779,17 +4779,17 @@ function bind() {
   const closeOPMLPreview = () => { pendingOPMLFile = null; pendingOPMLFeedUrls = []; $("#opmlPreviewDialog").close(); };
   $("#opmlPreviewClose").onclick = $("#opmlPreviewCancel").onclick = closeOPMLPreview;
   const updateOPMLSelection = () => {
-    const selected = $("#opmlFeedSelection input[data-opml-feed]:checked").length;
+    const selected = $$("#opmlFeedSelection input[data-opml-feed]:checked").length;
     $("#opmlPreviewConfirm").disabled = selected === 0;
     $("#opmlPreviewConfirm").textContent = selected ? "Import " + selected + " feed" + (selected === 1 ? "" : "s") : "Select feeds to import";
   };
   $("#opmlFeedSelection").addEventListener("change", updateOPMLSelection);
-  $("#opmlSelectAll").onclick = () => { $("#opmlFeedSelection input[data-opml-feed]:not(:disabled)").forEach(input => { input.checked = true; }); updateOPMLSelection(); };
-  $("#opmlSelectNone").onclick = () => { $("#opmlFeedSelection input[data-opml-feed]:not(:disabled)").forEach(input => { input.checked = false; }); updateOPMLSelection(); };
+  $("#opmlSelectAll").onclick = () => { $$("#opmlFeedSelection input[data-opml-feed]:not(:disabled)").forEach(input => { input.checked = true; }); updateOPMLSelection(); };
+  $("#opmlSelectNone").onclick = () => { $$("#opmlFeedSelection input[data-opml-feed]:not(:disabled)").forEach(input => { input.checked = false; }); updateOPMLSelection(); };
   $("#opmlPreviewConfirm").onclick = async () => {
     if (!pendingOPMLFile) return;
     const file = pendingOPMLFile;
-    const selected = new Set($("#opmlFeedSelection input[data-opml-feed]:checked").map(input => input.dataset.opmlFeed));
+    const selected = new Set($$("#opmlFeedSelection input[data-opml-feed]:checked").map(input => input.dataset.opmlFeed));
     pendingOPMLFile = null;
     pendingOPMLFeedUrls = [];
     $("#opmlPreviewDialog").close();
