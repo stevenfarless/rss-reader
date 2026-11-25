@@ -4372,7 +4372,7 @@ function bind() {
   $("#statsRange").onchange = e => { $("#statsDialog").close(); showReadingStats(Number(e.target.value)); };
   $("#libraryMore").addEventListener("toggle", () => { try { localStorage.setItem("rss-reader.library-more-open", $("#libraryMore").open ? "1" : "0"); } catch {} });
   try { $("#libraryMore").open = localStorage.getItem("rss-reader.library-more-open") === "1"; } catch {}
-  document.addEventListener("click", e => { if (e.target.closest("[data-rail-search]")) $("#search").focus(); if (e.target.closest("[data-rail-refresh]")) refresh(); if (e.target.closest("[data-rail-next-unread]")) moveUnread(1); });
+  document.addEventListener("click", e => { if (e.target.closest("[data-rail-search]")) { state.settings.sidebarCollapsed = false; local(S, state.settings); applySidebarCollapsed(); $("#search").focus(); } if (e.target.closest("[data-rail-refresh]")) refresh(); if (e.target.closest("[data-rail-next-unread]")) moveUnread(1); if (e.target.closest("#railTheme")) $("#theme").click(); if (e.target.closest("#railSettings")) showSettings(); });
   $("#menu").onclick = () => {
     const open = $("#sidebar").classList.toggle("open");
     $("#scrim").classList.toggle("show", open);
