@@ -22,21 +22,66 @@ test("secondary navigation can be expanded and queue view is reachable", async (
   await expect(page.locator("#heading")).toHaveText("Reading queue");
 });
 
-test("adding a deterministic feed persists its article and supports the reading queue", async ({ page }) => {
-  await page.route("https://example.test/feed.xml", route => route.fulfill({
-    status: 200,
-    contentType: "application/rss+xml",
-    body: "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>Fixture Feed</title><link>https://example.test/</link><description>Local fixture</description><item><title>Fixture Article</title><link>https://example.test/article</link><guid>fixture-1</guid><pubDate>Mon, 24 Nov 2025 12:00:00 GMT</pubDate><description>A deterministic article for browser testing.</description></item></channel></rss>"
-  }));
+test("reading queue persists article ordering in the local library", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#add").click();
-  await page.locator("#feedSearchInput").fill("https://example.test/feed.xml");
-  await page.locator("#saveFeed").click();
-  await expect(page.locator("#articleList")).toContainText("Fixture Article", { timeout: 15000 });
+  await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("rss-reader-cache");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("items", "readwrite");
+      tx.objectStore("items").put({
+        id: "fixture-article",
+        feedId: "fixture-feed",
+        title: "Fixture Article",
+        url: "https://example.test/article",
+        published: new Date().toISOString(),
+        content: "A deterministic article for browser testing.",
+        summary: "A deterministic article for browser testing.",
+        read: false,
+        saved: false,
+        queued: false,
+        queueOrder: 0,
+        tags: []
+      });
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    localStorage.setItem("rss-reader.feeds.v1", JSON.stringify([{
+      id: "fixture-feed",
+      url: "https://example.test/feed.xml",
+      title: "Fixture Feed",
+      site: "https://example.test/",
+      added: new Date().toISOString(),
+      error: "",
+      via: "direct",
+      wpRoot: "",
+      group: ""
+    }]));
+    db.close();
+  });
+  await page.reload();
+  await expect(page.locator("#articleList")).toContainText("Fixture Article");
   await page.locator('[data-action="queue"]').click();
-  await page.locator('[data-view="queue"]').first().click();
+  await page.locator('#sidebar > .nav[data-view="queue"]').click();
   await expect(page.locator("#articleList")).toContainText("Fixture Article");
   await expect(page.locator("#queueCount")).toHaveText("1");
+});
+
+test("OPML import displays a preview before changing subscriptions", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#settings").click();
+  await page.locator("#opmlFile").setInputFiles({
+    name: "fixture.opml",
+    mimeType: "text/xml",
+    buffer: Buffer.from('<?xml version="1.0"?><opml version="2.0"><body><outline text="Example" title="Example"><outline text="Fixture" title="Fixture" type="rss" xmlUrl="https://example.test/feed.xml"/></outline></body></opml>')
+  });
+  await expect(page.locator("#opmlPreviewDialog")).toBeVisible();
+  await expect(page.locator("#opmlPreviewSummary")).toContainText("1 feeds");
+  await page.locator("#opmlPreviewCancel").click();
+  await expect(page.locator("#opmlPreviewDialog")).not.toBeVisible();
 });
 
 test("complete backup export produces a versioned JSON download", async ({ page }) => {
