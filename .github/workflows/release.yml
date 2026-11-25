@@ -1,0 +1,67 @@
+name: Create GitHub Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - package.json
+      - app.js
+      - sw.js
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(node -p "require('./package.json').version")"
+          app_version="$(sed -nE 's/^[[:space:]]*const APP_VERSION = "([^"]+)";$/\1/p' app.js)"
+
+          if [[ -z "$version" || "$version" != "$app_version" ]]; then
+            echo "::error::package.json version ($version) does not match APP_VERSION ($app_version)."
+            exit 1
+          fi
+
+          previous_version=""
+          if git cat-file -e HEAD^:package.json 2>/dev/null; then
+            previous_version="$(git show HEAD^:package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).version))')"
+          fi
+
+          if [[ "$version" == "$previous_version" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Version unchanged ($version); no release needed."
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "::error::Release tag v$version already exists. Refusing to overwrite it."
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.changed == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          target_commitish: main
+          name: RSS Reader v${{ steps.version.outputs.version }}
+          generate_release_notes: true
