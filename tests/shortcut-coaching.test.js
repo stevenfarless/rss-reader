@@ -58,5 +58,10 @@ test("app wires coaching to pointer-originated clicks and the persisted setting"
   assert.match(app, /findShortcutForAction\(presetName, action\)/);
   assert.match(app, /canShowShortcutCoach\(action, coachLastShown/);
   assert.match(app, /shortcut-coach-suppressed\.v1/);
-  assert.match(html, /id="shortcutCoachingToggle"/);\n  assert.match(html, /id="shortcutCoach"[^>]*aria-live="polite"/);\n  assert.match(app, /const el = \$\("#shortcutCoach"\)/);\n  assert.doesNotMatch(app, /function showShortcutCoach[\\s\\S]*?\$\("#toast"\)/);
+  assert.match(html, /id="shortcutCoachingToggle"/);
+  assert.match(html, /id="shortcutCoach"[^>]*aria-live="polite"/);
+  assert.match(app, /const el = \\$\("#shortcutCoach"\)/);
+  const coachFunction = app.slice(app.indexOf("function showShortcutCoach"), app.indexOf("\\nfunction coachShortcut"));
+  assert.ok(coachFunction.includes("#shortcutCoach"));
+  assert.ok(!coachFunction.includes("#toast"));
 });
