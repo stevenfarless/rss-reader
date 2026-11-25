@@ -334,7 +334,7 @@ body.vim-navigation-enabled #reader.vim-focused{outline:2px solid var(--accent);
 :root[data-theme="oled"]{color-scheme:dark;--bg:#000;--panel:#000;--panel2:#101010;--line:#292929;--text:#f2f2f2;--muted:#c0c0c0;--soft:#a0a0a0;--accent:#d0b58a;--accentbg:#252018;--on-accent:#000}
 :root[data-theme="white"]{color-scheme:light;--bg:#fff;--panel:#fff;--panel2:#f4f4f4;--line:#d8d8d8;--text:#171717;--muted:#383838;--soft:#555;--accent:#514020;--accentbg:#eee7d9;--err:#8b241b;--on-accent:#fff}
 .layout{grid-template-columns:clamp(180px,var(--side-w,250px),420px) minmax(280px,clamp(280px,var(--list-w,400px),640px)) minmax(320px,1fr)}
-@media(min-width:821px){body.sidebar-collapsed .layout{grid-template-columns:52px minmax(280px,min(calc(var(--list-w,400px) + var(--collapsed-list-extra,calc(var(--side-w,250px) - 52px))),calc(100% - 372px))) minmax(320px,1fr)}}
+@media(min-width:821px){body.sidebar-collapsed .layout{grid-template-columns:52px minmax(280px,min(var(--list-w,400px),calc(100% - 372px))) minmax(320px,1fr)}}
 .library-more{margin:2px 0 8px}
 .library-more summary{list-style:none;cursor:pointer;padding:6px 10px;border-radius:5px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between}
 .library-more summary::-webkit-details-marker{display:none}
@@ -382,3 +382,5 @@ dialog:focus-visible{outline:none}
 
 /* Keyboard shortcuts are unavailable on touch-sized mobile layouts. */
 @media(max-width:820px){#shortcutCoach{display:none!important}}
+
+.opml-selection-tools{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0 8px}.opml-selection-tools>span{display:flex;gap:6px}.opml-selection-tools button{padding:5px 9px;font-size:12px}.opml-feed-selection{max-height:min(42vh,360px);overflow:auto;border:1px solid var(--line);border-radius:6px;padding:5px}.opml-feed-option{display:flex;align-items:center;gap:9px;padding:8px;border-radius:4px;cursor:pointer}.opml-feed-option:hover{background:var(--panel2)}.opml-feed-option input{flex:none}.opml-feed-title{flex:1;min-width:0;overflow-wrap:anywhere}.opml-feed-option.unavailable{opacity:.62;cursor:default}.opml-feed-status{font-size:11px;color:var(--soft)}
