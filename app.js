@@ -37,7 +37,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.9.13";
+const APP_VERSION = "1.9.14";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -3782,13 +3782,13 @@ function previewOPML(file) {
     // The file picker is inside Settings. Wait for its close event before
     // opening the preview so the browser has removed it from the modal stack.
     const settingsDialog = $("#settingsDialog");
-    const openPreview = () => $("#opmlPreviewDialog").showModal();
-    if (settingsDialog?.open) {
-      settingsDialog.addEventListener("close", openPreview, { once: true });
-      settingsDialog.close();
-    } else {
-      openPreview();
-    }
+    if (settingsDialog?.open) settingsDialog.close();
+    // Give the browser a frame to remove Settings from the top layer
+    // before promoting the preview dialog to a modal.
+    requestAnimationFrame(() => {
+      const previewDialog = $("#opmlPreviewDialog");
+      if (!previewDialog.open) previewDialog.showModal();
+    });
   }).catch(error => toast("Could not read OPML file: " + error.message));
 }
 function isShortcutCoachingAvailable() {
