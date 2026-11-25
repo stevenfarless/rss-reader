@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.8] - 2026-11-25
+
+### Fixed
+- Preserve automatic list expansion when collapsing the sidebar, while allowing the article-list splitter to reduce the pane to its configured minimum.
+- Add browser regression coverage for manually resizing the article list after collapsing the sidebar.
+
+
 ## [1.9.7] - 2026-11-25
 
 ### Fixed
