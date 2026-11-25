@@ -37,7 +37,7 @@ const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null, savedSearch: null,
   folders: [], tags: [], savedSearches: [], rules: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 250, listWidth: 400, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader", shortcutCoaching: false, retentionDays: 0, globalRefreshMinutes: 30 }
+  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 250, listWidth: 400, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader", shortcutCoaching: false, retentionDays: 0, retentionCount: 0, globalRefreshMinutes: 30 }
 };
 let db, timer, pendingSeq = null, pendingSeqTimer = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null, automaticRefreshTimer = null;
 /* Text-to-speech state (#105): the article being read, its sentence
@@ -494,6 +494,7 @@ function validateSettings(d) {
   if (typeof d.listWidth === "number" && d.listWidth >= 280 && d.listWidth <= 640) next.listWidth = d.listWidth;
   if (typeof d.shortcutCoaching === "boolean") next.shortcutCoaching = d.shortcutCoaching;
   if ([0,30,90,180,365].includes(Number(d.retentionDays))) next.retentionDays = Number(d.retentionDays);
+  if ([0,250,500,1000,2500,5000].includes(Number(d.retentionCount))) next.retentionCount = Number(d.retentionCount);
   if ([15,30,60,180,360,720,1440].includes(Number(d.globalRefreshMinutes))) next.globalRefreshMinutes = Number(d.globalRefreshMinutes);
   if (d.sort === "newest" || d.sort === "oldest") next.sort = d.sort;
   if (["all", "today", "week"].includes(d.filter)) next.filter = d.filter;
@@ -713,6 +714,7 @@ function readSettingsFromDialog() {
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
     shortcutCoaching: $("#shortcutCoachingToggle").checked,
     retentionDays: Number($("#retentionDaysSelect").value),
+    retentionCount: Number($("#retentionCountSelect").value),
     globalRefreshMinutes: Number($("#globalRefreshMinutesSelect").value),
     sidebarCollapsed: state.settings.sidebarCollapsed || false,
     sidebarWidth: state.settings.sidebarWidth, listWidth: state.settings.listWidth,
@@ -1650,7 +1652,7 @@ async function refreshFeed(f) {
     f.lastSuccess = Date.now();
     return true;
   } catch (e) {
-    f.error = classifyError(e); f.lastError = f.error;
+    f.error = e?.name === "QuotaExceededError" ? "Browser storage is full. Use Settings > Storage management to remove older articles, then retry." : classifyError(e); f.lastError = f.error;
     f.consecutiveFailures = (Number(f.consecutiveFailures) || 0) + 1;
     const backoff = Math.min(24 * 60 * 60 * 1000, 5 * 60 * 1000 * (2 ** Math.min(8, f.consecutiveFailures - 1)));
     f.nextRetryAt = Date.now() + backoff;
@@ -3443,7 +3445,30 @@ function validateCompleteBackup(d){if(!d||d.format!=="rss-reader-backup"||d.vers
 async function importCompleteBackup(file){let d;try{d=validateCompleteBackup(JSON.parse(await file.text()));}catch(e){toast(e.message);return;}const replace=confirm("Choose OK to replace this profile. Choose Cancel to merge backup records into this profile.");if(!replace&&!confirm("Merge backup records? Existing records with matching IDs will be kept."))return;try{const oi=replace?[]:await dbAll(),oh=replace?[]:await hlAll();const merge=(old,add)=>{const m=new Map(old.map(x=>[x.id,x]));for(const x of add)if(!m.has(x.id))m.set(x.id,x);return [...m.values()];};const items=replace?d.items:merge(oi,d.items),highlights=replace?d.highlights:merge(oh,d.highlights);const tx=db.transaction(["items","highlights"],"readwrite"),is=tx.objectStore("items"),hs=tx.objectStore("highlights");if(replace){is.clear();hs.clear();}for(const x of items)is.put(x);for(const x of highlights)hs.put(x);await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error||Error("Restore aborted."));});const p=d.profile;if(replace){state.feeds=p.feeds;state.folders=Array.isArray(p.folders)?p.folders:[];state.tags=Array.isArray(p.tags)?p.tags:[];state.savedSearches=Array.isArray(p.savedSearches)?p.savedSearches:[];state.rules=Array.isArray(p.rules)?p.rules:[];state.settings={...state.settings,...validateSettings(p.settings)};articleNotes=p.notes&&typeof p.notes==="object"?p.notes:{};collapsedFolders=new Set(Array.isArray(p.collapsedFolders)?p.collapsedFolders:[]);state.lastRefresh=Number(p.lastRefresh)||0;}else{const mb=(x,y)=>[...x,...y.filter(v=>!x.some(w=>w.id===v.id))];state.feeds=mb(state.feeds,p.feeds);state.folders=[...new Set([...state.folders,...(p.folders||[])])];state.tags=[...new Set([...state.tags,...(p.tags||[])])];state.savedSearches=mb(state.savedSearches,p.savedSearches||[]);state.rules=mb(state.rules,p.rules||[]);articleNotes={...articleNotes,...(p.notes||{})};}localStorage.setItem(K,JSON.stringify(state.feeds));localStorage.setItem(KF,JSON.stringify(state.folders));localStorage.setItem(KT,JSON.stringify(state.tags));localStorage.setItem(KS,JSON.stringify(state.savedSearches));localStorage.setItem(KR,JSON.stringify(state.rules));localStorage.setItem(S,JSON.stringify(state.settings));localStorage.setItem(NK,JSON.stringify(articleNotes));localStorage.setItem(COLLAPSED_FOLDERS_KEY,JSON.stringify([...collapsedFolders]));state.items=items;state.highlights=highlights;syncFolders();applySettings();mirrorSync();render();toast("Backup restored: "+state.feeds.length+" feeds, "+items.length+" articles, "+highlights.length+" highlights.");}catch(e){console.error(e);toast("Restore failed: "+e.message);}}
 function exportAnnotations(format){const byId=new Map(state.items.map(x=>[x.id,x]));const rows=[...state.highlights.map(h=>{const x=byId.get(h.itemId)||{};return {type:"highlight",title:x.title||"",url:x.url||"",feed:x.feedTitle||"",text:h.text||h.quote||"",note:h.note||"",createdAt:h.created||null,updatedAt:h.updated||null};}),...Object.entries(articleNotes).map(([id,note])=>{const x=byId.get(id)||{};return {type:"note",title:x.title||"",url:x.url||"",feed:x.feedTitle||"",note,createdAt:null,updatedAt:null};})];if(format==="json"){download(JSON.stringify({format:"rss-reader-annotations",version:1,annotations:rows},null,2),"rss-reader-annotations.json","application/json");return;}const md=rows.map(x=>"## "+(x.title||"Untitled article")+"\n\nSource: "+(x.url||"Unavailable")+"\n\nFeed: "+(x.feed||"Unknown")+"\n\n"+(x.createdAt?"Created: "+new Date(x.createdAt).toISOString()+"\n\n":"")+(x.updatedAt?"Updated: "+new Date(x.updatedAt).toISOString()+"\n\n":"")+(x.text?"> "+x.text+"\n\n":"")+(x.note||"")).join("\n---\n\n");download(md,"rss-reader-annotations.md","text/markdown");}
 async function updateStorageUsage(){const el=$("#storageUsage");if(!el)return;if(!navigator.storage?.estimate){el.textContent="Storage usage estimates are unavailable.";return;}try{const d=await navigator.storage.estimate(),fmt=n=>n<1048576?Math.round(n/1024)+" KB":(n/1048576).toFixed(1)+" MB";el.textContent="Approximate browser storage: "+fmt(d.usage||0)+" used of "+(d.quota?fmt(d.quota):"unknown quota")+". ";}catch{el.textContent="Storage usage could not be read.";}}
-async function previewRetentionCleanup(){const days=Number(state.settings.retentionDays)||0;if(!days){toast("Choose an article retention period in Settings first.");return;}const protectedIds=new Set([...state.highlights.map(x=>x.itemId),...Object.keys(articleNotes)]),cutoff=Date.now()-days*86400000;const old=state.items.filter(x=>{const t=dateSortKey(x);return t&&t<cutoff&&!x.saved&&!x.queued&&!protectedIds.has(x.id);});if(!old.length){toast("No unprotected articles are older than the selected period.");return;}if(!confirm("Remove "+old.length+" old articles? Saved, queued, highlighted, and noted articles are protected."))return;const ids=old.map(x=>x.id),set=new Set(ids);await deleteMany(ids);state.items=state.items.filter(x=>!set.has(x.id));render();updateStorageUsage();toast("Removed "+ids.length+" old articles.");}
+async function previewRetentionCleanup() {
+  const days = Number(state.settings.retentionDays) || 0;
+  const limit = Number(state.settings.retentionCount) || 0;
+  if (!days && !limit) { toast("Choose an article age limit or maximum count in Settings first."); return; }
+  const protectedIds = new Set([...state.highlights.map(x => x.itemId), ...Object.keys(articleNotes)]);
+  const sorted = [...state.items].sort((a,b) => (dateSortKey(b) || 0) - (dateSortKey(a) || 0));
+  const beyondLimit = limit ? new Set(sorted.slice(limit).map(x => x.id)) : new Set();
+  const cutoff = days ? Date.now() - days * 86400000 : 0;
+  const removable = sorted.filter(item => {
+    const timestamp = dateSortKey(item);
+    const tooOld = days && timestamp && timestamp < cutoff;
+    const beyondCount = limit && beyondLimit.has(item.id);
+    return (tooOld || beyondCount) && !item.saved && !item.queued && !protectedIds.has(item.id);
+  });
+  if (!removable.length) { toast("No unprotected articles exceed the selected retention limits."); return; }
+  if (!confirm("Remove " + removable.length + " articles outside the selected retention limits? Saved, queued, highlighted, and noted articles are protected.")) return;
+  const ids = removable.map(x => x.id);
+  for (let i = 0; i < ids.length; i += 250) await deleteMany(ids.slice(i, i + 250));
+  const removed = new Set(ids);
+  state.items = state.items.filter(x => !removed.has(x.id));
+  render();
+  updateStorageUsage();
+  toast("Removed " + ids.length + " old or excess articles.");
+}
 function showFeedHealth() {
   const now = Date.now();
   const unhealthy = state.feeds.map(feed => {
@@ -3551,6 +3576,7 @@ function showSettings() {
   $("#notifyNewToggle").checked = !!state.settings.notifyNew;
   $("#shortcutCoachingToggle").checked = !!state.settings.shortcutCoaching;
   $("#retentionDaysSelect").value = String(state.settings.retentionDays || 0);
+  $("#retentionCountSelect").value = String(state.settings.retentionCount || 0);
   $("#globalRefreshMinutesSelect").value = String(state.settings.globalRefreshMinutes || 30);
   updateStorageUsage();
   // App updates (#144): the running version, and the last check result
