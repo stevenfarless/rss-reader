@@ -1646,7 +1646,7 @@ async function refreshFeed(f) {
     }
     f.title = loaded.parsed.title || f.title;
     f.error = "";
-    f.consecutiveFailures = 0; f.lastError = ""; f.nextRetryAt = 0; f.retrievalPath = loaded.via;
+    f.consecutiveFailures = 0; f.nextRetryAt = 0; f.retrievalPath = loaded.via;
     f.via = loaded.via;
     f.wpRoot = loaded.wpRoot || f.wpRoot || "";
     if (loaded.url) f.url = loaded.url;
@@ -1654,7 +1654,7 @@ async function refreshFeed(f) {
     f.lastSuccess = Date.now();
     return true;
   } catch (e) {
-    f.error = e?.name === "QuotaExceededError" ? "Browser storage is full. Use Settings > Storage management to remove older articles, then retry." : classifyError(e); f.lastError = f.error;
+    f.error = e?.name === "QuotaExceededError" ? "Browser storage is full. Use Settings > Storage management to remove older articles, then retry." : classifyError(e); f.lastError = f.error; f.lastErrorAt = Date.now();
     f.consecutiveFailures = (Number(f.consecutiveFailures) || 0) + 1;
     const backoff = Math.min(24 * 60 * 60 * 1000, 5 * 60 * 1000 * (2 ** Math.min(8, f.consecutiveFailures - 1)));
     f.nextRetryAt = Date.now() + backoff;
@@ -1667,7 +1667,7 @@ async function refreshFeed(f) {
 function showFeedError(id) {
   const f = state.feeds.find(v => v.id === id);
   if (!f) return;
-  $("#feedErrorText").textContent = [f.error || "This feed failed to load.", f.lastAttempt ? "Last attempt: " + new Date(f.lastAttempt).toLocaleString() : "", f.lastSuccess ? "Last success: " + new Date(f.lastSuccess).toLocaleString() : "No successful refresh recorded", "Consecutive failures: " + (Number(f.consecutiveFailures) || 0), f.retrievalPath ? "Retrieval path: " + f.retrievalPath : ""].filter(Boolean).join("\n");
+  $("#feedErrorText").textContent = [f.error || "This feed failed to load.", f.lastAttempt ? "Last attempt: " + new Date(f.lastAttempt).toLocaleString() : "", f.lastSuccess ? "Last success: " + new Date(f.lastSuccess).toLocaleString() : "No successful refresh recorded", "Consecutive failures: " + (Number(f.consecutiveFailures) || 0), f.retrievalPath ? "Retrieval path: " + f.retrievalPath : "", f.lastError ? "Most recent error: " + f.lastError + (f.lastErrorAt ? " (" + new Date(f.lastErrorAt).toLocaleString() + ")" : "") : ""].filter(Boolean).join("\n");
   $("#feedErrorDialog").dataset.feed = id;
   $("#feedErrorDialog").showModal();
 }
@@ -3508,7 +3508,7 @@ function showFeedHealth() {
       (feed.lastSuccess ? ' · Last success: ' + esc(new Date(feed.lastSuccess).toLocaleString()) : ' · No successful refresh recorded') +
       (feed.lastAttempt ? ' · Last attempt: ' + esc(new Date(feed.lastAttempt).toLocaleString()) : '') +
       (feed.consecutiveFailures ? ' · Failures: ' + Number(feed.consecutiveFailures) : '') +
-      '</p>' + (feed.error ? '<p class="muted">' + esc(feed.error) + '</p>' : '') +
+      '</p>' + (feed.error ? '<p class="muted">Current error: ' + esc(feed.error) + '</p>' : feed.lastError ? '<p class="muted">Most recent error: ' + esc(feed.lastError) + (feed.lastErrorAt ? " · " + esc(new Date(feed.lastErrorAt).toLocaleString()) : "") + '</p>' : '') +
       '<button type="button" class="quiet" data-health-retry="' + esc(feed.id) + '">Retry feed</button></section>'
     ).join("");
   }
