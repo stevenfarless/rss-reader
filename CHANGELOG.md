@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.1] - 2026-11-24
+
+### Fixed
+- Corrected contextual shortcut coaching so article actions are matched to the active shortcut preset.
+- Excluded keyboard, scripted, and touch-only activations from coaching prompts.
+- Added per-action and global notification cooldowns, reliable dismissal, and regression tests.
+
+## [1.9.0] - 2026-11-24
+
 ## [1.9.0] - 2026-11-24
 
 ### Added
