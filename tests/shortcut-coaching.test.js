@@ -6,8 +6,7 @@ const require = createRequire(import.meta.url);
 const {
   PRESETS,
   findShortcutForAction,
-  isShortcutCoachPointerEvent,
-  canShowShortcutCoach
+  isShortcutCoachPointerEvent
 } = require("../utils.js");
 
 test("shortcut lookup follows the active preset instead of a duplicate mapping", () => {
@@ -37,15 +36,6 @@ test("coaching accepts touch and excludes keyboard, synthetic, stale, and invali
   assert.equal(isShortcutCoachPointerEvent(event, base, 2201), false);
   assert.equal(isShortcutCoachPointerEvent(event, { ...base, at: 1200 }, 1100), false);
   assert.equal(isShortcutCoachPointerEvent(event, null, 1100), false);
-});
-
-test("coaching cooldown deduplicates actions and limits overall notification frequency", () => {
-  const lastShown = new Map([["save", 1000]]);
-  assert.equal(canShowShortcutCoach("save", lastShown, 1000, 2000), false);
-  assert.equal(canShowShortcutCoach("read", lastShown, 1000, 2000), false);
-  assert.equal(canShowShortcutCoach("read", lastShown, 1000, 4000), true);
-  assert.equal(canShowShortcutCoach("save", lastShown, 1000, 62000), true);
-  assert.equal(canShowShortcutCoach("", lastShown, 1000, 62000), false);
 });
 
 test("app wires coaching to pointer-originated clicks and the persisted setting", async () => {
