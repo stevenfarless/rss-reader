@@ -213,8 +213,10 @@ test("retention cleanup preserves saved and queued articles", async ({ page }) =
   });
   await page.reload();
   await page.locator("#settings").click();
+  await expect(page.locator("#settingsDialog")).toBeVisible();
   await page.locator("#retentionDaysSelect").selectOption("30");
   page.once("dialog", dialog => dialog.accept());
+  await page.locator("#previewCleanup").scrollIntoViewIfNeeded();
   await page.locator("#previewCleanup").click();
   await page.locator("#saveSettings").click();
   await expect(page.locator("#articleList")).not.toContainText("Old ordinary article");
@@ -234,15 +236,20 @@ test("invalid profile backups are rejected before changing local data", async ({
   await expect(page.locator("#settingsDialog")).toBeVisible();
 });
 
-test("narrow mobile viewport keeps the reader within the screen", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+test("narrow mobile viewport keeps the reader within the screen", async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    serviceWorkers: "block"
+  });
+  const page = await context.newPage();
+  await page.goto("http://127.0.0.1:4173/", { waitUntil: "domcontentloaded", timeout: 10000 });
+  await expect(page.locator("#heading")).toBeVisible({ timeout: 10000 });
   const dimensions = await page.evaluate(() => ({
     viewport: document.documentElement.clientWidth,
     document: document.documentElement.scrollWidth
   }));
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport);
-  await expect(page.locator("#heading")).toBeVisible();
+  await context.close();
 });
 
 test("service worker installs and serves the shell after network loss", async ({ browser }) => {
