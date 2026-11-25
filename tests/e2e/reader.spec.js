@@ -249,7 +249,7 @@ test("narrow mobile viewport keeps the reader within the screen", async ({ page 
 test("service worker installs and serves the shell after network loss", async ({ browser }) => {
   const context = await browser.newContext({ serviceWorkers: "allow" });
   const page = await context.newPage();
-  await page.goto("/");
+  await page.goto("http://127.0.0.1:4173/");
   await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
   await expect(page.locator("#heading")).toHaveText("All articles");
   await context.setOffline(true);
