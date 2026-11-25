@@ -3742,39 +3742,13 @@ function previewOPML(file) {
     $("#opmlPreviewDialog").showModal();
   }).catch(error => toast("Could not read OPML file: " + error.message));
 }
-function showShortcutCoach(action, label, shortcut) {
-  let suppressed = [];
-  try {
-    const stored = JSON.parse(localStorage.getItem("rss-reader.shortcut-coach-suppressed.v1") || "[]");
-    if (Array.isArray(stored)) suppressed = stored.filter(value => typeof value === "string");
-  } catch {}
-  if (suppressed.includes(action)) return;
-
+function showShortcutCoach(label, shortcut) {
   const el = $("#shortcutCoach");
   if (!el) return;
-  el.replaceChildren(document.createTextNode(label + " · Shortcut: " + shortcut));
 
-  const dismiss = document.createElement("button");
-  dismiss.type = "button";
-  dismiss.textContent = "Dismiss";
-  dismiss.setAttribute("aria-label", "Dismiss shortcut suggestion");
-  dismiss.onclick = () => {
-    clearTimeout(coachTimer);
-    el.classList.remove("show");
-  };
-
-  const suppress = document.createElement("button");
-  suppress.type = "button";
-  suppress.textContent = "Don’t show again";
-  suppress.setAttribute("aria-label", "Do not show this shortcut suggestion again");
-  suppress.onclick = () => {
-    const next = [...new Set([...suppressed, action])];
-    try { localStorage.setItem("rss-reader.shortcut-coach-suppressed.v1", JSON.stringify(next)); } catch {}
-    clearTimeout(coachTimer);
-    el.classList.remove("show");
-  };
-
-  el.append(dismiss, suppress);
+  el.textContent = shortcut
+    ? label + " · Shortcut: " + shortcut
+    : label + " · No keyboard shortcut assigned";
   el.classList.add("show");
   clearTimeout(coachTimer);
   coachTimer = setTimeout(() => el.classList.remove("show"), 7000);
@@ -3784,64 +3758,48 @@ function coachShortcut(e) {
   if (!state.settings.shortcutCoaching ||
       !isShortcutCoachPointerEvent(e, pointerActivation)) return;
 
-  const target = e.target?.closest?.("[data-action],[data-reader],[data-view],#refresh,#settings,#railSettings,#add,#search,[data-rail-refresh]");
-  if (!target) return;
+  const target = e.target?.closest?.("button,a,[role='button'],summary,input[type='button'],input[type='submit'],input[type='reset'],[data-action],[data-reader],[data-view]");
+  if (!target || target.closest("#shortcutCoach")) return;
 
-  let action = null;
-  let label = "";
   const readerAction = target.dataset.reader;
   const appAction = target.dataset.action;
   const view = target.dataset.view;
+  let action = readerAction || appAction || view || target.id || "";
+  let label = target.getAttribute("aria-label") ||
+    target.getAttribute("title") ||
+    target.textContent?.replace(/\s+/g, " ").trim() ||
+    target.value ||
+    "Action";
 
-  if (appAction === "save" || readerAction === "save") {
-    action = "save"; label = "Save article";
-  } else if (appAction === "read" || readerAction === "read") {
-    action = "toggleRead"; label = "Toggle read state";
-  } else if (readerAction === "tags") {
-    action = "tag"; label = "Add article tag";
-  } else if (readerAction === "fulltext") {
-    action = "fullArticle"; label = "Toggle full article";
-  } else if (readerAction === "open") {
-    action = "openOriginal"; label = "Open original article";
-  } else if (readerAction === "close") {
-    action = "closeReader"; label = "Close article";
-  } else if (readerAction === "share" || appAction === "share") {
-    action = "share"; label = "Share article";
-  } else if (view === "all") {
-    action = "allView"; label = "All articles";
-  } else if (view === "unread") {
-    action = "unreadView"; label = "Unread";
-  } else if (view === "saved") {
-    action = "goSaved"; label = "Saved articles";
-  } else if (view === "snoozed") {
-    action = "goSnoozed"; label = "Snoozed articles";
-  } else if (view === "highlights") {
-    action = "goHighlights"; label = "Highlights";
-  } else if (target.id === "refresh" || target.hasAttribute("data-rail-refresh")) {
-    action = "refresh"; label = "Refresh feeds";
-  } else if (target.id === "add") {
-    action = "addFeed"; label = "Add feed";
-  } else if (target.id === "settings" || target.id === "railSettings") {
-    action = "goPrefs"; label = "Settings";
-  } else if (target.id === "search") {
-    action = "search"; label = "Search";
-  }
+  const knownActions = {
+    save: ["save", "Save article"],
+    read: ["toggleRead", "Toggle read state"],
+    tags: ["tag", "Add article tag"],
+    fulltext: ["fullArticle", "Toggle full article"],
+    open: ["openOriginal", "Open original article"],
+    close: ["closeReader", "Close article"],
+    share: ["share", "Share article"],
+    all: ["allView", "All articles"],
+    unread: ["unreadView", "Unread"],
+    saved: ["goSaved", "Saved articles"],
+    snoozed: ["goSnoozed", "Snoozed articles"],
+    highlights: ["goHighlights", "Highlights"],
+    refresh: ["refresh", "Refresh feeds"],
+    add: ["addFeed", "Add feed"],
+    settings: ["goPrefs", "Settings"],
+    railSettings: ["goPrefs", "Settings"],
+    search: ["search", "Search"]
+  };
+  const known = knownActions[action] || knownActions[target.id];
+  if (known) [action, label] = known;
 
-  if (!action) return;
-
-  // A card action is only coachable when it refers to a current article.
   if (target.dataset.id && !state.items.some(item => item.id === target.dataset.id)) return;
 
-  const presetName = shortcutPreset();
-  const shortcutKey = findShortcutForAction(presetName, action);
-  if (!shortcutKey) return;
-
-  const now = Date.now();
-  if (!canShowShortcutCoach(action, coachLastShown, coachLastAnyShown, now)) return;
-
-  coachLastShown.set(action, now);
-  coachLastAnyShown = now;
-  showShortcutCoach(action, label, shortcutKey.split(" ").map(displayDesc).join(" then "));
+  const shortcutKey = findShortcutForAction(shortcutPreset(), action);
+  const shortcut = shortcutKey
+    ? shortcutKey.split(" ").map(displayDesc).join(" then ")
+    : "";
+  showShortcutCoach(label, shortcut);
 }
 function toolbarOrderFromDialog() {
   const items = [...document.querySelectorAll("#toolbarOrderList [data-tb-key]")];
