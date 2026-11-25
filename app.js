@@ -39,7 +39,7 @@ const state = {
   folders: [], tags: [], savedSearches: [], rules: [],
   settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 250, listWidth: 400, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader", shortcutCoaching: false, retentionDays: 0, globalRefreshMinutes: 30 }
 };
-let db, timer, pendingSeq = null, pendingSeqTimer = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null;
+let db, timer, pendingSeq = null, pendingSeqTimer = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null, automaticRefreshTimer = null;
 /* Text-to-speech state (#105): the article being read, its sentence
    chunks, and where playback has reached. Null when nothing is playing. */
 let tts = null;
@@ -1682,7 +1682,7 @@ async function refresh(automatic = false) {
     // helper (rss2json) rate-limited by publishers. Five at a time
     // is far gentler and still fast enough.
     const eligibleFeeds = state.feeds.filter(f => !automatic || ((!f.nextRetryAt || Date.now() >= f.nextRetryAt) && Date.now() - (f.lastAttempt || 0) >= (Number(f.refreshMinutes) || Number(state.settings.globalRefreshMinutes) || 30) * 60000));
-    if (!eligibleFeeds.length) { toast("All feeds are within their refresh interval."); return; }
+    if (!eligibleFeeds.length) { if (!automatic) toast("All feeds are within their refresh interval."); return; }
     const results = new Array(eligibleFeeds.length);
     let next = 0;
     const REFRESH_CONCURRENCY = 5;
@@ -4674,7 +4674,12 @@ async function init() {
     if (state.feedsRestored) toast("Your subscriptions were restored from a backup copy.");
     // Refresh on launch when the newest cached article is stale, so
     // the list is never silently days old.
-    if (state.feeds.length) refresh(true);
+    if (state.feeds.length) {
+      refresh(true);
+      if (!automaticRefreshTimer) automaticRefreshTimer = setInterval(() => {
+        if (document.visibilityState === "visible" && !$("#refresh")?.disabled) refresh(true);
+      }, 60000);
+    }
   }
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
     initServiceWorker();
