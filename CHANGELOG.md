@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.9.18] - 2026-11-25
+
+### Fixed
+- Use the all-dialog selector when closing any remaining open dialogs before the OPML preview opens.
+
+
 ## [1.9.17] - 2026-11-25
 
 ### Fixed
