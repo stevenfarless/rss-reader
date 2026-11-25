@@ -37,7 +37,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.9.10";
+const APP_VERSION = "1.9.11";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -3775,6 +3775,9 @@ function previewOPML(file) {
     $("#opmlPreviewConfirm").disabled = eligible.length === 0;
     $("#opmlPreviewConfirm").textContent = eligible.length ? "Import " + eligible.length + " feeds" : "No new feeds to import";
     pendingOPMLFile = file;
+    // The file picker is inside Settings. Close that modal before opening the preview;
+    // browsers reject showModal() when another modal dialog is already active.
+    if ($("#settingsDialog")?.open) $("#settingsDialog").close();
     $("#opmlPreviewDialog").showModal();
   }).catch(error => toast("Could not read OPML file: " + error.message));
 }
