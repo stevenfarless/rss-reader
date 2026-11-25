@@ -3761,10 +3761,10 @@ function previewOPML(file) {
     pendingOPMLFeedUrls = eligible.map(entry => normalizedByEntry.get(entry));
     $("#opmlPreviewSummary").textContent = eligible.length + " available feed" + (eligible.length === 1 ? "" : "s") + " selected by default. " + duplicateEntries.size + " duplicates and " + invalidEntries.size + " invalid URLs will be skipped."; 
     $("#opmlPreviewDetails").textContent = folders.length ? "Folders found: " + folders.join(" · ") : "No named folders."; 
-    const eligibleUrls = new Set(pendingOPMLFeedUrls);
+    const eligibleEntries = new Set(eligible);
     $("#opmlFeedSelection").innerHTML = entries.map(entry => {
       const url = normalizedByEntry.get(entry) || "";
-      const selectable = !!url && eligibleUrls.has(url);
+      const selectable = eligibleEntries.has(entry);
       const status = invalidEntries.has(entry) ? "Invalid URL" : !selectable ? "Duplicate or already subscribed" : "";
       const label = [...entry.path, entry.title].filter(Boolean).join(" / ");
       return '<label class="opml-feed-option' + (selectable ? "" : " unavailable") + '"><input type="checkbox" data-opml-feed="' + esc(url) + '"' + (selectable ? " checked" : " disabled") + '><span class="opml-feed-title">' + esc(label) + '</span>' + (status ? '<span class="opml-feed-status">' + esc(status) + '</span>' : "") + '</label>';
