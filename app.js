@@ -37,7 +37,7 @@ const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null, savedSearch: null,
   folders: [], tags: [], savedSearches: [], rules: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 250, listWidth: 400, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader", shortcutCoaching: false, retentionDays: 0 }
+  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 250, listWidth: 400, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader", shortcutCoaching: false, retentionDays: 0, globalRefreshMinutes: 30 }
 };
 let db, timer, pendingSeq = null, pendingSeqTimer = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null;
 /* Text-to-speech state (#105): the article being read, its sentence
@@ -494,6 +494,7 @@ function validateSettings(d) {
   if (typeof d.listWidth === "number" && d.listWidth >= 280 && d.listWidth <= 640) next.listWidth = d.listWidth;
   if (typeof d.shortcutCoaching === "boolean") next.shortcutCoaching = d.shortcutCoaching;
   if ([0,30,90,180,365].includes(Number(d.retentionDays))) next.retentionDays = Number(d.retentionDays);
+  if ([15,30,60,180,360,720,1440].includes(Number(d.globalRefreshMinutes))) next.globalRefreshMinutes = Number(d.globalRefreshMinutes);
   if (d.sort === "newest" || d.sort === "oldest") next.sort = d.sort;
   if (["all", "today", "week"].includes(d.filter)) next.filter = d.filter;
   if (Array.isArray(d.toolbarOrder)) {
@@ -712,6 +713,7 @@ function readSettingsFromDialog() {
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
     shortcutCoaching: $("#shortcutCoachingToggle").checked,
     retentionDays: Number($("#retentionDaysSelect").value),
+    globalRefreshMinutes: Number($("#globalRefreshMinutesSelect").value),
     shortcutCoaching: $("#shortcutCoachingToggle").checked,
     retentionDays: Number($("#retentionDaysSelect").value),
     sidebarCollapsed: state.settings.sidebarCollapsed || false,
@@ -1676,7 +1678,7 @@ async function refresh(automatic = false) {
     // concurrent requests, and the burst is what gets the shared
     // helper (rss2json) rate-limited by publishers. Five at a time
     // is far gentler and still fast enough.
-    const eligibleFeeds = state.feeds.filter(f => !automatic || !f.refreshMinutes || Date.now() - (f.lastAttempt || 0) >= f.refreshMinutes * 60000);
+    const eligibleFeeds = state.feeds.filter(f => !automatic || Date.now() - (f.lastAttempt || 0) >= (Number(f.refreshMinutes) || Number(state.settings.globalRefreshMinutes) || 30) * 60000);
     if (!eligibleFeeds.length) { toast("All feeds are within their refresh interval."); return; }
     const results = new Array(eligibleFeeds.length);
     let next = 0;
@@ -3477,6 +3479,7 @@ function showSettings() {
   $("#notifyNewToggle").checked = !!state.settings.notifyNew;
   $("#shortcutCoachingToggle").checked = !!state.settings.shortcutCoaching;
   $("#retentionDaysSelect").value = String(state.settings.retentionDays || 0);
+  $("#globalRefreshMinutesSelect").value = String(state.settings.globalRefreshMinutes || 30);
   updateStorageUsage();
   // App updates (#144): the running version, and the last check result
   // (an update waiting shows here as well as in the banner).
