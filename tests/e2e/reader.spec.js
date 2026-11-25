@@ -39,6 +39,30 @@ test("collapsing the sidebar expands the article list into the freed space", asy
     .toBeLessThanOrEqual(await page.locator(".layout").evaluate(el => el.clientWidth));
 });
 
+test("shortcut coaching stays disabled on mobile while remaining enabled on desktop", async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    serviceWorkers: "block"
+  });
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    localStorage.setItem("rss-reader.settings.v1", JSON.stringify({
+      shortcutCoaching: true
+    }));
+  });
+  await page.goto("http://127.0.0.1:4173/");
+  await page.locator("#mobileAdd").click();
+  await expect(page.locator("#feedDialog")).toBeVisible();
+  await expect(page.locator("#shortcutCoach")).not.toBeVisible();
+  await page.locator("#feedDialog .x").click();
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.locator("#add").click();
+  await expect(page.locator("#shortcutCoach")).toContainText("Add feed");
+  await expect(page.locator("#shortcutCoach")).toContainText("Shortcut: a");
+  await context.close();
+});
+
 test("secondary navigation can be expanded and queue view is reachable", async ({ page }) => {
   await page.goto("/");
   await page.locator("#libraryMore summary").click();
