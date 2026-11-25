@@ -94,3 +94,19 @@ test("complete backup export produces a versioned JSON download", async ({ page 
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe("rss-reader-backup.json");
 });
+
+test("shortcut coaching and statistics are available from settings", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#settings").click();
+  await page.locator("#shortcutCoachingToggle").check();
+  await page.locator("#saveSettings").click();
+  await page.locator("#add").click();
+  await expect(page.locator("#toast")).toContainText("Shortcut:");
+  await page.locator("#feedDialog .x").click();
+
+  await page.locator("#settings").click();
+  await page.locator("#openStats").click();
+  await expect(page.locator("#statsDialog")).toBeVisible();
+  await page.locator("#statsRange").selectOption("7");
+  await expect(page.locator("#statsBody")).toContainText("the last 7 days");
+});
