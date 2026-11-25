@@ -302,6 +302,27 @@ for (const key of ["h", "j", "k", "d", "u", "Enter", "Space", "Shift+Space", "g 
 PRESETS.vim = { name: "Vim", keys: vimKeys };
 
 
+
+// Shared lookup and event eligibility for contextual shortcut coaching.
+function findShortcutForAction(presetName, action, presets = PRESETS) {
+  const preset = presets?.[presetName];
+  if (!preset?.keys || typeof action !== "string") return null;
+  const match = Object.entries(preset.keys).find(([, boundAction]) => boundAction === action);
+  return match?.[0] || null;
+}
+
+function isShortcutCoachPointerEvent(event, activation, now = Date.now(), maxAge = 1200) {
+  return Boolean(
+    event?.isTrusted === true &&
+    Number(event.detail) > 0 &&
+    activation?.isTrusted === true &&
+    (activation.type === "mouse" || activation.type === "pen") &&
+    Number.isFinite(activation.at) &&
+    now >= activation.at &&
+    now - activation.at <= maxAge
+  );
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder, nextFeedSort, keyDesc, PRESETS, ACTION_LABELS };
+  module.exports = { normalizeFeedUrl, sameFeedUrl, canonicalUrl, dedupeItems, snippet, ruleMatches, cleanSummary, moveFeedInList, namedFolderNames, allFoldersCollapsed, authorIsFeedTitle, normalizeToolbarOrder, nextFeedSort, keyDesc, PRESETS, ACTION_LABELS, findShortcutForAction, isShortcutCoachPointerEvent };
 }
