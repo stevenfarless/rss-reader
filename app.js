@@ -37,7 +37,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.9.6";
+const APP_VERSION = "1.9.7";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -911,7 +911,10 @@ function bindSplitter(el, kind) {
 function bindSplitters() {
   bindSplitter($("#splitSide"), "side");
   bindSplitter($("#splitList"), "list");
-  window.addEventListener("resize", positionSplitters);
+  window.addEventListener("resize", () => {
+    positionSplitters();
+    if (!isShortcutCoachingAvailable()) $("#shortcutCoach")?.classList.remove("show");
+  });
 }
 
 /* Reading progress (#92): thin bar at the bottom of the reader, filled
@@ -3742,11 +3745,17 @@ function previewOPML(file) {
     $("#opmlPreviewDialog").showModal();
   }).catch(error => toast("Could not read OPML file: " + error.message));
 }
+function isShortcutCoachingAvailable() {
+  return matchMedia("(min-width:821px)").matches;
+}
 function showShortcutCoach(label, shortcut) {
   const el = $("#shortcutCoach");
   if (!el) return;
 
-  if (!shortcut) return;
+  if (!isShortcutCoachingAvailable() || !shortcut) {
+    el.classList.remove("show");
+    return;
+  }
   el.textContent = label + " · Shortcut: " + shortcut;
   el.classList.add("show");
   clearTimeout(coachTimer);
@@ -3754,7 +3763,7 @@ function showShortcutCoach(label, shortcut) {
 }
 
 function coachShortcut(e) {
-  if (!state.settings.shortcutCoaching ||
+  if (!isShortcutCoachingAvailable() || !state.settings.shortcutCoaching ||
       !isShortcutCoachPointerEvent(e, pointerActivation)) return;
 
   const target = e.target?.closest?.("button,a,[role='button'],summary,input[type='search'],input[type='button'],input[type='submit'],input[type='reset'],[data-action],[data-reader],[data-view],[data-rail-next-unread],[data-rail-search],[data-rail-refresh],[data-folder-toggle]");
