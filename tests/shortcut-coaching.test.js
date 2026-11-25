@@ -30,7 +30,7 @@ test("coaching accepts trusted mouse and pen activations", () => {
 test("coaching excludes touch, keyboard, synthetic, stale, and invalid activations", () => {
   const event = { isTrusted: true, detail: 1 };
   const base = { type: "mouse", at: 1000, isTrusted: true };
-  assert.equal(isShortcutCoachPointerEvent(event, { ...base, type: "touch" }, 1100), false);
+  assert.equal(isShortcutCoachPointerEvent(event, { ...base, type: "touch" }, 1100), true);
   assert.equal(isShortcutCoachPointerEvent({ isTrusted: true, detail: 0 }, base, 1100), false);
   assert.equal(isShortcutCoachPointerEvent({ isTrusted: false, detail: 1 }, base, 1100), false);
   assert.equal(isShortcutCoachPointerEvent(event, { ...base, isTrusted: false }, 1100), false);
@@ -56,8 +56,10 @@ test("app wires coaching to pointer-originated clicks and the persisted setting"
   assert.match(app, /click", e => coachShortcut\(e\)/);
   assert.match(app, /isShortcutCoachPointerEvent\(e, pointerActivation\)/);
   assert.match(app, /findShortcutForAction\(presetName, action\)/);
-  assert.match(app, /canShowShortcutCoach\(action, coachLastShown/);
-  assert.match(app, /shortcut-coach-suppressed\.v1/);
+  assert.match(app, /No keyboard shortcut assigned/);
+  assert.match(app, /button,a,/);
+  assert.doesNotMatch(app, /shortcut-coach-suppressed/);
+  assert.doesNotMatch(app, /Don’t show again|Dismiss shortcut suggestion/);
   assert.match(html, /id="shortcutCoachingToggle"/);
   assert.match(html, /id="shortcutCoach"[^>]*aria-live="polite"/);
   assert.ok(app.includes('const el = $("#shortcutCoach")'));
