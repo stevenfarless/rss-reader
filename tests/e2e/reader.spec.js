@@ -55,6 +55,8 @@ test("reading queue persists article ordering in the local library", async ({ pa
       title: "Fixture Feed",
       site: "https://example.test/",
       added: new Date().toISOString(),
+      lastAttempt: Date.now(),
+      lastSuccess: Date.now(),
       error: "",
       via: "direct",
       wpRoot: "",
