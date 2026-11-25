@@ -4677,10 +4677,7 @@ async function init() {
     if (state.feedsRestored) toast("Your subscriptions were restored from a backup copy.");
     // Refresh on launch when the newest cached article is stale, so
     // the list is never silently days old.
-    if (state.feeds.length) {
-      const newest = state.items.reduce((m, x) => Math.max(m, dateSortKey(x) ?? 0), 0);
-      if (!state.items.length || Date.now() - newest > (Number(state.settings.globalRefreshMinutes) || 30) * 60000) refresh(true);
-    }
+    if (state.feeds.length) refresh(true);
   }
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
     initServiceWorker();
