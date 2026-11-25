@@ -3486,7 +3486,7 @@ function previewOPML(file) {
       outline.getAttribute("title") || outline.getAttribute("text") || outline.getAttribute("xmlUrl")
     ).join("\n");
     $("#opmlPreviewSummary").textContent =
-      feeds.length + " feed entries and " + folders.length + " folders found. " +
+      feeds.length + (feeds.length === 1 ? " feed entry" : " feed entries") + " and " + folders.length + (folders.length === 1 ? " folder" : " folders") + " found. " +
       duplicates.length + " duplicates and " + invalid.length + " invalid URLs will be skipped.";
     $("#opmlPreviewDetails").textContent = [folderText, duplicateText, invalidText, feedText].join("\n\n");
     pendingOPMLFile = file;
