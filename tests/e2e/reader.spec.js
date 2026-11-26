@@ -550,6 +550,8 @@ test("Vim preset navigates panes and preserves the focused pane after reload", a
 test("settings modal is usable on narrow screens and with keyboard input", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 });
   await page.goto("/");
+  await page.locator("#menu").click();
+  await expect(page.locator("#sidebar")).toHaveClass(/open/);
   await page.locator("#settings").click();
 
   const dialog = page.locator("#settingsDialog");
