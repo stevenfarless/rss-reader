@@ -126,6 +126,8 @@
     if (!deferredPrompt) { openGuidance(); return; }
     const event = deferredPrompt;
     deferredPrompt = null;
+    updateDialog();
+    if (!dialog.open) dialog.showModal();
     $("#pwaInstallDialogAction").disabled = true;
     $("#pwaInstallBannerAction").disabled = true;
     $("#pwaInstallStatus").textContent = "Waiting for your choice…";
