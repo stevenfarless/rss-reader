@@ -1,6 +1,8 @@
 name: Deploy to GitHub Pages
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
@@ -45,6 +47,7 @@ jobs:
           mkdir -p dist
           cp index.html styles.css manifest.webmanifest .nojekyll dist/
           npx --yes esbuild@0.25.11 app.js markdown.js purify.min.js utils.js readability.js pwa-install.js sw.js --minify --outdir=dist
+          for f in dist/*.js; do node --check "$f"; done
           cp -r assets fonts licenses dist/
       # Guard against a missing staged file: every local script and
       # stylesheet index.html loads must exist in dist/, or the build
@@ -61,6 +64,7 @@ jobs:
         with:
           path: dist
   deploy:
+    if: github.event_name != 'pull_request'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
