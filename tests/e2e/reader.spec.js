@@ -545,3 +545,35 @@ test("Vim preset navigates panes and preserves the focused pane after reload", a
   await expect(page.locator("#shortcutBar")).toBeHidden();
   await page.locator("#settingsDialog .x").click();
 });
+
+
+test("settings modal is usable on narrow screens and with keyboard input", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto("/");
+  await page.locator("#menu").click();
+  await expect(page.locator("#sidebar")).toHaveClass(/open/);
+  await page.locator("#settings").click();
+
+  const dialog = page.locator("#settingsDialog");
+  const content = page.locator("#settingsDialog .settings-scroll");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator(".settings-section")).toHaveCount(5);
+  await expect(page.locator('[data-settings-section="application"] #installAppSetting')).toHaveCount(1);
+
+  const hasHorizontalOverflow = await content.evaluate(el => el.scrollWidth > el.clientWidth);
+  expect(hasHorizontalOverflow).toBe(false);
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+
+  await page.locator("#settings").click();
+  await content.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  const dialogBox = await dialog.boundingBox();
+  const closeBox = await dialog.locator(".x").boundingBox();
+  expect(closeBox).not.toBeNull();
+  expect(closeBox.y).toBeGreaterThanOrEqual(dialogBox.y - 1);
+  expect(closeBox.y).toBeLessThan(dialogBox.y + 70);
+
+  await dialog.locator(".x").click();
+  await expect(dialog).not.toBeVisible();
+});
