@@ -633,6 +633,7 @@ test("iOS Safari receives Add to Home Screen instructions", async ({ browser }) 
   });
   const page = await context.newPage();
   await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgentData", { configurable: true, value: undefined });
     Object.defineProperty(navigator, "platform", { configurable: true, value: "iPhone" });
   });
   await page.goto("/");
@@ -663,6 +664,7 @@ test("macOS Safari receives Add to Dock instructions", async ({ browser }) => {
   });
   const page = await context.newPage();
   await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgentData", { configurable: true, value: undefined });
     Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
   });
   await page.goto("/");
