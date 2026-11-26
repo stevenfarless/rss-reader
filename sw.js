@@ -1,7 +1,7 @@
-const CACHE = "rss-reader-shell-v79";
+const CACHE = "rss-reader-shell-v80";
 const RUNTIME_CACHE = "rss-reader-runtime-v7";
 const RUNTIME_MAX = 50;
-const FILES = ["./", "./index.html", "./styles.css", "./markdown.js", "./purify.min.js", "./utils.js", "./readability.js", "./app.js", "./manifest.webmanifest", "./assets/icon.svg", "./assets/icon-192.png", "./assets/icon-512.png", "./assets/icon-maskable-512.png", "./assets/apple-touch-icon.png", "./fonts/GentiumBookPlus-Regular.woff2", "./fonts/GentiumBookPlus-Bold.woff2", "./fonts/GentiumBookPlus-Italic.woff2", "./fonts/GentiumBookPlus-BoldItalic.woff2", "./fonts/InterVariable.woff2", "./fonts/InterVariable-Italic.woff2", "./fonts/NunitoVariable.woff2", "./fonts/NunitoVariable-Italic.woff2", "./fonts/Ubuntu-Regular.woff2", "./fonts/Ubuntu-Bold.woff2", "./fonts/Ubuntu-Italic.woff2", "./fonts/Ubuntu-BoldItalic.woff2"];
+const FILES = ["./", "./index.html", "./styles.css", "./markdown.js", "./purify.min.js", "./utils.js", "./readability.js", "./app.js", "./pwa-install.js", "./manifest.webmanifest", "./assets/icon.svg", "./assets/icon-192.png", "./assets/icon-512.png", "./assets/icon-maskable-512.png", "./assets/apple-touch-icon.png", "./fonts/GentiumBookPlus-Regular.woff2", "./fonts/GentiumBookPlus-Bold.woff2", "./fonts/GentiumBookPlus-Italic.woff2", "./fonts/GentiumBookPlus-BoldItalic.woff2", "./fonts/InterVariable.woff2", "./fonts/InterVariable-Italic.woff2", "./fonts/NunitoVariable.woff2", "./fonts/NunitoVariable-Italic.woff2", "./fonts/Ubuntu-Regular.woff2", "./fonts/Ubuntu-Bold.woff2", "./fonts/Ubuntu-Italic.woff2", "./fonts/Ubuntu-BoldItalic.woff2"];
 /* Install is per-file, not all-or-nothing: one missing file (a font,
    an icon) must not reject the whole install and leave the worker
    unregistered, with no offline and no background sync. A failed file
@@ -37,7 +37,7 @@ async function trimRuntime(cache) {
    a cache fallback, so a new build reaches returning users without
    waiting on a hand-bumped version string. Fonts and icons stay
    cache-first: they change rarely and are needed offline. */
-const SHELL_RE = /(^|\/)(index\.html|styles\.css|markdown\.js|purify\.min\.js|utils\.js|readability\.js|app\.js)$|\/$/;
+const SHELL_RE = /(^|\/)(index\.html|styles\.css|markdown\.js|purify\.min\.js|utils\.js|readability\.js|app\.js|pwa-install\.js)$|\/$/;
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
   const u = new URL(e.request.url);
