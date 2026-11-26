@@ -69,6 +69,7 @@
 
     banner = document.createElement("section");
     banner.className = "pwa-install-banner";
+    banner.id = "pwaInstallBanner";
     banner.setAttribute("aria-label", "Install RSS Reader");
     banner.hidden = true;
     banner.innerHTML = '<p id="pwaInstallBannerText">Install RSS Reader for a dedicated app window.</p><button type="button" class="pwa-install-action" id="pwaInstallBannerAction">Install</button><button type="button" class="pwa-install-dismiss" id="pwaInstallDismiss">Dismiss</button>';
