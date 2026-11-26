@@ -595,7 +595,8 @@ test("PWA install prompt invokes the native browser prompt and updates after ins
   await expect(banner).toBeVisible();
   await banner.locator("#pwaInstallBannerAction").click();
   await expect.poll(() => page.evaluate(() => window.__installPromptCalls)).toBe(1);
-  await expect(banner.locator("#pwaInstallBannerAction")).toHaveText("How to install");
+  await expect(page.locator(".pwa-install-dialog")).toBeVisible();
+  await expect(page.locator("#pwaInstallStatus")).toContainText("Installation started");
 
   await page.evaluate(() => window.dispatchEvent(new Event("appinstalled")));
   await expect(banner).toBeHidden();
