@@ -43,7 +43,7 @@ const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
   sort: "newest", query: "", selected: null, tag: null, savedSearch: null,
   folders: [], tags: [], savedSearches: [], rules: [],
-  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 250, listWidth: 400, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader", shortcutCoaching: false, shortcutBar: true, retentionDays: 0, retentionCount: 0, globalRefreshMinutes: 30 }
+  settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 250, listWidth: 400, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader", shortcutCoaching: matchMedia("(min-width:821px)").matches, shortcutCoachingExplicit: false, shortcutBar: true, retentionDays: 0, retentionCount: 0, globalRefreshMinutes: 30 }
 };
 let db, timer, pendingSeq = null, pendingSeqTimer = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null, automaticRefreshTimer = null;
 /* Text-to-speech state (#105): the article being read, its sentence
@@ -499,7 +499,15 @@ function validateSettings(d) {
   if (typeof d.sidebarWidth === "number" && d.sidebarWidth >= 180 && d.sidebarWidth <= 420) next.sidebarWidth = d.sidebarWidth;
   if (typeof d.listWidth === "number" && d.listWidth >= 280 && d.listWidth <= 640) next.listWidth = d.listWidth;
   if (["sidebar", "list", "article"].includes(d.vimPane)) next.vimPane = d.vimPane;
-  if (typeof d.shortcutCoaching === "boolean") next.shortcutCoaching = d.shortcutCoaching;
+  if (d.shortcutCoachingExplicit === true && typeof d.shortcutCoaching === "boolean") {
+    next.shortcutCoaching = d.shortcutCoaching;
+    next.shortcutCoachingExplicit = true;
+  } else {
+    // Older settings stored the former off-by-default value without recording
+    // a user choice. Apply the responsive default during this migration.
+    next.shortcutCoaching = matchMedia("(min-width:821px)").matches;
+    next.shortcutCoachingExplicit = false;
+  }
   if (typeof d.shortcutBar === "boolean") next.shortcutBar = d.shortcutBar;
   if ([0,30,90,180,365].includes(Number(d.retentionDays))) next.retentionDays = Number(d.retentionDays);
   if ([0,250,500,1000,2500,5000].includes(Number(d.retentionCount))) next.retentionCount = Number(d.retentionCount);
@@ -721,6 +729,7 @@ function readSettingsFromDialog() {
     cardExcerpt: $("#cardExcerptSelect").value, cardImage: $("#cardImageToggle").checked,
     backgroundSync: $("#backgroundSyncToggle").checked, notifyNew: $("#notifyNewToggle").checked,
     shortcutCoaching: $("#shortcutCoachingToggle").checked,
+    shortcutCoachingExplicit: true,
     shortcutBar: $("#shortcutBarToggle").checked,
     retentionDays: Number($("#retentionDaysSelect").value),
     retentionCount: Number($("#retentionCountSelect").value),
@@ -932,6 +941,12 @@ function bindSplitters() {
   window.addEventListener("resize", () => {
     positionSplitters();
     if (!isShortcutCoachingAvailable()) $("#shortcutCoach")?.classList.remove("show");
+    if (!state.settings.shortcutCoachingExplicit) {
+      state.settings.shortcutCoaching = isShortcutCoachingAvailable();
+      local(S, state.settings);
+      const toggle = $("#shortcutCoachingToggle");
+      if (toggle) toggle.checked = state.settings.shortcutCoaching;
+    }
     renderShortcutBar();
   });
 }
