@@ -10,7 +10,7 @@
     const ua = nav.userAgent || "";
     const platform = nav.userAgentData?.platform || nav.platform || "";
     const safari = /Safari/i.test(ua) && !/(Chrome|Chromium|CriOS|Edg|OPR|FxiOS|Firefox|DuckDuckGo)/i.test(ua);
-    if (safari && (/iPhone|iPad|iPod/i.test(ua) || (platform === "MacIntel" && nav.maxTouchPoints > 1))) return "ios-safari";
+    if (safari && (/iPhone|iPad|iPod/i.test(ua) || (/Mac/i.test(platform) && nav.maxTouchPoints > 1))) return "ios-safari";
     if (safari && /Mac/i.test(platform || ua)) return "mac-safari";
     return "other";
   }
