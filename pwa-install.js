@@ -63,12 +63,13 @@
       ".pwa-install-dialog .pwa-install-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:22px}",
       ".pwa-install-dialog .pwa-install-close{padding:7px 12px;border:1px solid var(--line);border-radius:5px;background:transparent;color:var(--text)}",
       ".pwa-install-setting{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;margin:4px 0 14px;padding:10px 0;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--text);text-align:left;cursor:pointer}",
-      ".pwa-install-setting span{color:var(--accent);font-weight:600}@media(max-width:480px){.pwa-install-banner{gap:8px}.pwa-install-banner p{flex-basis:100%}}"
+      ".pwa-install-setting span{color:var(--accent);font-weight:600}.pwa-install-setting[hidden]{display:none}@media(max-width:480px){.pwa-install-banner{gap:8px}.pwa-install-banner p{flex-basis:100%}}"
     ].join("");
     document.head.append(style);
 
     banner = document.createElement("section");
     banner.className = "pwa-install-banner";
+    banner.id = "pwaInstallBanner";
     banner.setAttribute("aria-label", "Install RSS Reader");
     banner.hidden = true;
     banner.innerHTML = '<p id="pwaInstallBannerText">Install RSS Reader for a dedicated app window.</p><button type="button" class="pwa-install-action" id="pwaInstallBannerAction">Install</button><button type="button" class="pwa-install-dismiss" id="pwaInstallDismiss">Dismiss</button>';
@@ -125,6 +126,8 @@
     if (!deferredPrompt) { openGuidance(); return; }
     const event = deferredPrompt;
     deferredPrompt = null;
+    updateDialog();
+    if (!dialog.open) dialog.showModal();
     $("#pwaInstallDialogAction").disabled = true;
     $("#pwaInstallBannerAction").disabled = true;
     $("#pwaInstallStatus").textContent = "Waiting for your choice…";
@@ -139,6 +142,9 @@
       $("#pwaInstallDialogAction").hidden = true;
       $("#pwaInstallDialogAction").disabled = false;
       $("#pwaInstallBannerAction").disabled = false;
+      // The deferred event can only be used once. Update the banner so its
+      // action accurately changes from native installation to guidance.
+      showBanner();
     }
   }
   function showBanner() {

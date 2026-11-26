@@ -577,3 +577,100 @@ test("settings modal is usable on narrow screens and with keyboard input", async
   await dialog.locator(".x").click();
   await expect(dialog).not.toBeVisible();
 });
+
+
+test("PWA install prompt invokes the native browser prompt and updates after installation", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#pwaInstallBanner")).toBeHidden();
+
+  await page.evaluate(() => {
+    window.__installPromptCalls = 0;
+    const event = new Event("beforeinstallprompt", { cancelable: true });
+    event.prompt = async () => { window.__installPromptCalls += 1; };
+    event.userChoice = Promise.resolve({ outcome: "accepted" });
+    window.dispatchEvent(event);
+  });
+
+  const banner = page.locator("#pwaInstallBanner");
+  await expect(banner).toBeVisible();
+  await banner.locator("#pwaInstallBannerAction").click();
+  await expect.poll(() => page.evaluate(() => window.__installPromptCalls)).toBe(1);
+  await expect(page.locator(".pwa-install-dialog")).toBeVisible();
+  await expect(page.locator("#pwaInstallStatus")).toContainText("Installation started");
+
+  await page.evaluate(() => window.dispatchEvent(new Event("appinstalled")));
+  await expect(banner).toBeHidden();
+  await page.locator("#settings").click();
+  await expect(page.locator("#installAppSetting")).toBeHidden();
+});
+
+test("PWA install dismissal persists and Settings reopens installation guidance", async ({ page }) => {
+  await page.goto("/");
+  const dispatchPrompt = () => page.evaluate(() => {
+    const event = new Event("beforeinstallprompt", { cancelable: true });
+    event.prompt = async () => {};
+    event.userChoice = Promise.resolve({ outcome: "dismissed" });
+    window.dispatchEvent(event);
+  });
+
+  await dispatchPrompt();
+  const banner = page.locator("#pwaInstallBanner");
+  await expect(banner).toBeVisible();
+  await banner.locator("#pwaInstallDismiss").click();
+  await expect(banner).toBeHidden();
+  await page.reload();
+  await expect(banner).toBeHidden();
+
+  await page.locator("#settings").click();
+  await page.locator("#installAppSetting").click();
+  await expect(page.locator(".pwa-install-dialog")).toBeVisible();
+  await expect(page.locator("#pwaInstallInstructions")).toContainText("browser menu");
+});
+
+test("iOS Safari receives Add to Home Screen instructions", async ({ browser }) => {
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+  });
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgentData", { configurable: true, value: undefined });
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "iPhone" });
+  });
+  await page.goto("/");
+  await expect(page.locator("#pwaInstallBanner")).toBeVisible();
+  await page.locator("#pwaInstallBannerAction").click();
+  await expect(page.locator("#pwaInstallInstructions")).toContainText("Share button");
+  await expect(page.locator("#pwaInstallInstructions")).toContainText("Add to Home Screen");
+  await context.close();
+});
+
+test("installed display mode suppresses all PWA installation UI", async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = window.matchMedia.bind(window);
+    window.matchMedia = query => query === "(display-mode: standalone)"
+      ? { matches: true, addEventListener() {} }
+      : original(query);
+  });
+  await page.goto("/");
+  await expect(page.locator("#pwaInstallBanner")).toBeHidden();
+  await page.locator("#settings").click();
+  await expect(page.locator("#installAppSetting")).toBeHidden();
+});
+
+
+test("macOS Safari receives Add to Dock instructions", async ({ browser }) => {
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15"
+  });
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgentData", { configurable: true, value: undefined });
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
+  });
+  await page.goto("/");
+  await expect(page.locator("#pwaInstallBanner")).toBeVisible();
+  await page.locator("#pwaInstallBannerAction").click();
+  await expect(page.locator("#pwaInstallInstructions")).toContainText("File");
+  await expect(page.locator("#pwaInstallInstructions")).toContainText("Add to Dock");
+  await context.close();
+});
