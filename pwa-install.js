@@ -80,15 +80,15 @@
     dialog.innerHTML = '<h2 id="pwaInstallTitle">Install RSS Reader</h2><p id="pwaInstallInstructions"></p><p class="pwa-install-status" id="pwaInstallStatus" role="status" aria-live="polite"></p><div class="pwa-install-actions"><button type="button" class="pwa-install-close" id="pwaInstallClose">Close</button><button type="button" class="pwa-install-action" id="pwaInstallDialogAction" hidden>Install</button></div>';
     document.body.append(dialog);
 
-    const settings = $("#settingsDialog");
-    const firstGroup = settings?.querySelector(".settings-group");
-    if (firstGroup) {
+    const applicationSection = $("#settingsDialog .settings-section[data-settings-section='application']");
+    const applicationHeading = applicationSection?.querySelector(".settings-group");
+    if (applicationHeading) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "pwa-install-setting";
       button.id = "installAppSetting";
       button.innerHTML = "<strong>Install App</strong><span>View options →</span>";
-      firstGroup.before(button);
+      applicationHeading.after(button);
       button.addEventListener("click", openGuidance);
     }
 
