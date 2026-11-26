@@ -2223,7 +2223,23 @@ function cleanHTML(html, base) {
    Its cost grows with the page's nesting, so it is bounded
    (maxElemsToParse) and any failure — or a too-short result — falls
    back to the hand-rolled heuristic, which never throws. */
-function extractArticle(html, base) {
+let readabilityLoadPromise;
+function loadReadability() {
+  if (typeof Readability === "function") return Promise.resolve();
+  if (!readabilityLoadPromise) {
+    readabilityLoadPromise = new Promise(resolve => {
+      const script = document.createElement("script");
+      script.src = "./readability.js";
+      script.async = true;
+      script.onload = resolve;
+      script.onerror = () => { script.remove(); resolve(); };
+      document.head.append(script);
+    });
+  }
+  return readabilityLoadPromise;
+}
+async function extractArticle(html, base) {
+  await loadReadability();
   if (typeof Readability === "function") {
     try {
       const doc = new DOMParser().parseFromString(html, "text/html");
@@ -2384,7 +2400,7 @@ async function loadFullText(item) {
       item.fullContent = wp;
     } else {
       const html = await fetchArticleHtml(item.url, item.title);
-      const body = extractArticle(html, item.url);
+      const body = await extractArticle(html, item.url);
       if (!body || !body.textContent.trim()) throw Error("No article text found.");
       item.fullContent = body.innerHTML;
     }
