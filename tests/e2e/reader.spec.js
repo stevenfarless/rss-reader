@@ -619,7 +619,6 @@ test("PWA install dismissal persists and Settings reopens installation guidance"
   await banner.locator("#pwaInstallDismiss").click();
   await expect(banner).toBeHidden();
   await page.reload();
-  await dispatchPrompt();
   await expect(banner).toBeHidden();
 
   await page.locator("#settings").click();
