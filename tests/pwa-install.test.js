@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 const source = readFileSync(new URL("../pwa-install.js", import.meta.url), "utf8");
+const serviceWorker = readFileSync(new URL("../sw.js", import.meta.url), "utf8");
 
 function loadPwa({ standalone = false, nav = {}, stored = null } = {}) {
   const values = new Map(stored === null ? [] : [["rss-reader.pwa-install-dismissed.v1", stored]]);
@@ -62,4 +63,10 @@ test("native installation prompt is invoked and its choice is returned", async (
   assert.equal(prompted, true);
   assert.equal(result.outcome, "accepted");
   assert.equal((await api.requestInstall(null)).outcome, "unavailable");
+});
+
+test("installation script is included in the offline shell cache", () => {
+  assert.match(serviceWorker, /rss-reader-shell-v80/);
+  assert.match(serviceWorker, /"\.\/pwa-install\.js"/);
+  assert.match(serviceWorker, /pwa-install\\\.js/);
 });
