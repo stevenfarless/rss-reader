@@ -33,10 +33,10 @@ async function trimRuntime(cache) {
     await Promise.all(keys.slice(0, keys.length - RUNTIME_MAX).map(k => cache.delete(k)));
   }
 }
-/* The shell (navigation and the app's own files) is network-first with
-   a cache fallback, so a new build reaches returning users without
-   waiting on a hand-bumped version string. Fonts and icons stay
-   cache-first: they change rarely and are needed offline. */
+/* Navigations are network-first so returning users can discover new
+   deployments. Versioned application assets are cache-first for fast
+   repeat visits; bump CACHE when the shell changes. Other static assets
+   use the runtime cache and are capped to limit storage growth. */
 const SHELL_RE = /(^|\/)(index\.html|styles\.css|markdown\.js|purify\.min\.js|utils\.js|readability\.js|app\.js|pwa-install\.js)$|\/$/;
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
