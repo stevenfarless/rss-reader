@@ -66,7 +66,7 @@ test("native installation prompt is invoked and its choice is returned", async (
 });
 
 test("installation script is included in the offline shell cache", () => {
-  assert.match(serviceWorker, /const CACHE = "rss-reader-shell-v\\d+";/);
+  assert.match(serviceWorker, /const CACHE = "rss-reader-shell-v\d+";/);
   assert.match(serviceWorker, /"\.\/pwa-install\.js"/);
   assert.match(serviceWorker, /pwa-install\\\.js/);
 });
