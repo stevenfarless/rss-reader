@@ -63,7 +63,7 @@
       ".pwa-install-dialog .pwa-install-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:22px}",
       ".pwa-install-dialog .pwa-install-close{padding:7px 12px;border:1px solid var(--line);border-radius:5px;background:transparent;color:var(--text)}",
       ".pwa-install-setting{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;margin:4px 0 14px;padding:10px 0;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--text);text-align:left;cursor:pointer}",
-      ".pwa-install-setting span{color:var(--accent);font-weight:600}@media(max-width:480px){.pwa-install-banner{gap:8px}.pwa-install-banner p{flex-basis:100%}}"
+      ".pwa-install-setting span{color:var(--accent);font-weight:600}.pwa-install-setting[hidden]{display:none}@media(max-width:480px){.pwa-install-banner{gap:8px}.pwa-install-banner p{flex-basis:100%}}"
     ].join("");
     document.head.append(style);
 
