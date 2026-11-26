@@ -30,6 +30,12 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 - JSON settings import and export
 - Subscriptions and preferences stored in browser localStorage
 - Article cache and read/saved state stored in IndexedDB
+- Sidebar-based desktop controls with a searchable command palette, activity center, refresh and focus actions, and resizable desktop panes; no persistent application top bar
+- Mobile bottom navigation for All, Unread, Queue, and Saved, with secondary views and actions grouped under More
+- Multi-select articles with bulk mark-read, save, and queue actions, including range selection
+- Touch gestures in the article list to mark read or save, and horizontal navigation between open articles
+- Focus reading mode that expands the reader and hides surrounding navigation
+- Restore the last view, search, selected article, and reading position after a reload or PWA relaunch
 - Responsive desktop and mobile layout
 - Collapsible sidebar: the ‹/› toggle in the top left folds the sidebar to a narrow rail, remembered across visits
 - Per-feed automatic refresh scheduling on launch and while the reader is open, with a last-updated time under the heading
@@ -53,7 +59,7 @@ A reading-focused RSS reader designed to run entirely on GitHub Pages. It uses s
 
 ## Hosting
 
-The GitHub Actions workflow in `.github/workflows/pages.yml` deploys the repository root to GitHub Pages. Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**.
+The GitHub Actions workflow in `.github/workflows/static.yml` deploys the repository root to GitHub Pages. A separate workflow runs the Node and Playwright test suites on pull requests and pushes to the default branch. Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**.
 
 ### Automated audits
 

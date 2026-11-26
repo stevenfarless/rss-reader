@@ -23,6 +23,7 @@ const $$ = s => [...document.querySelectorAll(s)];
 const K = "rss-reader.feeds.v1", S = "rss-reader.settings.v1", DB = "rss-reader-cache";
 const KF = "rss-reader.folders.v1", KT = "rss-reader.tags.v1", LR = "rss-reader.lastRefresh.v1";
 const KS = "rss-reader.savedSearches.v1", KR = "rss-reader.rules.v1";
+const SESSION_KEY = "rss-reader.session.v1";
 const PROXY_API = "https://api.rss2json.com/v1/api.json?rss_url=";
 const ALLORIGINS = "https://api.allorigins.win/raw?url=";
 const JINA = "https://r.jina.ai/";
@@ -37,7 +38,7 @@ const PROXY_TIMEOUT_MS = 30000;
 const MAX_ITEMS_PER_FEED = 200;
 /* The version shown in Settings and in the update check (#144). Bump
    it with every release, alongside package.json and the SW cache. */
-const APP_VERSION = "1.9.21";
+const APP_VERSION = "1.10.4";
 
 const state = {
   feeds: [], items: [], highlights: [], view: "all", feed: null, folder: null, filter: "all",
@@ -45,7 +46,7 @@ const state = {
   folders: [], tags: [], savedSearches: [], rules: [],
   settings: { theme: "dark", width: "comfortable", size: "normal", readerFont: "serif", lineHeight: "comfortable", ttsRate: 1, hideDuplicates: true, sidebarCollapsed: false, sidebarWidth: 250, listWidth: 400, sort: "newest", filter: "all", progressPosition: "bottom", cardExcerpt: "full", cardImage: true, backgroundSync: false, notifyNew: false, mobileReaderBar: "bottom", shortcutPreset: "inoreader", shortcutCoaching: matchMedia("(min-width:821px)").matches, shortcutCoachingExplicit: false, shortcutBar: true, retentionDays: 0, retentionCount: 0, globalRefreshMinutes: 30 }
 };
-let db, timer, pendingSeq = null, pendingSeqTimer = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null, automaticRefreshTimer = null;
+let db, timer, pendingSeq = null, pendingSeqTimer = null, refreshAt = 0, orgEdit = null, pendingDelete = null, searchTimer = null, ruleEdit = null, automaticRefreshTimer = null, sessionSaveTimer = null;
 /* Text-to-speech state (#105): the article being read, its sentence
    chunks, and where playback has reached. Null when nothing is playing. */
 let tts = null;
@@ -830,8 +831,13 @@ function applySettings() {
 /* Sidebar collapse: the sidebar becomes a 52px rail holding only the
    toggle (top left), so the list and reader get the full width. The
    choice persists with the other settings. */
+const SIDEBAR_AUTO_COLLAPSE_WIDTH = 230;
+
 function applySidebarCollapsed() {
-  const collapsed = !!state.settings.sidebarCollapsed;
+  const manuallyCollapsed = !!state.settings.sidebarCollapsed;
+  const autoCollapsed = !manuallyCollapsed
+    && Number(state.settings.sidebarWidth) < SIDEBAR_AUTO_COLLAPSE_WIDTH;
+  const collapsed = manuallyCollapsed || autoCollapsed;
   document.body.classList.toggle("sidebar-collapsed", collapsed);
   if (collapsed) {
     document.documentElement.style.setProperty(
@@ -916,6 +922,7 @@ function bindSplitter(el, kind) {
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
+      if (kind === "side") applySidebarCollapsed();
       local(S, state.settings);
     };
     el.addEventListener("pointermove", move);
@@ -925,6 +932,7 @@ function bindSplitter(el, kind) {
   el.addEventListener("dblclick", () => {
     state.settings[key] = range.def;
     applyPaneWidths();
+    if (kind === "side") applySidebarCollapsed();
     local(S, state.settings);
   });
   el.addEventListener("keydown", e => {
@@ -932,6 +940,7 @@ function bindSplitter(el, kind) {
     e.preventDefault();
     state.settings[key] = clampW(state.settings[key] + (e.key === "ArrowRight" ? 10 : -10), range);
     applyPaneWidths();
+    if (kind === "side") applySidebarCollapsed();
     local(S, state.settings);
   });
 }
@@ -1881,6 +1890,7 @@ function saveCollapsedFolders() { try { localStorage.setItem(COLLAPSED_FOLDERS_K
 function fmtCount(n) { return n > 999 ? "999+" : String(n); }
 
 function renderNav() {
+  updateActivityIndicator();
   const shown = countableItems();
   $("#allCount").textContent = fmtCount(shown.length);
   $("#unreadCount").textContent = fmtCount(shown.filter(x => !x.read).length);
@@ -2110,6 +2120,7 @@ async function removeVisibleFromQueue() {
 }
 function renderList() {
   const a = visible();
+  renderSelectionToolbar();
   const titles = { all: "All articles", unread: "Unread", queue: "Reading queue", saved: "Saved", snoozed: "Snoozed", highlights: "Highlights", feed: state.feeds.find(f => f.id === state.feed)?.title || "Feed", folder: state.folder || "Folder", savedSearch: state.savedSearches.find(s => s.id === state.savedSearch)?.name || "Saved search", tag: state.tag ? "Tag: " + state.tag : "Tag" };
   $("#heading").textContent = titles[state.view];
   $("#removeQueue").hidden = state.view !== "queue";
@@ -2157,7 +2168,7 @@ function renderList() {
     const thumb = feedCardImage(srcFeed) && x.image ? `<img class="article-thumb" src="${esc(x.image)}" alt="" loading="lazy" onerror="this.remove()">` : "";
     const rt = readingTimeText(x);
     const snoozeNote = state.view === "snoozed" && x.snoozedUntil ? ` · <span>Snoozed until ${esc(fmtDateTime(new Date(x.snoozedUntil)))}</span>` : "";
-    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}">${thumb}<div class="article-main"><h2>${esc(x.title)}</h2><div class="article-source">${fav ? `<img class="card-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span>${esc(feedTitle)}</span></div>${excerpt}<div class="article-bottom"><span>${showAuthor ? `${esc(x.author)} · ` : ""}<time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? ` · <span>${rt}</span>` : ""}${snoozeNote}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button><button data-action="queue" data-id="${esc(x.id)}" title="${x.queued ? "Remove from queue" : "Add to queue"}" aria-label="${x.queued ? "Remove from queue" : "Add to queue"}: ${esc(x.title)}" aria-pressed="${!!x.queued}">${x.queued ? "☷" : "＋"}</button>${state.view === "queue" ? `<button class="text-btn" data-action="queue-up" data-id="${esc(x.id)}" title="Move earlier">↑</button><button class="text-btn" data-action="queue-down" data-id="${esc(x.id)}" title="Move later">↓</button>` : ""}${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div></article>`;
+    return `<article class="article ${x.read ? "" : "unread"} ${x.id === state.selected ? "selected" : ""} ${selectedArticleIds.has(x.id) ? "multi-selected" : ""}" data-item="${esc(x.id)}" tabindex="0" role="button" aria-label="Open: ${esc(x.title)}"><button type="button" class="article-select" data-select-item="${esc(x.id)}" aria-label="Select: ${esc(x.title)}" aria-pressed="${selectedArticleIds.has(x.id)}">${selectedArticleIds.has(x.id) ? "✓" : ""}</button>${thumb}<div class="article-main"><h2>${esc(x.title)}</h2><div class="article-source">${fav ? `<img class="card-favicon" src="${esc(fav)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span>${esc(feedTitle)}</span></div>${excerpt}<div class="article-bottom"><span>${showAuthor ? `${esc(x.author)} · ` : ""}<time datetime="${esc(d ? d.toISOString() : "")}" title="${esc(d ? d.toLocaleDateString() : "")}">${esc(relDate(d))}</time>${rt ? ` · <span>${rt}</span>` : ""}${snoozeNote}</span><span class="article-actions"><button data-action="read" data-id="${esc(x.id)}" title="Toggle read (m)" aria-label="${x.read ? "Mark unread" : "Mark read"}: ${esc(x.title)}" aria-pressed="${x.read}">${x.read ? "○" : "●"}</button><button data-action="save" data-id="${esc(x.id)}" title="Save (s)" aria-label="${x.saved ? "Unsave" : "Save"}: ${esc(x.title)}" aria-pressed="${x.saved}">${icon(x.saved ? "star-filled" : "star")}</button><button data-action="share" data-id="${esc(x.id)}" title="Share article" aria-label="Share: ${esc(x.title)}">${icon("share")}</button><button data-action="queue" data-id="${esc(x.id)}" title="${x.queued ? "Remove from queue" : "Add to queue"}" aria-label="${x.queued ? "Remove from queue" : "Add to queue"}: ${esc(x.title)}" aria-pressed="${!!x.queued}">${x.queued ? "☷" : "＋"}</button>${state.view === "queue" ? `<button class="text-btn" data-action="queue-up" data-id="${esc(x.id)}" title="Move earlier">↑</button><button class="text-btn" data-action="queue-down" data-id="${esc(x.id)}" title="Move later">↓</button>` : ""}${state.view === "snoozed" ? `<button class="text-btn" data-action="unsnooze" data-id="${esc(x.id)}" title="Bring back now" aria-label="Unsnooze: ${esc(x.title)}">Unsnooze</button>` : ""}</span></div></div></article>`;
   }).join("") : (state.query || state.filter !== "all" ? `<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>No articles match${state.query ? " &quot;" + esc(state.query) + "&quot;" : ""}.</p><button class="primary" id="emptyClear">Clear search</button></div>` : '<div class="empty"><div class="empty-mark">R</div><h2>Nothing to show.</h2><p>Add a feed or change the current filter.</p><button class="primary" id="emptyAdd">Add a feed</button></div>');
   const b = $("#emptyAdd");
   if (b) b.onclick = showFeed;
@@ -2174,6 +2185,8 @@ function renderList() {
   // Save search only appears when there is an active search to save (#146).
   const ss = $("#saveSearchBtn");
   if (ss) ss.hidden = !state.query;
+  renderSelectionToolbar();
+  scheduleAppSessionSave();
 }
 
 /* ---------- sanitising ---------- */
@@ -2579,8 +2592,10 @@ function renderReader(x) {
   const tagsRowHTML = ((x.tags || []).length || tagsOpen) ? `<div class="tags-row" id="tagsRow">${(x.tags || []).map(t => `<span class="tag-chip">${esc(t)}<button type="button" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">${icon("close")}</button></span>`).join("")}<span id="tagInputWrap" ${tagsOpen ? "" : "hidden"}><input id="tagInput" list="tagList" placeholder="Add a tag… (t)" aria-label="Add a tag"><button type="button" class="quiet" id="tagAddBtn">Add</button></span></div>` : "";
   const hasNote = !!getArticleNote(x.id);
   const readerFeedTitle = f ? feedDisplayTitle(f) : x.feedTitle;
-  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><span title="${esc(readerFeedTitle)}" aria-label="${esc(readerFeedTitle)}">${esc(readerFeedTitle)}</span><div class="reader-actions">${toolbarOrder().map(k => toolbarButtonHTML(k, x, {fullLabel, canListen, canFull, hasNote})).join("")}<button type="button" class="reader-btn" data-reader="queue" title="${x.queued ? "Remove from queue" : "Add to reading queue"}" aria-label="${x.queued ? "Remove from reading queue" : "Add to reading queue"}" aria-pressed="${!!x.queued}">${x.queued ? "☷" : "＋"}</button></div></div>${tagsRowHTML}${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${articleNoteHTML(x)}${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
+  $("#reader").innerHTML = `${progTop ? barHTML : ""}<div class="reader-content"><div class="reader-top"><button type="button" id="focusExit" class="focus-exit" title="Exit focus reading mode">Exit focus</button><span title="${esc(readerFeedTitle)}" aria-label="${esc(readerFeedTitle)}">${esc(readerFeedTitle)}</span><div class="reader-actions">${toolbarOrder().map(k => toolbarButtonHTML(k, x, {fullLabel, canListen, canFull, hasNote})).join("")}<button type="button" class="reader-btn" data-reader="queue" title="${x.queued ? "Remove from queue" : "Add to reading queue"}" aria-label="${x.queued ? "Remove from reading queue" : "Add to reading queue"}" aria-pressed="${!!x.queued}">${x.queued ? "☷" : "＋"}</button></div></div>${tagsRowHTML}${snoozeMenuHTML(x)}${ttsBarHTML(x)}<h1>${esc(x.title)}</h1><div class="byline">${[x.author ? esc(x.author) : "", esc(d ? fmtDateTime(d) : "No date"), rt].filter(Boolean).join(" · ")}</div>${articleNoteHTML(x)}${audioHTML}<div class="reader-body" id="body"></div><div class="reader-footer"><p>${showingFull ? "Full article text, extracted from the original page." : "Content supplied by the publisher's feed."}</p></div>${highlightsSectionHTML(x)}</div>${progTop ? "" : barHTML}`;
   setupReaderToolbarOverflow();
+  const focusExit = $("#focusExit");
+  if (focusExit) focusExit.onclick = () => { document.body.classList.remove("focus-mode"); updateFocusButton(); };
   const tagAdd = $("#tagAddBtn");
   if (tagAdd) tagAdd.onclick = () => { const x = selectedItem(); const inp = $("#tagInput"); if (x && inp) addTagToItem(x, inp.value); };
   const bodyEl = $("#body");
@@ -2644,6 +2659,7 @@ function renderReader(x) {
   // Highlights (#116): mark the saved passages back into the text.
   applyHighlights(bodyEl, highlightsFor(x.id));
   $("#reader").classList.add("open");
+  document.body.classList.add("reader-open");
   // A fresh article starts at the top; a re-render of the same article
   // (a save/read toggle, a tag change) keeps its scroll position.
   $("#reader").dataset.openId = x.id;
@@ -2975,6 +2991,7 @@ function openHighlight(hlId) {
   requestAnimationFrame(() => scrollToHighlight(hlId));
 }
 function openItem(itemId) {
+  if (selectedArticleIds.size) { toggleArticleSelection(itemId); return; }
   const x = state.items.find(i => i.id === itemId);
   if (!x) return;
   const prevId = state.selected;
@@ -3009,6 +3026,7 @@ function openItem(itemId) {
   if (ma) { ma.disabled = !row; ma.title = row ? "Marks every article above the open one read (Ctrl+M)" : "Open an article first — this acts on the articles around it."; }
   if (mb) { mb.disabled = !row; mb.title = row ? "Marks every article below the open one read (Shift+M)" : "Open an article first — this acts on the articles around it."; }
   renderReader(x);
+  saveAppSession();
   // Auto full article (#183): this feed always loads the full article
   // text when an article is opened, unless the feed already carries it
   // or the full text is already fetched.
@@ -3019,6 +3037,8 @@ function openItem(itemId) {
   }
 }
 function closeReader() {
+  document.body.classList.remove("focus-mode", "reader-open");
+  updateFocusButton();
   stopTTS();
   const wasOpen = $("#reader").classList.contains("open") || !!state.selected;
   $("#reader").classList.remove("open");
@@ -3029,7 +3049,74 @@ function closeReader() {
     try { history.back(); } catch {}
   }
 }
+
+/* Restore the reader's local navigation context after a reload or PWA
+   relaunch. Only view state and scroll positions are stored; feeds,
+   articles, and reading data remain in their existing local stores. */
+function saveAppSession() {
+  const list = $(".list-pane"), reader = $("#reader");
+  const session = {
+    view: state.view,
+    feed: state.feed,
+    folder: state.folder,
+    tag: state.tag,
+    savedSearch: state.savedSearch,
+    selected: state.selected,
+    query: state.query,
+    filter: state.filter,
+    sort: state.sort,
+    listScroll: list?.scrollTop || 0,
+    readerScroll: reader?.scrollTop || 0,
+    savedAt: Date.now()
+  };
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch {}
+}
+function scheduleAppSessionSave() {
+  clearTimeout(sessionSaveTimer);
+  sessionSaveTimer = setTimeout(saveAppSession, 180);
+}
+function restoreAppSession() {
+  let session;
+  try { session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch { return false; }
+  if (!session || typeof session !== "object") return false;
+  const views = ["all","unread","queue","saved","snoozed","highlights","feed","folder","savedSearch","tag"];
+  if (!views.includes(session.view)) return false;
+  if (session.view === "feed" && !state.feeds.some(f => f.id === session.feed)) return false;
+  if (session.view === "folder" && !state.feeds.some(f => f.group === session.folder)) return false;
+  if (session.view === "savedSearch" && !state.savedSearches.some(s => s.id === session.savedSearch)) return false;
+  if (session.view === "tag" && !state.tags.includes(session.tag)) return false;
+  state.view = session.view;
+  state.feed = session.view === "feed" ? session.feed : null;
+  state.folder = session.view === "folder" ? session.folder : null;
+  state.tag = session.view === "tag" ? session.tag : null;
+  state.savedSearch = session.view === "savedSearch" ? session.savedSearch : null;
+  state.query = typeof session.query === "string" ? session.query.slice(0,500) : "";
+  state.filter = ["all","today","week"].includes(session.filter) ? session.filter : "all";
+  state.sort = session.sort === "oldest" ? "oldest" : "newest";
+  state.settings.filter = state.filter;
+  state.settings.sort = state.sort;
+  $("#search").value = state.query;
+  $("#searchClear").hidden = !state.query;
+  state.selected = typeof session.selected === "string" && state.items.some(x => x.id === session.selected) ? session.selected : null;
+  render();
+  if (state.selected) {
+    const item = state.items.find(x => x.id === state.selected);
+    if (item) {
+      renderReader(item);
+      document.body.classList.add("reader-open");
+      $("#reader").scrollTop = Math.max(0, Number(session.readerScroll) || 0);
+    }
+  }
+  $(".list-pane").scrollTop = Math.max(0, Number(session.listScroll) || 0);
+  saveAppSession();
+  return true;
+}
 function render() {
+  if (!state.selected) {
+    document.body.classList.remove("reader-open");
+    if (document.body.classList.contains("focus-mode")) document.body.classList.remove("focus-mode");
+    updateFocusButton();
+  }
   renderNav();
   renderList();
   // The tag suggestions live in one static datalist (#162), kept in step
@@ -3037,10 +3124,15 @@ function render() {
   const tl = $("#tagList");
   if (tl) tl.innerHTML = state.tags.map(t => `<option value="${esc(t)}">`).join("");
   if (!state.selected) $("#reader").innerHTML = '<div class="reader-empty">' + icon("rss", "big") + '<h2>Nothing open yet</h2><p>Pick an article from the list to read it here.</p><small>Tip: press ? any time to see keyboard shortcuts.</small></div>';
+  saveAppSession();
 }
 
 /* ---------- folders & tags ---------- */
 function goTag(tag) {
+  clearArticleSelection();
+  $("#moreDialog")?.close();
+  document.body.classList.remove("focus-mode", "reader-open");
+  updateFocusButton();
   stopTTS();
   state.view = "tag"; state.tag = tag; state.feed = null; state.folder = null; state.savedSearch = null; state.selected = null;
   $("#reader").classList.remove("open");
@@ -4302,6 +4394,10 @@ function moveUnread(dir) {
   openItem(a[n].id);
 }
 function goView(view) {
+  clearArticleSelection();
+  $("#moreDialog")?.close();
+  document.body.classList.remove("focus-mode", "reader-open");
+  updateFocusButton();
   stopTTS();
   state.view = view; state.feed = null; state.folder = null; state.tag = null; state.savedSearch = null; state.selected = null;
   $("#reader").classList.remove("open");
@@ -4310,6 +4406,10 @@ function goView(view) {
 /* Open a folder as one merged list (#118): every feed in the folder,
    newest first, with the same mark-read controls as the other views. */
 function goFolder(name) {
+  clearArticleSelection();
+  $("#moreDialog")?.close();
+  document.body.classList.remove("focus-mode", "reader-open");
+  updateFocusButton();
   stopTTS();
   state.view = "folder"; state.folder = name; state.feed = null; state.tag = null; state.savedSearch = null; state.selected = null;
   $("#reader").classList.remove("open");
@@ -4317,6 +4417,10 @@ function goFolder(name) {
 }
 /* Open a saved search (#108): the stored filter, run over the library. */
 function goSavedSearch(id) {
+  clearArticleSelection();
+  $("#moreDialog")?.close();
+  document.body.classList.remove("focus-mode", "reader-open");
+  updateFocusButton();
   stopTTS();
   state.view = "savedSearch"; state.savedSearch = id; state.feed = null; state.folder = null; state.tag = null; state.selected = null;
   $("#reader").classList.remove("open");
@@ -4383,6 +4487,318 @@ async function markAboveBelow(which) {
     await putMany(targets);
     render();
   } });
+}
+
+
+/* ---------- application shell and command system ---------- */
+const selectedArticleIds = new Set();
+let lastSelectedArticleId = null;
+let swipeHandled = false;
+let longPressTimer = null;
+let longPressTriggered = false;
+function clearArticleSelection() {
+  selectedArticleIds.clear();
+  lastSelectedArticleId = null;
+  renderSelectionToolbar();
+}
+function renderSelectionToolbar() {
+  const bar = $("#selectionToolbar");
+  if (!bar) return;
+  const visibleIds = new Set(visible().map(x => x.id));
+  for (const itemId of selectedArticleIds) if (!visibleIds.has(itemId)) selectedArticleIds.delete(itemId);
+  const count = selectedArticleIds.size;
+  bar.hidden = count === 0;
+  $("#selectionCount").textContent = count + " selected";
+}
+function toggleArticleSelection(itemId, range = false) {
+  const items = visible();
+  const targetIndex = items.findIndex(x => x.id === itemId);
+  if (targetIndex < 0) return;
+  const anchorIndex = items.findIndex(x => x.id === lastSelectedArticleId);
+  if (range && anchorIndex >= 0) {
+    const start = Math.min(anchorIndex, targetIndex), end = Math.max(anchorIndex, targetIndex);
+    for (const item of items.slice(start, end + 1)) selectedArticleIds.add(item.id);
+  } else if (selectedArticleIds.has(itemId)) selectedArticleIds.delete(itemId);
+  else selectedArticleIds.add(itemId);
+  lastSelectedArticleId = itemId;
+  renderList();
+}
+async function runBulkAction(action) {
+  const targets = state.items.filter(x => selectedArticleIds.has(x.id));
+  if (!targets.length) return;
+  if (action === "clear") { clearArticleSelection(); renderList(); return; }
+  const before = targets.map(x => ({ id:x.id, read:x.read, readAt:x.readAt, saved:x.saved, queued:x.queued, queueOrder:x.queueOrder }));
+  for (const x of targets) {
+    if (action === "read") { x.read = true; x.readAt = Date.now(); }
+    if (action === "unread") { x.read = false; x.readAt = null; }
+    if (action === "save") x.saved = true;
+    if (action === "unsave") x.saved = false;
+    if (action === "queue") { x.queued = true; x.queueOrder ||= Date.now(); }
+    if (action === "dequeue") { x.queued = false; x.queueOrder = 0; }
+  }
+  await putMany(targets);
+  clearArticleSelection(); render();
+  const labels = {read:"Marked read",unread:"Marked unread",save:"Saved",unsave:"Removed from Saved",queue:"Added to the reading queue",dequeue:"Removed from the reading queue"};
+  toast(`${labels[action] || "Updated"} ${targets.length} article${targets.length === 1 ? "" : "s"}.`, {
+    label:"Undo",
+    fn:async()=>{
+      const previous = new Map(before.map(x=>[x.id,x]));
+      for(const item of targets){const old=previous.get(item.id);if(!old)continue;item.read=old.read;item.readAt=old.readAt;item.saved=old.saved;item.queued=old.queued;item.queueOrder=old.queueOrder;}
+      await putMany(targets);render();
+    }
+  });
+}
+function updateActivityIndicator() {
+  const count = state.feeds.filter(f => !!f.error).length;
+  const badge = $("#activityCount");
+  if (badge) { badge.textContent = count > 99 ? "99+" : String(count); badge.hidden = count === 0; }
+  const button = $("#activityButton");
+  if (button) {
+    button.classList.toggle("has-errors", count > 0);
+    button.setAttribute("aria-label", count ? `Activity and feed status, ${count} feed errors` : "Activity and feed status");
+  }
+}
+function renderActivityCenter() {
+  const root = $("#activityContent");
+  if (!root) return;
+  const errors = state.feeds.filter(f => f.error);
+  const refreshing = !!$("#refresh")?.disabled;
+  const online = navigator.onLine !== false;
+  const last = state.lastRefresh ? new Date(state.lastRefresh).toLocaleString() : "No refresh recorded in this browser";
+  const unread = countableItems().filter(x => !x.read).length;
+  const saved = state.items.filter(x => x.saved && !isSnoozed(x)).length;
+  const queued = state.items.filter(x => x.queued).length;
+  root.innerHTML = `<div class="activity-status"><span class="status-indicator ${online ? "online" : "offline"}"></span><div><strong>${online ? "Online" : "Offline"}</strong><p>${online ? "Network connection is available." : "Check your connection. Feed refreshes may fail until you reconnect."}</p></div></div><div class="activity-status"><span class="status-indicator ${refreshing ? "busy" : "idle"}"></span><div><strong>${refreshing ? "Refreshing feeds" : "Refresh idle"}</strong><p>${refreshing ? "Feed updates are being retrieved." : "Last refresh: " + esc(last)}</p></div></div><div class="activity-status"><span class="status-indicator idle"></span><div><strong>Reading library</strong><p>${unread} unread · ${saved} saved · ${queued} queued</p></div></div><section class="activity-errors"><h3>Feed problems <span>${errors.length}</span></h3>${errors.length ? errors.map(f => `<div class="activity-feed"><button type="button" data-activity-feed="${esc(f.id)}"><strong>${esc(feedDisplayTitle(f))}</strong><small>${esc(f.error)}</small></button><button type="button" data-activity-retry="${esc(f.id)}">Retry</button></div>`).join("") : '<p class="muted">All subscribed feeds are healthy.</p>'}</section>`;
+}
+function showActivityCenter() { renderActivityCenter(); $("#activityDialog").showModal(); }
+function goFeedById(feedId) {
+  const feed = state.feeds.find(f => f.id === feedId);
+  if (!feed) return;
+  clearArticleSelection();
+  document.body.classList.remove("focus-mode", "reader-open");
+  updateFocusButton();
+  stopTTS();
+  state.view = "feed"; state.feed = feed.id; state.folder = null; state.tag = null; state.savedSearch = null; state.selected = null;
+  $("#reader").classList.remove("open");
+  render();
+}
+function focusSearch() {
+  if (matchMedia("(max-width:820px)").matches) {
+    $("#sidebar").classList.add("open");
+    $("#scrim").classList.add("show");
+  } else if (state.settings.sidebarCollapsed) {
+    state.settings.sidebarCollapsed = false;
+    local(S,state.settings);
+    applySidebarCollapsed();
+  }
+  $("#search").focus();
+}
+const COMMANDS = [
+  ["all","All articles","Library",()=>goView("all")],
+  ["unread","Open unread articles","Library",()=>goView("unread")],
+  ["queue","Open reading queue","Library",()=>goView("queue")],
+  ["saved","Open saved articles","Library",()=>goView("saved")],
+  ["snoozed","Open snoozed articles","Library",()=>goView("snoozed")],
+  ["highlights","Open highlights","Library",()=>goView("highlights")],
+  ["refresh","Refresh all feeds","Feeds",()=>refresh()],
+  ["add","Add a feed","Feeds",()=>showFeed()],
+  ["search","Search articles","Navigation",focusSearch],
+  ["settings","Open settings","Application",()=>showSettings()],
+  ["activity","Open activity center","Application",()=>showActivityCenter()],
+  ["sidebar","Toggle feed sidebar","Layout",()=>toggleSidebar()],
+  ["focus","Toggle focus reading mode","Layout",()=>toggleFocusMode()],
+  ["fullscreen","Toggle full screen","Layout",()=>toggleFullscreen()],
+  ["mark-read","Mark visible articles read","Articles",()=>markVisibleRead()],
+  ["export","Export subscriptions (OPML)","Data",()=>exportOPML()]
+];
+const QUICK_SETTINGS = [
+  { key:"theme", label:"Appearance", choices:[["dark","Dark"],["light","Light"],["oled","OLED Black"],["white","Pure White"],["system","System"]] },
+  { key:"width", label:"Reading width", choices:[["narrow","Narrow"],["comfortable","Comfortable"],["wide","Wide"]] },
+  { key:"size", label:"Text size", choices:[["small","Small"],["normal","Normal"],["large","Large"]] },
+  { key:"readerFont", label:"Reader font", choices:[["serif","Serif"],["sans","Sans-serif"],["nunito","Nunito"],["ubuntu","Ubuntu"]] },
+  { key:"lineHeight", label:"Line height", choices:[["compact","Compact"],["comfortable","Comfortable"],["roomy","Roomy"]] },
+  { key:"progressPosition", label:"Reading progress bar", choices:[["bottom","Bottom"],["top","Top"]] },
+  { key:"mobileReaderBar", label:"Mobile article actions", choices:[["bottom","Bottom bar"],["top","Top bar"]] },
+  { key:"shortcutPreset", label:"Keyboard shortcuts", choices:[["inoreader","Inoreader"],["feedly","Feedly"],["newsblur","NewsBlur"],["feedbin","Feedbin"],["freshrss","FreshRSS"],["miniflux","Miniflux"],["oldreader","The Old Reader"],["bazqux","BazQux"],["commafeed","CommaFeed"],["vim","Vim"]] },
+  { key:"cardExcerpt", label:"Preview text", choices:[["none","None"],["short","Short"],["full","Full"]] },
+  { key:"globalRefreshMinutes", label:"Default refresh interval", choices:[[15,"15 minutes"],[30,"30 minutes"],[60,"1 hour"],[180,"3 hours"],[360,"6 hours"],[720,"12 hours"],[1440,"24 hours"]] },
+  { key:"cardImage", label:"Show thumbnails", choices:[[true,"On"],[false,"Off"]] },
+  { key:"hideDuplicates", label:"Hide duplicate articles", choices:[[true,"On"],[false,"Off"]] },
+  { key:"shortcutCoaching", label:"Shortcut coaching", choices:[[true,"On"],[false,"Off"]] },
+  { key:"shortcutBar", label:"Keyboard shortcut bar", choices:[[true,"On"],[false,"Off"]] }
+];
+function quickSettingCommands() {
+  return QUICK_SETTINGS.flatMap(setting => {
+    const defaults = { cardImage:true, hideDuplicates:true, shortcutBar:true, globalRefreshMinutes:30 };
+    const current = state.settings[setting.key] ?? defaults[setting.key];
+    const currentLabel = setting.choices.find(([value]) => value === current)?.[1] || String(current);
+    return setting.choices.map(([value,label]) => [
+      `setting-${setting.key}-${String(value)}`,
+      `${setting.label}: ${label}`,
+      `Quick settings · Current: ${currentLabel}`,
+      () => setQuickSetting(setting.key,value,setting.label,label)
+    ]);
+  });
+}
+function setQuickSetting(key,value,label,valueLabel) {
+  const setting = QUICK_SETTINGS.find(item => item.key === key);
+  if (!setting || !setting.choices.some(([choice]) => choice === value)) return;
+  state.settings[key] = value;
+  if (key === "shortcutCoaching") state.settings.shortcutCoachingExplicit = true;
+  local(S,state.settings);
+  applySettings();
+  renderList();
+  if (state.selected) {
+    const item = selectedItem();
+    if (item) {
+      const scrollTop = $("#reader").scrollTop;
+      renderReader(item);
+      $("#reader").scrollTop = scrollTop;
+    }
+  }
+  toast(`${label} set to ${valueLabel}.`);
+}
+let commandActiveIndex = 0;
+function renderCommandResults() {
+  const q = ($("#commandInput")?.value || "").trim().toLowerCase();
+  const feedCommands = state.feeds.map(f => [`feed-${f.id}`, `Open feed: ${feedDisplayTitle(f)}`, "Feeds", () => goFeedById(f.id)]);
+  const articleCommands = q.length >= 2 ? state.items.filter(x => (x.title || "").toLowerCase().includes(q)).slice(0,8).map(x => [`article-${x.id}`, x.title, feedTitleFor(x), () => openItem(x.id)]) : [];
+  const matches = [...COMMANDS, ...quickSettingCommands(), ...feedCommands, ...articleCommands].filter(c => (c[1] + " " + c[2]).toLowerCase().includes(q));
+  commandActiveIndex = Math.min(commandActiveIndex, Math.max(0, matches.length - 1));
+  $("#commandResults").innerHTML = matches.length ? matches.map((c,i)=>`<button type="button" role="option" aria-selected="${i===commandActiveIndex}" data-command-id="${c[0]}"><span><strong>${esc(c[1])}</strong><small>${esc(c[2])}</small></span><kbd>${i===commandActiveIndex ? "↵" : ""}</kbd></button>`).join("") : '<p class="muted">No matching commands.</p>';
+}
+function runCommand(id) {
+  let command = [...COMMANDS, ...quickSettingCommands()].find(c => c[0] === id);
+  if (!command && id.startsWith("feed-")) {
+    const feed = state.feeds.find(f => "feed-" + f.id === id);
+    if (feed) command = [id, feedDisplayTitle(feed), "Feeds", () => goFeedById(feed.id)];
+  }
+  if (!command && id.startsWith("article-")) {
+    const item = state.items.find(x => "article-" + x.id === id);
+    if (item) command = [id, item.title, feedTitleFor(item), () => openItem(item.id)];
+  }
+  if (!command) return;
+  $("#commandDialog").close();
+  command[3]();
+}
+function showCommandPalette() {
+  const dialog = $("#commandDialog");
+  if (!dialog || dialog.open) return;
+  $("#commandInput").value = "";
+  commandActiveIndex = 0;
+  renderCommandResults();
+  dialog.showModal();
+  $("#commandInput").focus();
+}
+function updateFocusButton() {
+  const button = $("#appFocus");
+  if (!button) return;
+  const active = document.body.classList.contains("focus-mode");
+  button.setAttribute("aria-pressed",String(active));
+  const label = button.querySelector("span:last-child");
+  if (label) label.textContent = active ? "Exit focus" : "Focus";
+  else button.textContent = active ? "Exit focus" : "Focus";
+  button.title = active ? "Exit focus reading mode" : "Focus reading mode";
+}
+function toggleFocusMode() {
+  if (!document.body.classList.contains("focus-mode") && !state.selected) {
+    const first = visible()[0];
+    if (!first) { toast("Open an article before entering focus mode."); return; }
+    openItem(first.id);
+  }
+  document.body.classList.toggle("focus-mode");
+  updateFocusButton();
+}
+function bindApplicationChrome() {
+  $("#commandButton").onclick = showCommandPalette;
+  $("#appSearch").onclick = focusSearch;
+  $("#appRefresh").onclick = () => refresh();
+  $("#activityButton").onclick = showActivityCenter;
+  $("#appFocus").onclick = toggleFocusMode;
+  document.querySelectorAll("[data-rail-commands]").forEach(button => button.addEventListener("click", showCommandPalette));
+  document.querySelectorAll("[data-rail-activity]").forEach(button => button.addEventListener("click", showActivityCenter));
+  document.querySelectorAll("[data-rail-focus]").forEach(button => button.addEventListener("click", toggleFocusMode));
+  $("#commandInput").addEventListener("input", () => { commandActiveIndex=0; renderCommandResults(); });
+  $("#commandInput").addEventListener("keydown", e => {
+    const options = [...$("#commandResults").querySelectorAll("[data-command-id]")];
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); commandActiveIndex = (commandActiveIndex + (e.key === "ArrowDown" ? 1 : -1) + options.length) % Math.max(1,options.length); renderCommandResults(); }
+    if (e.key === "Enter" && options.length) { e.preventDefault(); const active = $("#commandResults").querySelector('[aria-selected="true"]') || options[0]; if(active) runCommand(active.dataset.commandId); }
+  });
+  $("#commandResults").addEventListener("click", e => { const button=e.target.closest("[data-command-id]"); if(button) runCommand(button.dataset.commandId); });
+  $("#mobileMore").onclick = () => $("#moreDialog").showModal();
+  $("#moreDone").onclick = () => $("#moreDialog").close();
+  $("#moreFeeds").onclick = () => { $("#moreDialog").close(); $("#sidebar").classList.add("open"); $("#scrim").classList.add("show"); };
+  $("#moreSearch").onclick = () => { $("#moreDialog").close(); focusSearch(); };
+  $("#moreAdd").onclick = () => { $("#moreDialog").close(); showFeed(); };
+  $("#moreRefresh").onclick = () => { $("#moreDialog").close(); refresh(); };
+  $("#moreActivity").onclick = () => { $("#moreDialog").close(); showActivityCenter(); };
+  $("#moreSettings").onclick = () => { $("#moreDialog").close(); showSettings(); };
+  $("#activityClose").onclick = $("#activityDone").onclick = () => $("#activityDialog").close();
+  $("#activityRefresh").onclick = async () => { await refresh(); renderActivityCenter(); };
+  document.addEventListener("click", async e => {
+    const bulk = e.target.closest("[data-bulk]");
+    if (bulk) { await runBulkAction(bulk.dataset.bulk); return; }
+    const activityFeed = e.target.closest("[data-activity-feed]");
+    if (activityFeed) { $("#activityDialog").close(); showFeedError(activityFeed.dataset.activityFeed); return; }
+    const retry = e.target.closest("[data-activity-retry]");
+    if (retry) {
+      const feed = state.feeds.find(f=>f.id===retry.dataset.activityRetry);
+      if (!feed) return;
+      retry.disabled = true; await refreshFeed(feed); saveFeeds(); render(); renderActivityCenter(); return;
+    }
+  });
+  $("#articleList").addEventListener("pointerdown", e => {
+    if (e.pointerType !== "touch" || e.target.closest("button,a,input,select")) return;
+    const row=e.target.closest("[data-item]"); if(!row) return;
+    row.dataset.swipeStart = [e.clientX,e.clientY].join(",");
+    clearTimeout(longPressTimer);
+    longPressTimer = setTimeout(() => {
+      longPressTriggered = true;
+      toggleArticleSelection(row.dataset.item);
+    }, 550);
+  });
+  $("#articleList").addEventListener("pointermove", e => {
+    if (!longPressTimer) return;
+    const row=e.target.closest("[data-item]"); if(!row?.dataset.swipeStart) return;
+    const [x,y]=row.dataset.swipeStart.split(",").map(Number);
+    if(Math.abs(e.clientX-x)>12 || Math.abs(e.clientY-y)>12){clearTimeout(longPressTimer);longPressTimer=null;}
+  });
+  $("#articleList").addEventListener("pointerup", async e => {
+    clearTimeout(longPressTimer); longPressTimer=null;
+    if (longPressTriggered) {
+      longPressTriggered = false;
+      swipeHandled = true;
+      setTimeout(() => { swipeHandled = false; }, 500);
+      return;
+    }
+    const row=e.target.closest("[data-item]"); if(!row?.dataset.swipeStart) return;
+    const [x,y]=row.dataset.swipeStart.split(",").map(Number); delete row.dataset.swipeStart;
+    const dx=e.clientX-x, dy=e.clientY-y;
+    if(Math.abs(dx)<75 || Math.abs(dx)<Math.abs(dy)*1.25) return;
+    const item=state.items.find(i=>i.id===row.dataset.item); if(!item) return;
+    swipeHandled=true;
+    if(dx>0){item.read=!item.read;item.readAt=item.read?Date.now():null;await put(item);renderNav();renderList();toast(item.read?"Marked read.":"Marked unread.");}
+    else {item.saved=!item.saved;await put(item);renderNav();renderList();toast(item.saved?"Saved article.":"Removed from saved.");}
+    setTimeout(()=>{swipeHandled=false;},300);
+  });
+  $("#articleList").addEventListener("pointercancel",()=>{clearTimeout(longPressTimer);longPressTimer=null;longPressTriggered=false;swipeHandled=false;});
+  $("#reader").addEventListener("pointerdown", e => {
+    if(e.pointerType!=="touch" || e.target.closest("a,button,input,select,audio,video")) return;
+    $("#reader").dataset.swipeStart=[e.clientX,e.clientY].join(",");
+  });
+  $("#reader").addEventListener("pointerup", e => {
+    const raw=$("#reader").dataset.swipeStart; if(!raw) return; delete $("#reader").dataset.swipeStart;
+    const [x,y]=raw.split(",").map(Number), dx=e.clientX-x, dy=e.clientY-y;
+    if(Math.abs(dx)<90 || Math.abs(dx)<Math.abs(dy)*1.3) return;
+    const items=visible(), index=items.findIndex(i=>i.id===state.selected), next=items[index+(dx<0?1:-1)];
+    if(next) openItem(next.id);
+  });
+  window.addEventListener("online",renderActivityCenter);
+  window.addEventListener("offline",renderActivityCenter);
+  $(".list-pane").addEventListener("scroll",scheduleAppSessionSave,{passive:true});
+  $("#reader").addEventListener("scroll",scheduleAppSessionSave,{passive:true});
+  window.addEventListener("pagehide",saveAppSession);
+  updateFocusButton();
 }
 
 function bind() {
@@ -4544,10 +4960,18 @@ function bind() {
     if (noteEdit) { const x2 = selectedItem(); if (x2) showArticleNoteDialog(x2); return; }
     const noteDel = e.target.closest("[data-note-delete]");
     if (noteDel) { const x2 = selectedItem(); if (x2) { setArticleNote(x2.id, ""); renderReader(x2); toast("Note deleted."); } return; }
+    const selectButton = e.target.closest("[data-select-item]");
+    if (selectButton) { e.preventDefault(); toggleArticleSelection(selectButton.dataset.selectItem, e.shiftKey); return; }
     const row = e.target.closest("[data-item]");
-    if (row) { openItem(row.dataset.item); return; }
+    if (row) {
+      if (swipeHandled) { swipeHandled = false; return; }
+      if (selectedArticleIds.size || e.shiftKey) { toggleArticleSelection(row.dataset.item, e.shiftKey); return; }
+      openItem(row.dataset.item); return;
+    }
   });
   document.addEventListener("keydown", e => {
+    const selectButton = e.target.closest?.("[data-select-item]");
+    if (selectButton && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggleArticleSelection(selectButton.dataset.selectItem, e.shiftKey); return; }
     const row = e.target.closest?.("[data-item]");
     // Only when the row itself is focused: an inner button (read/save)
     // must keep its own Enter/Space behavior.
@@ -4886,11 +5310,20 @@ function bind() {
     $("#scrim").classList.toggle("show", open);
   };
   $("#sideToggle").onclick = () => {
-    state.settings.sidebarCollapsed = !state.settings.sidebarCollapsed;
+    const width = Number(state.settings.sidebarWidth) || SIDE_W.def;
+    if (state.settings.sidebarCollapsed || width < SIDEBAR_AUTO_COLLAPSE_WIDTH) {
+      state.settings.sidebarCollapsed = false;
+      state.settings.sidebarWidth = Math.max(width, SIDEBAR_AUTO_COLLAPSE_WIDTH);
+      applyPaneWidths();
+    } else {
+      state.settings.sidebarCollapsed = true;
+    }
     local(S, state.settings);
     applySidebarCollapsed();
   };
   window.addEventListener("popstate", () => {
+    document.body.classList.remove("reader-open", "focus-mode");
+    updateFocusButton();
     stopTTS();
     if ($("#reader").classList.contains("open") || state.selected) {
       $("#reader").classList.remove("open");
@@ -5028,6 +5461,11 @@ function bind() {
       e.preventDefault();
       return;
     }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k" && !dialogOpen) {
+      e.preventDefault();
+      showCommandPalette();
+      return;
+    }
     if (editable || dialogOpen) return;
     if (handleVimNavigation(e)) return;
     if (e.key === "Escape") {
@@ -5094,6 +5532,7 @@ function bind() {
     e.preventDefault();
     runShortcutAction(action, e);
   };
+  bindApplicationChrome();
   // Sidebar drag and drop (#182).
   setupFeedDrag();
 }
@@ -5205,7 +5644,7 @@ async function init() {
       toast("Could not load your articles.");
     }
   }
-  render();
+  if (!restoreAppSession()) render();
   if (!opened) {
     toast("Could not open browser storage. Your articles are unavailable.", { label: "Retry", fn: () => location.reload() });
   } else {
