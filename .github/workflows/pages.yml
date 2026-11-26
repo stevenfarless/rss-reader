@@ -32,6 +32,7 @@ jobs:
           node --check sw.js
           node --check markdown.js
           node --check utils.js
+          node --check pwa-install.js
       - name: Run tests
         run: npm test
       - name: Configure Pages
@@ -42,7 +43,7 @@ jobs:
       - name: Stage site files
         run: |
           mkdir -p dist
-          cp index.html app.js styles.css sw.js manifest.webmanifest markdown.js purify.min.js utils.js readability.js .nojekyll dist/
+          cp index.html app.js styles.css sw.js manifest.webmanifest markdown.js purify.min.js utils.js readability.js pwa-install.js .nojekyll dist/
           cp -r assets fonts licenses dist/
       # Guard against a missing staged file: every local script and
       # stylesheet index.html loads must exist in dist/, or the build
