@@ -37,7 +37,7 @@ async function trimRuntime(cache) {
    a cache fallback, so a new build reaches returning users without
    waiting on a hand-bumped version string. Fonts and icons stay
    cache-first: they change rarely and are needed offline. */
-const SHELL_RE = /(^|\/)(index\.html|styles\.css|markdown\.js|purify\.min\.js|utils\.js|readability\.js|app\.js)$|\/$/;
+const SHELL_RE = /(^|\/)(index\.html|styles\.css|markdown\.js|purify\.min\.js|utils\.js|readability\.js|app\.js|pwa-install\.js)$|\/$/;
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
   const u = new URL(e.request.url);
