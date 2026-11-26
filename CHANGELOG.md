@@ -1,4 +1,42 @@
+## 1.10.4
+
+- Automatically collapse the desktop sidebar into its icon rail when its configured width drops below 230px.
+- Preserve the user's manual collapse preference independently from automatic width-based collapse.
+- Expanding an automatically collapsed sidebar restores a usable 230px width; resizing the sidebar across the threshold updates its mode.
+- Add browser coverage for automatic collapse and expansion.
+
 # Changelog
+
+## [1.10.3] - 2026-11-26
+
+### Changed
+- Remove the sidebar pane-layout preset control; pane widths remain adjustable with the existing splitters.
+- Add searchable quick settings to the command palette, with current values, immediate application, persistence, and confirmation feedback.
+
+
+## [1.10.2] - 2026-11-26
+
+### Changed
+- Remove the persistent desktop toolbar and move its application actions into the navigation sidebar.
+- Consolidate desktop navigation, command access, activity, refresh, focus mode, and pane presets in the sidebar.
+- Restore the full viewport height to the three-pane reading workspace.
+
+
+## [1.10.1] - 2026-11-26
+
+### Added
+- Restore the last library view, search, selected article, and scroll positions after a reload or PWA relaunch.
+- Show unread, saved, and queued article totals in the activity center.
+- Add browser regression coverage for session and reader-scroll restoration.
+
+## [1.10.0] - 2026-11-26
+
+### Added
+- Add an application toolbar, searchable command palette, activity center, and desktop pane presets.
+- Add mobile bottom navigation and a More sheet for secondary views and common actions.
+- Add focus reading mode, touch article navigation, swipe actions, and multi-select bulk operations.
+- Add continuous integration for JavaScript syntax, unit tests, and Playwright browser tests.
+- Automate versioned GitHub releases.
 
 ## [1.9.19] - 2026-11-25
 
@@ -8,7 +46,7 @@
 - Add unit coverage for OPML multi-selection behavior.
 
 
-## [1.9.18] - 2026-11-25
+## [1.9.18] - 2026-11-25 
 
 ### Fixed
 - Use the all-dialog selector when closing any remaining open dialogs before the OPML preview opens.
