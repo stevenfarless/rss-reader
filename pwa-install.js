@@ -139,6 +139,9 @@
       $("#pwaInstallDialogAction").hidden = true;
       $("#pwaInstallDialogAction").disabled = false;
       $("#pwaInstallBannerAction").disabled = false;
+      // The deferred event can only be used once. Update the banner so its
+      // action accurately changes from native installation to guidance.
+      showBanner();
     }
   }
   function showBanner() {
