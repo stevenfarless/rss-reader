@@ -543,7 +543,7 @@ body.shortcut-bar-visible .layout{margin-bottom:38px}
 }
 
 #settingsDialog { position: relative; }
-#settingsDialog .settings-scroll > .x {
+#settingsDialog > form > .x {
   position: absolute;
   top: 12px;
   right: 12px;
