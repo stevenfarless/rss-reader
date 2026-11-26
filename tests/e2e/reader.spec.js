@@ -655,3 +655,20 @@ test("installed display mode suppresses all PWA installation UI", async ({ page 
   await page.locator("#settings").click();
   await expect(page.locator("#installAppSetting")).toBeHidden();
 });
+
+
+test("macOS Safari receives Add to Dock instructions", async ({ browser }) => {
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15"
+  });
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
+  });
+  await page.goto("/");
+  await expect(page.locator("#pwaInstallBanner")).toBeVisible();
+  await page.locator("#pwaInstallBannerAction").click();
+  await expect(page.locator("#pwaInstallInstructions")).toContainText("File");
+  await expect(page.locator("#pwaInstallInstructions")).toContainText("Add to Dock");
+  await context.close();
+});
