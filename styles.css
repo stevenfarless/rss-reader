@@ -424,6 +424,7 @@ body.shortcut-bar-visible .layout{margin-bottom:38px}
  #settingsDialog .setting{align-items:flex-start;flex-direction:column;gap:7px;padding:11px 0}
  #settingsDialog .setting>select,#settingsDialog .setting .shortcut-control{width:100%;max-width:none;flex-basis:auto}
  #settingsDialog .setting input[type=checkbox]{align-self:flex-start}
+ #settingsDialog .setting-toggle{align-items:center;flex-direction:row;justify-content:space-between}
  #settingsDialog .shortcut-setting .shortcut-control{display:flex}
  #settingsDialog .toolbar-order-row{gap:10px}
  #settingsDialog .backup button{white-space:normal}
