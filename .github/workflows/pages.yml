@@ -43,7 +43,8 @@ jobs:
       - name: Stage site files
         run: |
           mkdir -p dist
-          cp index.html app.js styles.css sw.js manifest.webmanifest markdown.js purify.min.js utils.js readability.js pwa-install.js .nojekyll dist/
+          cp index.html styles.css manifest.webmanifest .nojekyll dist/
+          npx --yes esbuild@0.25.11 app.js markdown.js purify.min.js utils.js readability.js pwa-install.js sw.js --minify --outdir=dist
           cp -r assets fonts licenses dist/
       # Guard against a missing staged file: every local script and
       # stylesheet index.html loads must exist in dist/, or the build
