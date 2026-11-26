@@ -81,14 +81,14 @@
     document.body.append(dialog);
 
     const settings = $("#settingsDialog");
-    const firstGroup = settings?.querySelector(".settings-group");
-    if (firstGroup) {
+    const installAnchor = settings?.querySelector("[data-settings-install-anchor]");
+    if (installAnchor) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "pwa-install-setting";
       button.id = "installAppSetting";
       button.innerHTML = "<strong>Install App</strong><span>View options →</span>";
-      firstGroup.before(button);
+      installAnchor.append(button);
       button.addEventListener("click", openGuidance);
     }
 
